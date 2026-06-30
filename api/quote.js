@@ -3,11 +3,11 @@ const FINNHUB = 'https://finnhub.io/api/v1';
 export default async function handler(req, res) {
   const symbol = String(req.query.symbol || '').toUpperCase();
 
+  // leer universe.json por HTTP desde el propio sitio
   let universe = [];
   try {
-    const fs = await import('fs');
-    const path = await import('path');
-    universe = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'universe.json'), 'utf8'));
+    const base = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '';
+    universe = await (await fetch(`${base}/universe.json`)).json();
   } catch (e) {
     return res.status(500).json({ error: 'no pude leer universe.json', detail: String(e) });
   }
