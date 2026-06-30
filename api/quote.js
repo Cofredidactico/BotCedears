@@ -1,16 +1,9 @@
+import universe from '../universe.json';
+
 const FINNHUB = 'https://finnhub.io/api/v1';
 
 export default async function handler(req, res) {
   const symbol = String(req.query.symbol || '').toUpperCase();
-
-  // leer universe.json por HTTP desde el propio sitio
-  let universe = [];
-  try {
-    const base = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '';
-    universe = await (await fetch(`${base}/universe.json`)).json();
-  } catch (e) {
-    return res.status(500).json({ error: 'no pude leer universe.json', detail: String(e) });
-  }
 
   const asset = universe.find(a => a.ticker === symbol);
   if (!asset) return res.status(404).json({ error: 'symbol desconocido', universeLen: universe.length });
