@@ -9,10 +9,10 @@ export default async function handler(req, res) {
     if (d.status === 'error' || !Array.isArray(d.values))
       return res.status(502).json({ error: d.message || 'sin datos' });
     const rows = d.values.slice().reverse();
-    const o = [], h = [], l = [], c = [], v = [];
-    for (const k of rows) { o.push(+k.open); h.push(+k.high); l.push(+k.low); c.push(+k.close); v.push(+(k.volume || 0)); }
+    const o = [], h = [], l = [], c = [], v = [], t = [];
+    for (const k of rows) { o.push(+k.open); h.push(+k.high); l.push(+k.low); c.push(+k.close); v.push(+(k.volume || 0)); t.push(k.datetime); }
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
-    return res.status(200).json({ o, h, l, c, v });
+    return res.status(200).json({ o, h, l, c, v, t });
   } catch (e) {
     return res.status(502).json({ error: 'upstream', detail: String(e) });
   }
