@@ -1,6 +1,7 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getMacroSnapshot, getCCL } from './dataSource.js';
 import { computeTechnical } from './indicators.js';
 import { computeScore, computePlan } from './scoring.js';
+import { renderPriceChartSVG } from './chart.js';
 
 const GREEN = 'oklch(0.68 0.13 150)', AMBER = 'oklch(0.72 0.11 85)', RED = 'oklch(0.65 0.15 25)';
 
@@ -295,6 +296,11 @@ function renderReport() {
       <div class="thermo-labels"><span>Venta</span><span>Reducir</span><span>Mantener</span><span>Compra</span><span>Compra Fuerte</span></div>
       <div class="thermo-bar"><div class="thermo-marker" style="left:${thermoPos}%;"></div></div>
       <div class="thermo-valuewrap"><div class="thermo-value" style="left:${thermoPos}%;">${score}</div></div>
+    </div>
+
+    <div class="sectiontitle">Gráfico de Precio</div>
+    <div class="card chart-card">
+      ${renderPriceChartSVG(r.candles, { support: t.support, resistance: t.resistance })}
     </div>
 
     <div class="card score-card">

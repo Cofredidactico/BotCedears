@@ -82,7 +82,9 @@ const Mock = {
     }
     const scf = u.refPriceUsd / c[c.length - 1];
     for (const k of [o, h, l, c]) for (let i = 0; i < k.length; i++) k[i] *= scf;
-    return { o, h, l, c, v, isReal: false };
+    const t = [];
+    for (let i = n - 1; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); t.push(d.toISOString().slice(0, 10)); }
+    return { o, h, l, c, v, t, isReal: false };
   },
   async getFundamentals() { return { hasData: false, isReal: false }; },
   async getNews() { return { items: [], sentimentScore: null, isReal: false }; },
@@ -143,11 +145,11 @@ const Crypto = {
       const r = await fetch(`${COINGECKO}/coins/${coingeckoId}/ohlc?vs_currency=usd&days=${days}`);
       if (!r.ok) throw new Error('coingecko ohlc ' + r.status);
       const rows = await r.json(); // [ [time,o,h,l,c], ... ]
-      const o = [], h = [], l = [], c = [], v = [];
-      for (const row of rows) { o.push(row[1]); h.push(row[2]); l.push(row[3]); c.push(row[4]); v.push(0); }
+      const o = [], h = [], l = [], c = [], v = [], t = [];
+      for (const row of rows) { o.push(row[1]); h.push(row[2]); l.push(row[3]); c.push(row[4]); v.push(0); t.push(new Date(row[0]).toISOString().slice(0, 10)); }
       // CoinGecko OHLC gratuito no trae volumen — se documenta como no disponible,
       // liquidez/OBV/VWAP quedan en N/D para cripto en vez de inventarse.
-      return { o, h, l, c, v, isReal: true };
+      return { o, h, l, c, v, t, isReal: true };
     });
   },
 };
