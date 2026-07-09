@@ -1,0 +1,11 @@
+{
+  "lastUpdated": "2026-07-09",
+  "note": "Snapshot manual de datos macro públicos (FED, DXY, VIX, bono 10Y, IPC, PBI, riesgo país). No hay proveedor en vivo conectado todavía — actualizar este archivo periódicamente (o cablear FRED/Trading Economics más adelante) para que el score y la sección Macro reflejen la realidad.",
+  "fedRateLabel": "4.25%–4.50%",
+  "dxy": 103.8,
+  "vix": 15.4,
+  "bond10y": 4.12,
+  "cpiYoyLabel": "2.7%",
+  "gdpQoqLabel": "2.1%",
+  "riesgoPaisArg": 780
+}
