@@ -1,0 +1,57 @@
+/**
+ * /api/news?symbol=X — noticias + sentimiento reales vía Finnhub.
+ * `news-sentiment` da el score agregado (usado en el score compuesto).
+ * `company-news` da los titulares; como Finnhub free tier no etiqueta cada
+ * titular individualmente, se clasifica cada uno con un heurístico simple de
+ * palabras clave — se documenta como heurístico, no como IA de sentimiento.
+ */
+const FINNHUB = 'https://finnhub.io/api/v1';
+
+const POS_WORDS = ['beat', 'beats', 'surge', 'record', 'upgrade', 'buyback', 'growth', 'strong', 'expansion', 'raises', 'raised', 'profit', 'gain', 'rally', 'outperform'];
+const NEG_WORDS = ['miss', 'misses', 'downgrade', 'lawsuit', 'recall', 'decline', 'plunge', 'weak', 'cut', 'layoff', 'probe', 'investigation', 'fraud', 'loss', 'warns', 'warning'];
+
+function tagHeadline(text) {
+  const t = (text || '').toLowerCase();
+  let score = 0;
+  for (const w of POS_WORDS) if (t.includes(w)) score++;
+  for (const w of NEG_WORDS) if (t.includes(w)) score--;
+  if (score >= 2) return { tag: 'Muy Positiva', bg: 'oklch(0.32 0.07 150)', color: 'oklch(0.88 0.11 150)' };
+  if (score === 1) return { tag: 'Positiva', bg: 'oklch(0.30 0.06 150)', color: 'oklch(0.85 0.10 150)' };
+  if (score === -1) return { tag: 'Negativa', bg: 'oklch(0.30 0.07 25)', color: 'oklch(0.82 0.11 25)' };
+  if (score <= -2) return { tag: 'Muy Negativa', bg: 'oklch(0.28 0.09 25)', color: 'oklch(0.86 0.13 25)' };
+  return { tag: 'Neutral', bg: 'oklch(0.30 0.005 70)', color: 'oklch(0.75 0.01 70)' };
+}
+
+function fmtDate(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+export default async function handler(req, res) {
+  const symbol = String(req.query.symbol || '').toUpperCase();
+  if (!symbol) return res.status(400).json({ error: 'falta symbol' });
+
+  const to = new Date();
+  const from = new Date(to.getTime() - 14 * 24 * 3600 * 1000);
+
+  try {
+    const [newsRes, sentRes] = await Promise.all([
+      fetch(`${FINNHUB}/company-news?symbol=${symbol}&from=${fmtDate(from)}&to=${fmtDate(to)}&token=${process.env.FINNHUB_KEY}`),
+      fetch(`${FINNHUB}/news-sentiment?symbol=${symbol}&token=${process.env.FINNHUB_KEY}`),
+    ]);
+    const newsRaw = newsRes.ok ? await newsRes.json() : [];
+    const sentRaw = sentRes.ok ? await sentRes.json() : null;
+
+    const items = (Array.isArray(newsRaw) ? newsRaw : [])
+      .sort((a, b) => (b.datetime || 0) - (a.datetime || 0))
+      .slice(0, 6)
+      .map(n => ({ ...tagHeadline(n.headline), text: n.headline, source: n.source, url: n.url, datetime: n.datetime }));
+
+    const bullishPercent = sentRaw?.sentiment?.bullishPercent;
+    const sentimentScore = typeof bullishPercent === 'number' ? bullishPercent : null;
+
+    res.setHeader('Cache-Control', 's-maxage=900, stale-while-revalidate=1800');
+    return res.status(200).json({ items, sentimentScore });
+  } catch (e) {
+    return res.status(502).json({ error: 'upstream', detail: String(e) });
+  }
+}
