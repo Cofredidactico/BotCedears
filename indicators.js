@@ -182,6 +182,28 @@ export function fibonacci(highs, lows, lookback = 90) {
   };
 }
 
+/** Divergencia entre el precio y el RSI: si el precio hace un máximo más
+ *  alto pero el RSI no lo acompaña (o un mínimo más bajo que el RSI no
+ *  confirma), es una señal clásica de agotamiento de la tendencia — se
+ *  detecta comparando los dos últimos swings de precio contra el RSI en
+ *  esos mismos puntos. */
+export function detectDivergence(closes, rsiSeries, lookback = 60) {
+  const { swingHighs, swingLows } = findSwings(closes, closes, lookback);
+  if (swingHighs.length >= 2) {
+    const a = swingHighs.at(-2), b = swingHighs.at(-1);
+    if (b.price > a.price && rsiSeries[b.i] < rsiSeries[a.i]) {
+      return { type: 'bearish', label: 'Divergencia bajista — precio hace un máximo más alto, el RSI no lo confirma.' };
+    }
+  }
+  if (swingLows.length >= 2) {
+    const a = swingLows.at(-2), b = swingLows.at(-1);
+    if (b.price < a.price && rsiSeries[b.i] > rsiSeries[a.i]) {
+      return { type: 'bullish', label: 'Divergencia alcista — precio hace un mínimo más bajo, el RSI no lo confirma.' };
+    }
+  }
+  return null;
+}
+
 export function marketStructure(highs, lows, lookback = 90) {
   const { swingHighs, swingLows } = findSwings(highs, lows, lookback);
   if (swingHighs.length < 2 || swingLows.length < 2) {
@@ -275,6 +297,16 @@ export function computeTechnical(candles) {
   const trSeries = tr;
 
   const obvSlope = ov[last] - ov[Math.max(0, last - 10)];
+  const hasVolume = v.some(x => x > 0);
+  const priceSlope = price - c[Math.max(0, last - 10)];
+  // Confirmación de volumen: un movimiento de precio sin que el OBV
+  // acompañe en la misma dirección es la causa más común de rupturas
+  // falsas — se compara el signo de ambas pendientes en la misma ventana.
+  let obvConfirms = null;
+  if (hasVolume && Math.abs(priceSlope) / price > 0.002) {
+    obvConfirms = Math.sign(obvSlope) === Math.sign(priceSlope);
+  }
+  const divergence = detectDivergence(c, r);
   const bullishAlign = ema20[last] > ema50[last] && ema50[last] > ema100[last] && ema100[last] > ema200[last];
   const bearishAlign = ema20[last] < ema50[last] && ema50[last] < ema100[last] && ema100[last] < ema200[last];
   const bbPos = isNaN(bb.upper[last]) ? null
@@ -289,7 +321,7 @@ export function computeTechnical(candles) {
     adx: a[last], atr: tr[last], vwap: vwap[last],
     bbUpper: bb.upper[last], bbMid: bb.mid[last], bbLower: bb.lower[last], bbPos,
     obvTrend: ov.length > 10 ? (obvSlope > 0 ? 'Ascendente — acumulación' : obvSlope < 0 ? 'Descendente — distribución' : 'Lateral') : 'N/D',
-    hasVolume: v.some(x => x > 0),
+    obvConfirms, hasVolume, divergence,
     support: sr.support, resistance: sr.resistance,
     fib, structure,
     priceAction: priceActionLabel(c, trSeries),

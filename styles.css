@@ -137,7 +137,7 @@ a { color: inherit; }
 .skel-line { height: 12px; margin-bottom: 10px; }
 .skel-title { height: 26px; width: 46%; margin-bottom: 14px; }
 .skel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; margin-bottom: 18px; }
-.skel-chart { height: 320px; border-radius: 10px; margin-bottom: 8px; }
+.skel-chart { height: 432px; border-radius: 10px; margin-bottom: 8px; }
 .skel-row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
 .skel-row .skel { flex: 1; height: 8px; }
 
