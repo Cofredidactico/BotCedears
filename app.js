@@ -486,10 +486,14 @@ function renderReport() {
 
   const { risks, catalysts } = risksAndCatalysts(r);
 
-  const isCedear = asset.category === 'CEDEAR' && asset.ratio;
+  const isCedear = (asset.category === 'CEDEAR' || asset.category === 'ETF') && asset.ratio;
+  const cedearPriceTxt = quote.cedearArs != null ? `AR$${Math.round(quote.cedearArs).toLocaleString('es-AR')} por CEDEAR` : 'N/D';
+  const cedearSourceTxt = quote.cedearSource === 'live'
+    ? 'precio real operado hoy en BYMA'
+    : `estimación vía CCL${ccl?.value ? ` ≈ $${Math.round(ccl.value).toLocaleString('es-AR')}` : ''} — sin cotización real disponible para este símbolo`;
   const cedearNote = isCedear ? `
     <div class="cedear-note">
-      <strong>Referencia CEDEAR (solo informativa):</strong> el análisis completo se realizó sobre ${esc(asset.name)} (${esc(asset.ticker)}) cotizando en USD. El CEDEAR argentino replica esta acción con ratio 1:${asset.ratio}. Equivalente aproximado: ${quote.cedearArs != null ? `AR$${Math.round(quote.cedearArs).toLocaleString('es-AR')} por CEDEAR` : 'N/D'} (CCL ${ccl?.value ? `≈ $${Math.round(ccl.value).toLocaleString('es-AR')}` : 'N/D'}). Ninguna recomendación de esta sección se basa en el precio en pesos.
+      <strong>Referencia CEDEAR (solo informativa):</strong> el análisis completo se realizó sobre ${esc(asset.name)} (${esc(asset.ticker)}) cotizando en USD. El CEDEAR argentino replica esta acción con ratio de referencia 1:${asset.ratio}. Equivalente: ${cedearPriceTxt} (${cedearSourceTxt}). Ninguna recomendación de esta sección se basa en el precio en pesos.
     </div>` : '';
 
   els.report.innerHTML = `
@@ -1131,7 +1135,7 @@ function portfolioRowHTML(r) {
   return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">
     <td class="port-ticker-cell">${esc(r.ticker)}${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}${r.costCurrency === 'ARS' ? ' <span class="watch-stale">ARS</span>' : ''}</td>
     <td>${r.shares}</td>
-    <td>${fmtUsd(r.d.price)}${r.costCurrency === 'ARS' && r.d.cedearArs != null ? `<br><span class="port-pnl-abs">CEDEAR ${fmtArs(r.d.cedearArs)}</span>` : ''}</td>
+    <td>${fmtUsd(r.d.price)}${r.costCurrency === 'ARS' && r.d.cedearArs != null ? `<br><span class="port-pnl-abs" title="${r.d.cedearSource === 'live' ? 'Precio real operado hoy en BYMA' : 'Estimado vía CCL — sin cotización real disponible para este símbolo'}">CEDEAR ${fmtArs(r.d.cedearArs)} ${r.d.cedearSource === 'live' ? '●' : '≈'}</span>` : ''}</td>
     <td>${r.value != null ? fmtUsd(r.value) : 'N/D'}</td>
     <td>${r.weight != null ? `${Math.round(r.weight * 100)}%` : 'N/D'}</td>
     <td class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${pnlCell}</td>
@@ -1350,7 +1354,8 @@ async function computeLightSignal(ticker, macro) {
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
     price: quote.usd, changePct: quote.changePct,
-    cedearArs: quote.cedearArs ?? null, // precio del CEDEAR en pesos (vía CCL) — null para cripto, que no tiene CEDEAR
+    cedearArs: quote.cedearArs ?? null, // precio del CEDEAR en pesos — null para cripto, que no tiene CEDEAR
+    cedearSource: quote.cedearSource ?? null, // 'live' (precio real BYMA) | 'estimated' (vía CCL) | null
     score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
     alert: priceAlert,
   };
