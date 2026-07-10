@@ -3,6 +3,7 @@ import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta 
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
+import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
 
 const GREEN = 'oklch(0.68 0.13 150)', AMBER = 'oklch(0.72 0.11 85)', RED = 'oklch(0.65 0.15 25)';
 
@@ -16,7 +17,7 @@ const els = {
   watchlist: document.getElementById('watchlist'),
 };
 
-const state = { query: '', asset: null, report: null, loading: false, error: null };
+const state = { query: '', asset: null, report: null, loading: false, error: null, view: 'dashboard' };
 function lsGetSafe(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } }
 
 /* ───────────────────────── dashboard / radar ───────────────────────── */
@@ -33,6 +34,9 @@ const DASHBOARD_UNIVERSE = [
   'BTC', 'ETH',
 ];
 const dashState = { data: {}, loading: new Set(), started: false };
+
+/* ───────────────────────── portfolio advisor ───────────────────────── */
+const portState = { data: {}, loading: new Set() };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
 
 const watchState = {
@@ -443,9 +447,12 @@ function renderReport() {
     return;
   }
   if (!state.report) {
-    els.report.innerHTML = dashboardHTML();
-    wireDashboardEvents();
-    if (!dashState.started) loadDashboardData();
+    els.report.innerHTML = homeNavHTML() + (state.view === 'portfolio' ? portfolioHTML() : dashboardHTML());
+    wireHomeNavEvents();
+    if (state.view === 'portfolio') wirePortfolioEvents();
+    else wireDashboardEvents();
+    if (state.view === 'dashboard' && !dashState.started) loadDashboardData();
+    if (state.view === 'portfolio') loadPortfolioData();
     return;
   }
 
@@ -759,6 +766,23 @@ function sortAndFilterTickers(tickers) {
   return list;
 }
 
+function homeNavHTML() {
+  return `
+    <div class="home-nav">
+      <button class="home-nav-btn ${state.view === 'dashboard' ? 'active' : ''}" data-view="dashboard">Dashboard</button>
+      <button class="home-nav-btn ${state.view === 'portfolio' ? 'active' : ''}" data-view="portfolio">Portfolio Advisor</button>
+    </div>`;
+}
+
+function wireHomeNavEvents() {
+  els.report.querySelectorAll('.home-nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.view = btn.dataset.view;
+      renderReport();
+    });
+  });
+}
+
 function dashCardHTML(ticker, d) {
   const up = d.changePct >= 0;
   const sig = scoreLabelColor(d.scoreLabel);
@@ -833,6 +857,180 @@ function wireDashboardEvents() {
   els.report.querySelectorAll('[data-dash-ticker]').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.dashTicker));
   });
+}
+
+/** Agrega los holdings con su señal ya resuelta en portState.data: valor
+ *  total, score ponderado por peso en la cartera, concentración por activo
+ *  y por sector, y qué posiciones tienen señal de Venta/Reducir. Todo a
+ *  partir de datos reales — nada se inventa si falta el precio de un ticker. */
+function computePortfolioStats(holdings) {
+  const rows = holdings.map(h => {
+    const d = portState.data[h.ticker];
+    const price = d?.price ?? null;
+    const value = price != null ? price * h.shares : null;
+    return { ...h, d, value };
+  });
+  const totalValue = rows.reduce((s, r) => s + (r.value ?? 0), 0);
+  for (const r of rows) {
+    r.weight = (r.value != null && totalValue > 0) ? r.value / totalValue : null;
+    if (r.avgCost != null && r.d?.price != null) {
+      r.gainPct = (r.d.price - r.avgCost) / r.avgCost;
+      r.gainAbs = (r.d.price - r.avgCost) * r.shares;
+    }
+  }
+
+  let weightedScoreSum = 0, weightedScoreDenom = 0;
+  const bySector = {};
+  for (const r of rows) {
+    if (r.d?.score != null && r.weight != null) { weightedScoreSum += r.d.score * r.weight; weightedScoreDenom += r.weight; }
+    if (r.d?.sector && r.value != null) bySector[r.d.sector] = (bySector[r.d.sector] || 0) + r.value;
+  }
+  const weightedScore = weightedScoreDenom > 0 ? Math.round(weightedScoreSum / weightedScoreDenom) : null;
+  const sectorRows = Object.entries(bySector)
+    .map(([sector, value]) => ({ sector, pct: totalValue > 0 ? value / totalValue : 0 }))
+    .sort((a, b) => b.pct - a.pct);
+
+  const topHolding = rows.slice().sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))[0] ?? null;
+  const concentrationRisk = topHolding && (topHolding.weight ?? 0) > 0.35;
+  const sectorRisk = sectorRows[0] && sectorRows[0].pct > 0.5 ? sectorRows[0] : null;
+  const sellSignals = rows.filter(r => r.d?.scoreLabel === 'Venta' || r.d?.scoreLabel === 'Reducir');
+  const totalGain = rows.every(r => r.gainAbs == null) ? null : rows.reduce((s, r) => s + (r.gainAbs ?? 0), 0);
+  const totalCost = rows.every(r => r.avgCost == null) ? null : rows.reduce((s, r) => s + (r.avgCost != null ? r.avgCost * r.shares : 0), 0);
+
+  return { rows, totalValue, weightedScore, sectorRows, topHolding, concentrationRisk, sectorRisk, sellSignals, totalGain, totalCost };
+}
+
+function portfolioRiskNotes(stats) {
+  const notes = [];
+  if (stats.concentrationRisk) notes.push({ type: 'risk', text: `${stats.topHolding.ticker} representa ${Math.round(stats.topHolding.weight * 100)}% de la cartera — concentración alta en un solo activo.` });
+  if (stats.sectorRisk) notes.push({ type: 'risk', text: `El sector ${stats.sectorRisk.sector} concentra ${Math.round(stats.sectorRisk.pct * 100)}% de la cartera.` });
+  if (stats.sellSignals.length) notes.push({ type: 'risk', text: `${stats.sellSignals.length} posición(es) con señal de Venta/Reducir: ${stats.sellSignals.map(r => r.ticker).join(', ')}.` });
+  if (!notes.length && stats.rows.length) notes.push({ type: 'ok', text: 'Sin señales de concentración excesiva ni posiciones en zona de Venta/Reducir en este momento.' });
+  return notes;
+}
+
+function portfolioHTML() {
+  const holdings = getPortfolio();
+  const stats = holdings.length ? computePortfolioStats(holdings) : null;
+  const notes = stats ? portfolioRiskNotes(stats) : [];
+  const loadingCount = holdings.filter(h => !portState.data[h.ticker]).length;
+
+  return `
+    <div class="sectiontitle">Portfolio Advisor</div>
+    <div class="dash-intro">Cargá tus tenencias (ticker, cantidad y costo promedio opcional en USD) para ver diversificación, concentración y señal de cada posición con datos reales. Se guarda solo en este navegador.</div>
+
+    <div class="card port-form-card">
+      <div class="port-form">
+        <input list="port-ticker-list" id="port-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" autocomplete="off" style="text-transform:uppercase;" />
+        <datalist id="port-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
+        <input type="number" id="port-shares" class="port-input" placeholder="Cantidad" min="0" step="any" />
+        <input type="number" id="port-cost" class="port-input" placeholder="Costo promedio USD (opcional)" min="0" step="any" />
+        <button class="port-add-btn" id="port-add">Agregar</button>
+      </div>
+    </div>
+
+    ${!holdings.length ? `<div class="card watch-empty">Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}).</div>` : `
+    <div class="port-summary-grid">
+      <div class="card port-summary-card">
+        <div class="dash-radar-title">Valor total</div>
+        <div class="port-summary-value">${fmtUsd(stats.totalValue)}</div>
+        ${stats.totalGain != null ? `<div class="port-summary-sub ${stats.totalGain >= 0 ? 'up' : 'down'}">${stats.totalGain >= 0 ? '+' : ''}${fmtUsd(stats.totalGain)} (${fmtPct(stats.totalCost > 0 ? (stats.totalGain / stats.totalCost) * 100 : 0)})</div>` : ''}
+      </div>
+      <div class="card port-summary-card">
+        <div class="dash-radar-title">Score ponderado</div>
+        <div class="port-summary-value">${stats.weightedScore ?? 'N/D'}</div>
+        <div class="port-summary-sub">de 100, ponderado por peso en la cartera</div>
+      </div>
+      <div class="card port-summary-card">
+        <div class="dash-radar-title">Posiciones</div>
+        <div class="port-summary-value">${holdings.length}</div>
+        <div class="port-summary-sub">${loadingCount > 0 ? `${loadingCount} cargando…` : 'todas actualizadas'}</div>
+      </div>
+    </div>
+
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Lectura de diversificación</div>
+      ${notes.map(n => `<div class="port-note ${n.type}">${n.type === 'risk' ? '⚠' : '✓'} ${esc(n.text)}</div>`).join('')}
+    </div>
+
+    <div class="port-table-wrap">
+      <table class="port-table">
+        <thead><tr><th>Ticker</th><th>Cantidad</th><th>Precio</th><th>Valor</th><th>Peso</th><th>P&amp;L</th><th>Señal</th><th></th></tr></thead>
+        <tbody>
+          ${stats.rows.map(r => portfolioRowHTML(r)).join('')}
+        </tbody>
+      </table>
+    </div>`}
+  `;
+}
+
+function portfolioRowHTML(r) {
+  if (!r.d) {
+    return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td>${r.shares}</td><td colspan="4"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}">×</button></td></tr>`;
+  }
+  const sig = scoreLabelColor(r.d.scoreLabel);
+  return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">
+    <td class="port-ticker-cell">${esc(r.ticker)}${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</td>
+    <td>${r.shares}</td>
+    <td>${fmtUsd(r.d.price)}</td>
+    <td>${r.value != null ? fmtUsd(r.value) : 'N/D'}</td>
+    <td>${r.weight != null ? `${Math.round(r.weight * 100)}%` : 'N/D'}</td>
+    <td class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${r.gainPct != null ? fmtPct(r.gainPct * 100) : '—'}</td>
+    <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>
+    <td><button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar">×</button></td>
+  </tr>`;
+}
+
+function wirePortfolioEvents() {
+  els.report.querySelectorAll('[data-port-ticker]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.port-remove')) return;
+      selectTicker(el.dataset.portTicker);
+    });
+  });
+  els.report.querySelectorAll('.port-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeHolding(btn.dataset.portRemove);
+      delete portState.data[btn.dataset.portRemove];
+      renderReport();
+    });
+  });
+  const addBtn = document.getElementById('port-add');
+  if (addBtn) addBtn.addEventListener('click', () => {
+    const tickerEl = document.getElementById('port-ticker');
+    const sharesEl = document.getElementById('port-shares');
+    const costEl = document.getElementById('port-cost');
+    const ticker = tickerEl.value.trim().toUpperCase();
+    const shares = parseFloat(sharesEl.value);
+    const cost = costEl.value ? parseFloat(costEl.value) : null;
+    if (!ticker || !shares || shares <= 0) return;
+    addHolding(ticker, shares, cost);
+    tickerEl.value = ''; sharesEl.value = ''; costEl.value = '';
+    renderReport();
+  });
+}
+
+// Solo pide lo que todavía no tiene: renderReport() dispara esto en cada
+// render mientras se está en la vista Portfolio, así que tiene que ser un
+// no-op cuando no hay nada nuevo — si no, cada holding resuelto vuelve a
+// llamar a renderReport(), que vuelve a llamar a esta función, en loop.
+async function loadPortfolioData() {
+  const holdings = getPortfolio();
+  const missing = holdings.filter(h => !portState.data[h.ticker] && !portState.loading.has(h.ticker));
+  if (!missing.length) return;
+  const macro = await getMacro();
+  await Promise.all(missing.map(async (h) => {
+    portState.loading.add(h.ticker);
+    try {
+      portState.data[h.ticker] = await computeLightSignal(h.ticker, macro);
+    } catch (e) {
+      console.warn('[portfolio] no se pudo cargar', h.ticker, e.message);
+    } finally {
+      portState.loading.delete(h.ticker);
+      if (!state.asset && state.view === 'portfolio') renderReport();
+    }
+  }));
 }
 
 function renderWatchlist() {
@@ -1002,3 +1200,4 @@ setInterval(() => { if (state.asset) renderReport(); }, 30 * 1000); // refresca 
 setInterval(() => { if (state.asset) loadReport(state.asset.ticker); }, 180 * 1000);
 setInterval(loadWatchlistData, 180 * 1000);
 setInterval(() => { if (!state.asset) loadDashboardData(); }, 180 * 1000);
+setInterval(() => { if (!state.asset && state.view === 'portfolio') { portState.data = {}; loadPortfolioData(); } }, 180 * 1000);
