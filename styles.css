@@ -168,10 +168,19 @@ a { color: inherit; }
 /* ---------- Gráfico de precio ---------- */
 .chart-card { padding: 20px 24px 12px 24px; margin-bottom: 36px; }
 .chart-card svg { display: block; }
+.chart-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.chart-tab {
+  background: transparent; border: 1px solid oklch(0.32 0.01 60); border-radius: 7px;
+  color: oklch(0.62 0.01 70); font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  padding: 5px 12px; cursor: pointer;
+}
+.chart-tab:hover { border-color: oklch(0.45 0.06 85); color: oklch(0.85 0.01 80); }
+.chart-tab.active { background: oklch(0.30 0.07 85); border-color: oklch(0.45 0.09 85); color: oklch(0.90 0.05 85); font-weight: 600; }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; padding-top: 12px; border-top: 1px solid oklch(0.26 0.008 60); }
 .chart-legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: oklch(0.60 0.01 70); }
 .chart-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
 .chart-empty { font-size: 13px; color: oklch(0.55 0.01 70); padding: 24px 0; text-align: center; }
+.chart-stale { font-size: 11px; color: oklch(0.65 0.15 25); margin-top: 8px; }
 
 /* ---------- Score breakdown ---------- */
 .score-card { padding: 24px 32px; margin-bottom: 40px; }

@@ -19,6 +19,56 @@ const els = {
 const state = { query: '', asset: null, report: null, loading: false, error: null };
 const watchState = { data: {}, loading: new Set() }; // ticker -> { price, changePct, score, scoreLabel, isReal, ts }
 
+const CHART_TABS = [
+  { key: '45min', label: '45m' },
+  { key: '4h', label: '4H' },
+  { key: '1day', label: '1D' },
+  { key: '1week', label: '1S' },
+];
+const chartState = { tf: '1day', cache: {}, loading: new Set() }; // tf -> { candles, isReal }
+function chartTabsForAsset(asset) {
+  return asset?.category === 'Cripto' ? CHART_TABS.filter(t => t.key === '1day' || t.key === '1week') : CHART_TABS;
+}
+
+function chartCardBody(dailyTechnical) {
+  const tf = chartState.tf;
+  const entry = chartState.cache[tf];
+  if (chartState.loading.has(tf) && !entry) return `<div class="chart-empty">Cargando ${tf}…</div>`;
+  if (!entry) return `<div class="chart-empty">Sin datos para este timeframe todavía.</div>`;
+  const svg = renderPriceChartSVG(entry.candles, { support: dailyTechnical.support, resistance: dailyTechnical.resistance });
+  const staleNote = entry.isReal === false ? `<div class="chart-stale">Datos de demostración — sin conexión al proveedor para este timeframe.</div>` : '';
+  return svg + staleNote;
+}
+
+async function loadChartTf(tf) {
+  if (!state.asset) return;
+  chartState.tf = tf;
+  if (chartState.cache[tf]) { renderReport(); return; }
+  chartState.loading.add(tf);
+  renderReport();
+  try {
+    const ticker = state.asset.ticker;
+    const isCripto = state.asset.category === 'Cripto';
+    let candles, isReal;
+    if (isCripto) {
+      // CoinGecko free tier no da granularidad custom — se reusa lo ya cargado.
+      const base = chartState.cache['1day']?.candles ?? state.report?.candles;
+      candles = tf === '1week' ? resampleWeekly(base) : base;
+      isReal = chartState.cache['1day']?.isReal ?? false;
+    } else {
+      const n = tf === '1week' ? 130 : tf === '4h' ? 240 : tf === '45min' ? 220 : 220;
+      const res = await getCandles(ticker, tf, n);
+      candles = res; isReal = res.isReal;
+    }
+    chartState.cache[tf] = { candles, isReal };
+  } catch (e) {
+    console.warn('[chart] no se pudo cargar', tf, e.message);
+  } finally {
+    chartState.loading.delete(tf);
+    renderReport();
+  }
+}
+
 /* ───────────────────────── utilidades ───────────────────────── */
 const fmtUsd = (n) => n == null || isNaN(n) ? 'N/D' : (Math.abs(n) >= 1000 ? `US$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : `$${n.toFixed(2)}`);
 const fmtPct = (n, digits = 1) => n == null || isNaN(n) ? 'N/D' : `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`;
@@ -119,6 +169,9 @@ async function selectTicker(ticker) {
   state.loading = true;
   state.error = null;
   state.report = null;
+  chartState.tf = '1day';
+  chartState.cache = {};
+  chartState.loading.clear();
   renderTopbar();
   renderReport();
   await loadReport(ticker);
@@ -164,6 +217,11 @@ async function loadReport(ticker) {
       technical, weeklyTechnical, confluence, ...scoreResult, plan,
       ts: { quote: now, candles: now, fundamentals: now, news: now },
     };
+
+    // El gráfico arranca en 1D/1S sin pegarle de nuevo a la API: reutiliza
+    // las mismas velas que ya se pidieron para el análisis diario/semanal.
+    chartState.cache['1day'] = { candles, isReal: candles.isReal };
+    if (weeklyCandles) chartState.cache['1week'] = { candles: weeklyCandles, isReal: isCripto ? candles.isReal : (weeklyNative?.isReal ?? false) };
     state.loading = false;
   } catch (e) {
     console.error('[app] error cargando reporte', e);
@@ -334,7 +392,10 @@ function renderReport() {
 
     <div class="sectiontitle">Gráfico de Precio</div>
     <div class="card chart-card">
-      ${renderPriceChartSVG(r.candles, { support: t.support, resistance: t.resistance })}
+      <div class="chart-tabs">
+        ${chartTabsForAsset(asset).map(tab => `<button class="chart-tab ${chartState.tf === tab.key ? 'active' : ''}" data-tf="${tab.key}">${tab.label}</button>`).join('')}
+      </div>
+      ${chartCardBody(t)}
     </div>
 
     <div class="card score-card">
@@ -449,6 +510,10 @@ function renderReport() {
       loadWatchlistData();
     });
   }
+
+  els.report.querySelectorAll('.chart-tab').forEach(btn => {
+    btn.addEventListener('click', () => loadChartTf(btn.dataset.tf));
+  });
 }
 
 function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
