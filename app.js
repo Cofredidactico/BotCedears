@@ -36,7 +36,7 @@ const DASHBOARD_UNIVERSE = [
 const dashState = { data: {}, loading: new Set(), started: false };
 
 /* ───────────────────────── portfolio advisor ───────────────────────── */
-const portState = { data: {}, loading: new Set() };
+const portState = { data: {}, loading: new Set(), sortBy: lsGetSafe('icp_port_sort', 'weight'), editing: null };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
 
 const watchState = {
@@ -52,6 +52,14 @@ const SORT_OPTIONS = [
   { key: 'ticker', label: 'Ticker (A-Z)' },
 ];
 const SIGNAL_FILTERS = ['all', 'Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'];
+
+const PORT_SORT_OPTIONS = [
+  { key: 'weight', label: 'Peso en cartera (mayor a menor)' },
+  { key: 'value', label: 'Valor de mercado (mayor a menor)' },
+  { key: 'gainPct', label: 'P&L % (mayor a menor)' },
+  { key: 'score', label: 'Score (mayor a menor)' },
+  { key: 'ticker', label: 'Ticker (A-Z)' },
+];
 
 /* ───────────────────────── alertas de precio ───────────────────────── */
 const ALERT_META = {
@@ -931,31 +939,114 @@ function portfolioRiskNotes(stats) {
   return notes;
 }
 
+/** Recomendación accionable por posición: combina la señal de mercado
+ *  (score compuesto del activo) con el P&L real de ESA tenencia — no es lo
+ *  mismo "Compra Fuerte" en general que "Compra Fuerte" cuando ya estás
+ *  parado en la posición y perdiendo, ganando, o recién por entrar. */
+const RECO_TONE = {
+  buy: { bg: 'oklch(0.30 0.07 150)', color: 'oklch(0.85 0.10 150)' },
+  hold: { bg: 'oklch(0.28 0.05 85)', color: 'oklch(0.78 0.09 85)' },
+  reduce: { bg: 'oklch(0.28 0.06 45)', color: 'oklch(0.78 0.10 45)' },
+  sell: { bg: 'oklch(0.28 0.07 25)', color: 'oklch(0.82 0.11 25)' },
+};
+
+function portfolioRecommendation(r) {
+  const signal = r.d?.scoreLabel;
+  const gainPct = r.gainPct; // fracción (0.213 = +21.3%), null si no hay costo cargado
+  if (!signal) return null;
+
+  if (signal === 'Compra Fuerte') {
+    if (gainPct == null) return { label: 'Comprar Fuerte', tone: 'buy', detail: 'Señal técnica y fundamental de compra fuerte sobre el activo.' };
+    if (gainPct < 0) return { label: 'Promediar a la baja', tone: 'buy', detail: `Cotiza ${Math.abs(gainPct * 100).toFixed(1)}% por debajo de tu costo promedio con la señal en Compra Fuerte — oportunidad de bajar el costo promedio.` };
+    return { label: 'Sumar posición', tone: 'buy', detail: 'Posición en ganancia y la señal se mantiene en Compra Fuerte — el análisis respalda ampliar.' };
+  }
+  if (signal === 'Compra Moderada') {
+    if (gainPct == null) return { label: 'Comprar', tone: 'buy', detail: 'Señal de compra moderada sobre el activo.' };
+    if (gainPct < -0.10) return { label: 'Promediar con cautela', tone: 'buy', detail: `Pérdida no realizada de ${Math.abs(gainPct * 100).toFixed(1)}% con señal de compra moderada — promediar en tramos, no de una vez.` };
+    return { label: 'Mantener / sumar selectivo', tone: 'hold', detail: 'Señal de compra moderada — mantener la posición y evaluar sumar en retrocesos.' };
+  }
+  if (signal === 'Mantener') {
+    return { label: 'Mantener', tone: 'hold', detail: 'El análisis no muestra una señal direccional fuerte de compra ni de venta.' };
+  }
+  if (signal === 'Reducir') {
+    if (gainPct != null && gainPct > 0) return { label: 'Tomar ganancias parciales', tone: 'reduce', detail: `Posición en ganancia (+${(gainPct * 100).toFixed(1)}%) con la señal debilitándose — considerar realizar parte de la ganancia.` };
+    return { label: 'Reducir exposición', tone: 'reduce', detail: 'La señal se debilitó — considerar reducir el tamaño de la posición.' };
+  }
+  // Venta
+  if (gainPct != null && gainPct < 0) return { label: 'Cortar pérdida', tone: 'sell', detail: `Pérdida no realizada de ${Math.abs(gainPct * 100).toFixed(1)}% con señal de Venta — evaluar cortar para no profundizar la pérdida.` };
+  if (gainPct != null && gainPct >= 0) return { label: 'Cerrar posición', tone: 'sell', detail: `Posición en ganancia (+${(gainPct * 100).toFixed(1)}%) pero la señal pasó a Venta — considerar cerrar y asegurar la ganancia.` };
+  return { label: 'Evitar / no entrar', tone: 'sell', detail: 'Señal de Venta sobre el activo.' };
+}
+
+function sortPortfolioRows(rows) {
+  const list = rows.slice();
+  const val = (r, key) => {
+    if (key === 'ticker') return r.ticker;
+    if (key === 'score') return r.d?.score ?? -Infinity;
+    if (key === 'gainPct') return r.gainPct ?? -Infinity;
+    if (key === 'value') return r.value ?? -Infinity;
+    return r.weight ?? -Infinity;
+  };
+  list.sort((a, b) => {
+    if (portState.sortBy === 'ticker') return val(a, 'ticker').localeCompare(val(b, 'ticker'));
+    return val(b, portState.sortBy) - val(a, portState.sortBy);
+  });
+  return list;
+}
+
+function holdingsToCsv(holdings) {
+  const header = 'ticker,shares,avgCost,costCurrency';
+  const lines = holdings.map(h => `${h.ticker},${h.shares},${h.avgCost ?? ''},${h.costCurrency ?? 'USD'}`);
+  return [header, ...lines].join('\n');
+}
+
+function parseHoldingsCsv(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const out = [];
+  for (const line of lines) {
+    const [ticker, shares, avgCost, costCurrency] = line.split(',').map(x => x?.trim());
+    if (!ticker || ticker.toLowerCase() === 'ticker') continue; // salteo encabezado
+    const sharesNum = parseFloat(shares);
+    if (!sharesNum || sharesNum <= 0) continue;
+    const costNum = avgCost ? parseFloat(avgCost) : null;
+    out.push({ ticker: ticker.toUpperCase(), shares: sharesNum, avgCost: costNum != null && !isNaN(costNum) ? costNum : null, costCurrency: costCurrency === 'ARS' ? 'ARS' : 'USD' });
+  }
+  return out;
+}
+
 function portfolioHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
   const notes = stats ? portfolioRiskNotes(stats) : [];
   const loadingCount = holdings.filter(h => !portState.data[h.ticker]).length;
+  const editingHolding = portState.editing ? holdings.find(h => h.ticker === portState.editing) : null;
 
   return `
     <div class="sectiontitle">Portfolio Advisor</div>
     <div class="dash-intro">Cargá tus tenencias (ticker, cantidad y costo promedio opcional) para ver diversificación, concentración y señal de cada posición con datos reales. Si compraste CEDEARs en pesos, elegí "ARS (CEDEAR)" — el P&amp;L se compara contra el precio del CEDEAR en pesos (vía CCL), no contra el precio en dólares del subyacente. Se guarda solo en este navegador.</div>
 
     <div class="card port-form-card">
+      ${editingHolding ? `<div class="port-editing-banner">Editando ${esc(editingHolding.ticker)} — <a href="#" id="port-edit-cancel">cancelar</a></div>` : ''}
       <div class="port-form">
-        <input list="port-ticker-list" id="port-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" autocomplete="off" style="text-transform:uppercase;" />
+        <input list="port-ticker-list" id="port-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" autocomplete="off" style="text-transform:uppercase;" value="${editingHolding ? esc(editingHolding.ticker) : ''}" ${editingHolding ? 'readonly' : ''} />
         <datalist id="port-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
-        <input type="number" id="port-shares" class="port-input" placeholder="Cantidad" min="0" step="any" />
-        <input type="number" id="port-cost" class="port-input" placeholder="Costo promedio (opcional)" min="0" step="any" />
+        <input type="number" id="port-shares" class="port-input" placeholder="Cantidad" min="0" step="any" value="${editingHolding ? editingHolding.shares : ''}" />
+        <input type="number" id="port-cost" class="port-input" placeholder="Costo promedio (opcional)" min="0" step="any" value="${editingHolding?.avgCost ?? ''}" />
         <select id="port-currency" class="port-input">
-          <option value="USD">USD (acción/activo subyacente)</option>
-          <option value="ARS">ARS (CEDEAR en pesos)</option>
+          <option value="USD" ${!editingHolding || editingHolding.costCurrency !== 'ARS' ? 'selected' : ''}>USD (acción/activo subyacente)</option>
+          <option value="ARS" ${editingHolding?.costCurrency === 'ARS' ? 'selected' : ''}>ARS (CEDEAR en pesos)</option>
         </select>
-        <button class="port-add-btn" id="port-add">Agregar</button>
+        <button class="port-add-btn" id="port-add">${editingHolding ? 'Actualizar' : 'Agregar'}</button>
       </div>
     </div>
 
-    ${!holdings.length ? `<div class="card watch-empty">Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}).</div>` : `
+    <div class="port-table-controls">
+      <button class="port-csv-btn" id="port-export">Exportar CSV</button>
+      <button class="port-csv-btn" id="port-import">Importar CSV</button>
+      <input type="file" id="port-import-file" accept=".csv,text/csv" style="display:none;" />
+    </div>
+
+    ${!holdings.length ? `<div class="card watch-empty">Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}). Podés empezar cargando una a la vez arriba, o importar un CSV (columnas: ticker,shares,avgCost,costCurrency).</div>` : `
     <div class="port-summary-grid">
       <div class="card port-summary-card">
         <div class="dash-radar-title">Valor total</div>
@@ -976,15 +1067,47 @@ function portfolioHTML() {
     </div>
 
     <div class="card port-notes-card">
+      <div class="dash-radar-title">Recomendación por posición</div>
+      ${stats.rows.filter(r => r.d).map(r => {
+        const reco = portfolioRecommendation(r);
+        if (!reco) return '';
+        const tone = RECO_TONE[reco.tone];
+        return `
+        <div class="port-reco-row">
+          <span class="port-reco-ticker">${esc(r.ticker)}</span>
+          <span class="watch-signal" style="background:${tone.bg}; color:${tone.color};">${esc(reco.label)}</span>
+          <span class="port-reco-detail">${esc(reco.detail)}</span>
+        </div>`;
+      }).join('') || '<div class="dash-loading-note">Cargando análisis de cada posición…</div>'}
+    </div>
+
+    <div class="card port-notes-card">
       <div class="dash-radar-title">Lectura de diversificación</div>
       ${notes.map(n => `<div class="port-note ${n.type}">${n.type === 'risk' ? '⚠' : '✓'} ${esc(n.text)}</div>`).join('')}
     </div>
 
+    ${stats.sectorRows.length ? `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Asignación por sector</div>
+      ${stats.sectorRows.map(s => `
+        <div class="score-row" style="grid-template-columns: 140px 1fr 50px;">
+          <span class="score-label">${esc(s.sector)}</span>
+          <div class="score-bar-bg"><div class="score-bar-fill" style="width:${Math.round(s.pct * 100)}%;"></div></div>
+          <span class="score-fraction">${Math.round(s.pct * 100)}%</span>
+        </div>`).join('')}
+    </div>` : ''}
+
+    <div class="port-table-controls">
+      <select class="watch-select" id="port-sort">
+        ${PORT_SORT_OPTIONS.map(o => `<option value="${o.key}" ${portState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+      </select>
+    </div>
+
     <div class="port-table-wrap">
       <table class="port-table">
-        <thead><tr><th>Ticker</th><th>Cantidad</th><th>Precio</th><th>Valor</th><th>Peso</th><th>P&amp;L</th><th>Señal</th><th></th></tr></thead>
+        <thead><tr><th>Ticker</th><th>Cantidad</th><th>Precio</th><th>Valor</th><th>Peso</th><th>P&amp;L</th><th>Señal</th><th>Recomendación</th><th></th></tr></thead>
         <tbody>
-          ${stats.rows.map(r => portfolioRowHTML(r)).join('')}
+          ${sortPortfolioRows(stats.rows).map(r => portfolioRowHTML(r)).join('')}
         </tbody>
       </table>
     </div>`}
@@ -993,7 +1116,7 @@ function portfolioHTML() {
 
 function portfolioRowHTML(r) {
   if (!r.d) {
-    return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td>${r.shares}</td><td colspan="4"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}">×</button></td></tr>`;
+    return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td>${r.shares}</td><td colspan="5"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}">×</button></td></tr>`;
   }
   const sig = scoreLabelColor(r.d.scoreLabel);
   const fmtGain = r.gainCurrency === 'ARS' ? fmtArs : fmtUsd;
@@ -1003,6 +1126,8 @@ function portfolioRowHTML(r) {
   } else if (r.gainUnavailableReason) {
     pnlCell = `<span title="${esc(r.gainUnavailableReason)}">N/D ⓘ</span>`;
   }
+  const reco = portfolioRecommendation(r);
+  const recoTone = reco ? RECO_TONE[reco.tone] : null;
   return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">
     <td class="port-ticker-cell">${esc(r.ticker)}${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}${r.costCurrency === 'ARS' ? ' <span class="watch-stale">ARS</span>' : ''}</td>
     <td>${r.shares}</td>
@@ -1011,14 +1136,27 @@ function portfolioRowHTML(r) {
     <td>${r.weight != null ? `${Math.round(r.weight * 100)}%` : 'N/D'}</td>
     <td class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${pnlCell}</td>
     <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>
-    <td><button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar">×</button></td>
+    <td>${reco ? `<span class="watch-signal" style="background:${recoTone.bg}; color:${recoTone.color};" title="${esc(reco.detail)}">${esc(reco.label)}</span>` : 'N/D'}</td>
+    <td>
+      <button class="port-edit" data-port-edit="${esc(r.ticker)}" title="Editar">✎</button>
+      <button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar">×</button>
+    </td>
   </tr>`;
+}
+
+function downloadTextFile(filename, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function wirePortfolioEvents() {
   els.report.querySelectorAll('[data-port-ticker]').forEach(el => {
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.port-remove')) return;
+      if (e.target.closest('.port-remove') || e.target.closest('.port-edit')) return;
       selectTicker(el.dataset.portTicker);
     });
   });
@@ -1027,8 +1165,22 @@ function wirePortfolioEvents() {
       e.stopPropagation();
       removeHolding(btn.dataset.portRemove);
       delete portState.data[btn.dataset.portRemove];
+      if (portState.editing === btn.dataset.portRemove) portState.editing = null;
       renderReport();
     });
+  });
+  els.report.querySelectorAll('.port-edit').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      portState.editing = btn.dataset.portEdit;
+      renderReport();
+    });
+  });
+  const cancelEdit = document.getElementById('port-edit-cancel');
+  if (cancelEdit) cancelEdit.addEventListener('click', (e) => {
+    e.preventDefault();
+    portState.editing = null;
+    renderReport();
   });
   const addBtn = document.getElementById('port-add');
   if (addBtn) addBtn.addEventListener('click', () => {
@@ -1042,9 +1194,34 @@ function wirePortfolioEvents() {
     const currency = currencyEl?.value === 'ARS' ? 'ARS' : 'USD';
     if (!ticker || !shares || shares <= 0) return;
     addHolding(ticker, shares, cost, currency);
+    portState.editing = null;
     tickerEl.value = ''; sharesEl.value = ''; costEl.value = '';
     renderReport();
   });
+  const sortSel = document.getElementById('port-sort');
+  if (sortSel) sortSel.addEventListener('change', () => {
+    portState.sortBy = sortSel.value;
+    lsSetSafe('icp_port_sort', portState.sortBy);
+    renderReport();
+  });
+  const exportBtn = document.getElementById('port-export');
+  if (exportBtn) exportBtn.addEventListener('click', () => {
+    downloadTextFile('portfolio.csv', holdingsToCsv(getPortfolio()), 'text/csv');
+  });
+  const importBtn = document.getElementById('port-import');
+  const importFile = document.getElementById('port-import-file');
+  if (importBtn && importFile) {
+    importBtn.addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', async () => {
+      const file = importFile.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      const parsed = parseHoldingsCsv(text);
+      for (const h of parsed) addHolding(h.ticker, h.shares, h.avgCost, h.costCurrency);
+      importFile.value = '';
+      renderReport();
+    });
+  }
 }
 
 // Solo pide lo que todavía no tiene: renderReport() dispara esto en cada
