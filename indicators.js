@@ -299,3 +299,28 @@ export function computeTechnical(candles) {
       : (price > ema200[last] ? 'Alcista de fondo, corrección de corto plazo' : 'Bajista de fondo, rebote de corto plazo'),
   };
 }
+
+/** Correlación (Pearson) y beta de los retornos diarios del activo contra un
+ *  benchmark (SPY), sobre la ventana de datos que ambas series tengan en
+ *  común. Beta = covarianza(activo,bench) / varianza(bench). */
+export function correlationAndBeta(assetCloses, benchCloses) {
+  const n = Math.min(assetCloses.length, benchCloses.length);
+  if (n < 20) return null;
+  const a = assetCloses.slice(-n), b = benchCloses.slice(-n);
+  const ra = [], rb = [];
+  for (let i = 1; i < n; i++) {
+    ra.push((a[i] - a[i - 1]) / a[i - 1]);
+    rb.push((b[i] - b[i - 1]) / b[i - 1]);
+  }
+  const mean = (arr) => arr.reduce((s, v) => s + v, 0) / arr.length;
+  const ma = mean(ra), mb = mean(rb);
+  let cov = 0, varA = 0, varB = 0;
+  for (let i = 0; i < ra.length; i++) {
+    const da = ra[i] - ma, db = rb[i] - mb;
+    cov += da * db; varA += da * da; varB += db * db;
+  }
+  cov /= ra.length; varA /= ra.length; varB /= ra.length;
+  const corr = (varA > 0 && varB > 0) ? cov / Math.sqrt(varA * varB) : null;
+  const beta = varB > 0 ? cov / varB : null;
+  return { correlation: corr, beta };
+}

@@ -46,22 +46,58 @@ function scoreFundamentals(f) {
   return clamp(rev * 0.3 + eps * 0.3 + roe * 0.2 + margin * 0.2);
 }
 
-function scoreValuation(f) {
-  if (!f || f.peg == null) return null;
-  if (f.peg <= 0) return 0.4;
-  if (f.peg < 1) return 0.9;
-  if (f.peg < 1.5) return 0.7;
-  if (f.peg < 2.5) return 0.5;
-  return 0.25;
+// Rangos de PE "típicos" por sector, como referencia de mercado (no un feed
+// en vivo de peers — evita sumar un request por activo solo para valuación).
+// Sirven para juzgar si el múltiplo es caro/barato RELATIVO a su propio
+// sector, no contra un umbral genérico único para toda la bolsa.
+export const SECTOR_PE_RANGE = {
+  'Tecnología': [22, 35], 'Semiconductores': [24, 38], 'Salud': [16, 26],
+  'Consumo': [18, 26], 'Bancos': [8, 13], 'Energía': [7, 13],
+  'Fintech': [20, 32], 'Comunicación': [14, 22], 'Industrial': [15, 22],
+  'Automotriz': [10, 18], 'Materiales': [10, 16],
+};
+
+function scoreValuation(f, sector) {
+  if (!f) return null;
+  const range = SECTOR_PE_RANGE[sector];
+  let peScore = null;
+  if (range && f.peTTM != null && f.peTTM > 0) {
+    const [lo, hi] = range;
+    if (f.peTTM <= lo) peScore = 0.85;
+    else if (f.peTTM <= (lo + hi) / 2) peScore = 0.7;
+    else if (f.peTTM <= hi) peScore = 0.5;
+    else if (f.peTTM <= hi * 1.3) peScore = 0.3;
+    else peScore = 0.15;
+  }
+  let pegScore = null;
+  if (f.peg != null) {
+    if (f.peg <= 0) pegScore = 0.4;
+    else if (f.peg < 1) pegScore = 0.9;
+    else if (f.peg < 1.5) pegScore = 0.7;
+    else if (f.peg < 2.5) pegScore = 0.5;
+    else pegScore = 0.25;
+  }
+  if (peScore == null && pegScore == null) return null;
+  if (peScore == null) return pegScore;
+  if (pegScore == null) return peScore;
+  return clamp(peScore * 0.5 + pegScore * 0.5);
 }
 
 function scoreNews(newsSentiment) {
   return newsSentiment == null ? null : clamp(newsSentiment);
 }
 
+// Riesgo país Argentina: ~400pb es un nivel "sano" reciente, ~1200pb es zona
+// de crisis — la escala es una referencia relativa, no un umbral absoluto.
+const riesgoPaisPart = (v) => v == null ? null : clamp(1 - (v - 400) / 800);
+
 function scoreMacro(macro) {
-  if (!macro || macro.vix == null) return null;
-  return clamp(1 - (macro.vix - 12) / 25);
+  if (!macro) return null;
+  const parts = [];
+  if (macro.vix != null) parts.push(clamp(1 - (macro.vix - 12) / 25));
+  const rp = riesgoPaisPart(macro.riesgoPaisArg);
+  if (rp != null) parts.push(rp);
+  return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : null;
 }
 
 function scoreRisk(t) {
@@ -71,12 +107,11 @@ function scoreRisk(t) {
 }
 
 function scoreSentiment(newsSentiment, macro) {
-  const vixPart = macro && macro.vix != null ? clamp(1 - (macro.vix - 12) / 25) : null;
-  const newsPart = newsSentiment != null ? newsSentiment : null;
-  if (vixPart == null && newsPart == null) return null;
-  if (vixPart == null) return newsPart;
-  if (newsPart == null) return vixPart;
-  return clamp(vixPart * 0.5 + newsPart * 0.5);
+  const parts = [];
+  if (macro?.vix != null) parts.push(clamp(1 - (macro.vix - 12) / 25));
+  if (newsSentiment != null) parts.push(clamp(newsSentiment));
+  if (macro?.fearGreed?.value != null) parts.push(clamp(macro.fearGreed.value / 100));
+  return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : null;
 }
 
 function scoreLiquidity(candles) {
@@ -86,12 +121,12 @@ function scoreLiquidity(candles) {
   return clamp(Math.log10(avgVol + 1) / 8);
 }
 
-export function computeScore({ technical, fundamentals, macro, newsSentiment, candles, confluence }) {
+export function computeScore({ technical, fundamentals, macro, newsSentiment, candles, confluence, sector }) {
   const raw = {
     trend: scoreTrend(technical, confluence),
     momentum: scoreMomentum(technical),
     fundamentals: scoreFundamentals(fundamentals),
-    valuation: scoreValuation(fundamentals),
+    valuation: scoreValuation(fundamentals, sector),
     news: scoreNews(newsSentiment),
     macro: scoreMacro(macro),
     risk: scoreRisk(technical),
@@ -182,5 +217,25 @@ export function computePlan(technical, score) {
     riskReward: isNaN(riskReward) || riskReward <= 0 ? 'N/D' : `${riskReward.toFixed(1)}:1`,
     probability: `~${Math.round(probability * 100)}%`,
     drawdown: `-${Math.round(drawdownPct * 100 * 1.5)}% a -${Math.round(drawdownPct * 100 * 2.5)}%`,
+    // Valores numéricos crudos, para comparar contra el precio (alertas) sin
+    // tener que re-parsear los strings formateados de arriba. supportRef/
+    // resistanceRef/safeAtr (sin el margen de +0.1×ATR que separa sellLow del
+    // precio actual solo para que el rango se vea bien en la UI) son los que
+    // usa detectPriceAlert, para que la condición de cruce sea alcanzable.
+    raw: { buyLow, buyHigh, sellLow, sellHigh, stopLoss, tp1, tp2, tp3, supportRef, resistanceRef, safeAtr },
   };
+}
+
+/** Compara el precio actual contra soporte/resistencia crudos (no contra el
+ *  plan operativo: ese se recalcula siempre relativo al precio del momento
+ *  para que el plan mostrado tenga sentido, lo que lo vuelve inútil como
+ *  referencia fija de un refresco al siguiente). Soporte/resistencia salen
+ *  de swings históricos reales, así que sí sirven como nivel a "cruzar". */
+export function detectPriceAlert(price, technical) {
+  const { support, resistance, atr } = technical;
+  const safeAtr = atr && atr > 0 && !isNaN(atr) ? atr : price * 0.02;
+  if (price <= support - safeAtr) return { type: 'stop', label: 'Rompió el soporte' };
+  if (price <= support + 0.6 * safeAtr) return { type: 'buy', label: 'En zona de compra' };
+  if (price >= resistance - 0.6 * safeAtr) return { type: 'sell', label: 'En zona de venta' };
+  return null;
 }

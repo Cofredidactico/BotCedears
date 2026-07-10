@@ -81,13 +81,29 @@ a { color: inherit; }
 
 /* ---------- Seguimiento (watchlist) ---------- */
 .watch-empty { padding: 20px 24px; font-size: 13px; color: oklch(0.58 0.01 70); margin-bottom: 28px; }
-.watch-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+.watch-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.watch-select {
+  background: oklch(0.20 0.007 55); border: 1px solid oklch(0.32 0.01 60); border-radius: 7px;
+  color: oklch(0.75 0.01 75); font-family: 'IBM Plex Sans', sans-serif; font-size: 11px;
+  padding: 5px 8px; cursor: pointer;
+}
+.watch-select:hover { border-color: oklch(0.45 0.06 85); }
+.watch-alerts-btn {
+  background: transparent; border: 1px solid oklch(0.32 0.01 60); border-radius: 7px;
+  color: oklch(0.62 0.01 70); font-family: 'IBM Plex Sans', sans-serif; font-size: 11px;
+  padding: 5px 10px; cursor: pointer;
+}
+.watch-alerts-btn:hover { border-color: oklch(0.45 0.06 85); }
+.watch-alerts-btn.on { background: oklch(0.28 0.06 85); border-color: oklch(0.45 0.09 85); color: oklch(0.88 0.08 85); }
+.watch-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; margin-top: 14px; }
 .watch-card {
   position: relative; cursor: pointer; width: 168px;
   background: oklch(0.20 0.007 55); border: 1px solid oklch(0.30 0.01 60); border-radius: 12px;
   padding: 14px 16px 16px 16px; transition: border-color 0.15s;
 }
 .watch-card:hover { border-color: oklch(0.45 0.06 85); }
+.watch-card.has-alert { border-width: 1.5px; }
+.watch-alert { font-size: 11px; font-weight: 600; margin-top: 8px; }
 .watch-remove {
   position: absolute; top: 8px; right: 8px; background: transparent; border: none; cursor: pointer;
   color: oklch(0.50 0.01 70); font-size: 14px; line-height: 1; padding: 2px 4px;
@@ -114,6 +130,16 @@ a { color: inherit; }
   border: 1px solid oklch(0.30 0.01 60); border-radius: 14px; padding: 32px; margin-bottom: 32px; text-align: center;
   font-size: 13px; color: oklch(0.65 0.01 70);
 }
+
+/* ---------- Loading skeletons ---------- */
+@keyframes skel-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+.skel { background: oklch(0.26 0.008 60); border-radius: 6px; animation: skel-pulse 1.4s ease-in-out infinite; }
+.skel-line { height: 12px; margin-bottom: 10px; }
+.skel-title { height: 26px; width: 46%; margin-bottom: 14px; }
+.skel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; margin-bottom: 18px; }
+.skel-chart { height: 320px; border-radius: 10px; margin-bottom: 8px; }
+.skel-row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.skel-row .skel { flex: 1; height: 8px; }
 
 /* ---------- Section titles ---------- */
 .sectiontitle {
@@ -208,9 +234,11 @@ a { color: inherit; }
 
 /* ---------- Macro / Noticias ---------- */
 .macro-card { padding: 22px 24px; display: flex; flex-wrap: wrap; gap: 10px; }
-.macro-chip { border: 1px solid oklch(0.32 0.01 60); border-radius: 8px; padding: 8px 14px; font-size: 12px; }
+.macro-chip { border: 1px solid oklch(0.32 0.01 60); border-radius: 8px; padding: 8px 14px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
 .macro-chip-label { color: oklch(0.58 0.01 70); }
 .macro-chip-value { font-family: 'IBM Plex Mono', monospace; }
+.macro-chip-live { width: 6px; height: 6px; border-radius: 50%; background: oklch(0.68 0.13 150); flex-shrink: 0; }
+.macro-chip-var { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: oklch(0.58 0.01 70); }
 .news-card { padding: 22px 24px; display: flex; flex-direction: column; gap: 12px; }
 .news-item { display: flex; gap: 12px; align-items: flex-start; }
 .news-tag { font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; padding: 3px 9px; border-radius: 12px; white-space: nowrap; }
