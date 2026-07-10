@@ -2,6 +2,7 @@ import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, 
 import { computeTechnical } from './indicators.js';
 import { computeScore, computePlan } from './scoring.js';
 import { renderPriceChartSVG } from './chart.js';
+import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 
 const GREEN = 'oklch(0.68 0.13 150)', AMBER = 'oklch(0.72 0.11 85)', RED = 'oklch(0.65 0.15 25)';
 
@@ -12,9 +13,11 @@ const els = {
   tickerchip: document.getElementById('tickerchip'),
   dropdown: document.getElementById('dropdown'),
   report: document.getElementById('report'),
+  watchlist: document.getElementById('watchlist'),
 };
 
 const state = { query: '', asset: null, report: null, loading: false, error: null };
+const watchState = { data: {}, loading: new Set() }; // ticker -> { price, changePct, score, scoreLabel, isReal, ts }
 
 /* ───────────────────────── utilidades ───────────────────────── */
 const fmtUsd = (n) => n == null || isNaN(n) ? 'N/D' : (Math.abs(n) >= 1000 ? `US$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : `$${n.toFixed(2)}`);
@@ -89,12 +92,22 @@ function renderDropdown() {
       </div>
       <div class="dropdown-right">
         <span class="dropdown-cat">${esc(a.category)}</span>
-        <span class="dropdown-badge" style="background:oklch(0.30 0.07 150); color:oklch(0.85 0.10 150);">Analizable</span>
+        <button class="star-btn" data-star="${esc(a.ticker)}" title="Agregar a seguimiento">${isWatched(a.ticker) ? '★' : '☆'}</button>
       </div>
     </div>`).join('');
   els.dropdown.style.display = 'block';
   els.dropdown.querySelectorAll('.dropdown-item').forEach(el => {
-    el.addEventListener('click', () => selectTicker(el.dataset.ticker));
+    el.addEventListener('click', (e) => { if (e.target.closest('.star-btn')) return; selectTicker(el.dataset.ticker); });
+  });
+  els.dropdown.querySelectorAll('.star-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ticker = btn.dataset.star;
+      toggleWatchlist(ticker);
+      btn.textContent = isWatched(ticker) ? '★' : '☆';
+      renderWatchlist();
+      loadWatchlistData();
+    });
   });
 }
 
@@ -270,6 +283,7 @@ function renderReport() {
         <div class="exec-name-row">
           <div class="exec-name">${esc(asset.name)}</div>
           <div class="exec-tickersector">${esc(asset.ticker)} · ${esc(asset.sector)}</div>
+          <button class="star-btn star-btn-lg" id="exec-star" title="Agregar a seguimiento">${isWatched(asset.ticker) ? '★' : '☆'}</button>
         </div>
         <div class="exec-price-row">
           <div class="exec-price">${fmtUsd(quote.usd)}</div>
@@ -405,6 +419,16 @@ function renderReport() {
 
     ${cedearNote}
   `;
+
+  const starBtn = document.getElementById('exec-star');
+  if (starBtn) {
+    starBtn.addEventListener('click', () => {
+      toggleWatchlist(asset.ticker);
+      starBtn.textContent = isWatched(asset.ticker) ? '★' : '☆';
+      renderWatchlist();
+      loadWatchlistData();
+    });
+  }
 }
 
 function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -471,10 +495,94 @@ function macroChips(macro) {
   ];
 }
 
+/* ───────────────────────── seguimiento (watchlist) ───────────────────────── */
+function scoreLabelColor(label) {
+  if (label === 'Compra Fuerte') return { bg: 'oklch(0.30 0.07 150)', color: 'oklch(0.85 0.10 150)' };
+  if (label === 'Compra Moderada') return { bg: 'oklch(0.27 0.05 150)', color: 'oklch(0.78 0.09 150)' };
+  if (label === 'Mantener') return { bg: 'oklch(0.28 0.05 85)', color: 'oklch(0.78 0.09 85)' };
+  if (label === 'Reducir') return { bg: 'oklch(0.28 0.06 45)', color: 'oklch(0.78 0.10 45)' };
+  return { bg: 'oklch(0.28 0.07 25)', color: 'oklch(0.82 0.11 25)' }; // Venta
+}
+
+function renderWatchlist() {
+  const tickers = getWatchlist();
+  if (!tickers.length) {
+    els.watchlist.innerHTML = `
+      <div class="sectiontitle">Seguimiento</div>
+      <div class="card watch-empty">Todavía no agregaste activos. Buscá uno y tocá la ☆ para tenerlo siempre a mano acá (máx. ${WATCHLIST_MAX}).</div>`;
+    return;
+  }
+  els.watchlist.innerHTML = `
+    <div class="sectiontitle">Seguimiento</div>
+    <div class="watch-grid">
+      ${tickers.map(ticker => {
+        const d = watchState.data[ticker];
+        if (!d) {
+          return `<div class="watch-card" data-ticker="${esc(ticker)}">
+            <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
+            <div class="watch-ticker">${esc(ticker)}</div>
+            <div class="watch-loading">${watchState.loading.has(ticker) ? 'Cargando…' : 'Sin datos'}</div>
+          </div>`;
+        }
+        const up = d.changePct >= 0;
+        const sig = scoreLabelColor(d.scoreLabel);
+        return `<div class="watch-card" data-ticker="${esc(ticker)}">
+          <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
+          <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
+          <div class="watch-name">${esc(d.name ?? '')}</div>
+          <div class="watch-price">${fmtUsd(d.price)}</div>
+          <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
+          <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  els.watchlist.querySelectorAll('.watch-card').forEach(el => {
+    el.addEventListener('click', (e) => { if (e.target.closest('.watch-remove')) return; selectTicker(el.dataset.ticker); });
+  });
+  els.watchlist.querySelectorAll('.watch-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ticker = btn.dataset.remove;
+      toggleWatchlist(ticker);
+      delete watchState.data[ticker];
+      renderWatchlist();
+    });
+  });
+}
+
+async function loadWatchlistData() {
+  const tickers = getWatchlist();
+  const macro = await getMacroSnapshot();
+  await Promise.all(tickers.map(async (ticker) => {
+    if (watchState.loading.has(ticker)) return;
+    watchState.loading.add(ticker);
+    renderWatchlist();
+    try {
+      const asset = await getAsset(ticker);
+      const [quote, candles] = await Promise.all([getQuote(ticker), getCandles(ticker, '1day', 220)]);
+      const technical = computeTechnical(candles);
+      const scoreResult = computeScore({ technical, fundamentals: null, macro: { vix: macro?.vix ?? null }, newsSentiment: null, candles });
+      watchState.data[ticker] = {
+        name: asset?.name ?? ticker, price: quote.usd, changePct: quote.changePct,
+        score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
+      };
+    } catch (e) {
+      console.warn('[watchlist] no se pudo cargar', ticker, e.message);
+    } finally {
+      watchState.loading.delete(ticker);
+      renderWatchlist();
+    }
+  }));
+}
+
 /* ───────────────────────── init ───────────────────────── */
 renderTopbar();
 renderReport();
+renderWatchlist();
 initSearch();
+loadWatchlistData();
 setInterval(renderTopbar, 30 * 1000);
 setInterval(() => { if (state.asset) renderReport(); }, 30 * 1000); // refresca textos de frescura sin re-fetch
 setInterval(() => { if (state.asset) loadReport(state.asset.ticker); }, 60 * 1000); // re-fetch datos en vivo
+setInterval(loadWatchlistData, 120 * 1000); // ciclo más largo: cada ticker de seguimiento suma requests a la API

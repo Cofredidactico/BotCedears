@@ -71,6 +71,38 @@ a { color: inherit; }
 .dropdown-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; }
 .searchhint { font-size: 11px; color: oklch(0.50 0.01 70); margin-bottom: 28px; }
 
+/* ---------- Estrella (seguimiento) ---------- */
+.star-btn {
+  background: transparent; border: none; cursor: pointer; color: oklch(0.62 0.10 85);
+  font-size: 15px; line-height: 1; padding: 2px 4px;
+}
+.star-btn:hover { color: oklch(0.78 0.11 85); }
+.star-btn-lg { font-size: 20px; margin-left: auto; }
+
+/* ---------- Seguimiento (watchlist) ---------- */
+.watch-empty { padding: 20px 24px; font-size: 13px; color: oklch(0.58 0.01 70); margin-bottom: 28px; }
+.watch-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+.watch-card {
+  position: relative; cursor: pointer; width: 168px;
+  background: oklch(0.20 0.007 55); border: 1px solid oklch(0.30 0.01 60); border-radius: 12px;
+  padding: 14px 16px 16px 16px; transition: border-color 0.15s;
+}
+.watch-card:hover { border-color: oklch(0.45 0.06 85); }
+.watch-remove {
+  position: absolute; top: 8px; right: 8px; background: transparent; border: none; cursor: pointer;
+  color: oklch(0.50 0.01 70); font-size: 14px; line-height: 1; padding: 2px 4px;
+}
+.watch-remove:hover { color: oklch(0.75 0.12 25); }
+.watch-ticker { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.watch-name { font-size: 11px; color: oklch(0.58 0.01 70); margin-bottom: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.watch-price { font-family: 'IBM Plex Mono', monospace; font-size: 16px; margin-bottom: 4px; }
+.watch-change { font-family: 'IBM Plex Mono', monospace; font-size: 12px; margin-bottom: 10px; }
+.watch-change.up { color: oklch(0.72 0.13 150); }
+.watch-change.down { color: oklch(0.72 0.13 25); }
+.watch-signal { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 10px; }
+.watch-loading { font-size: 12px; color: oklch(0.55 0.01 70); padding: 10px 0; }
+.watch-stale { font-size: 9px; color: oklch(0.60 0.01 70); font-weight: 400; letter-spacing: 0.5px; text-transform: uppercase; }
+
 /* ---------- Empty state ---------- */
 .emptycard {
   border: 1px solid oklch(0.36 0.02 85); border-radius: 14px; padding: 32px; margin-bottom: 32px; text-align: center;
