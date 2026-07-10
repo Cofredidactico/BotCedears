@@ -135,6 +135,7 @@ async function loadChartTf(tf) {
 
 /* ───────────────────────── utilidades ───────────────────────── */
 const fmtUsd = (n) => n == null || isNaN(n) ? 'N/D' : (Math.abs(n) >= 1000 ? `US$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : `$${n.toFixed(2)}`);
+const fmtArs = (n) => n == null || isNaN(n) ? 'N/D' : `AR$${Math.round(n).toLocaleString('es-AR')}`;
 const fmtPct = (n, digits = 1) => n == null || isNaN(n) ? 'N/D' : `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`;
 const fmtNum = (n, digits = 2) => n == null || isNaN(n) ? 'N/D' : n.toFixed(digits);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -873,9 +874,21 @@ function computePortfolioStats(holdings) {
   const totalValue = rows.reduce((s, r) => s + (r.value ?? 0), 0);
   for (const r of rows) {
     r.weight = (r.value != null && totalValue > 0) ? r.value / totalValue : null;
-    if (r.avgCost != null && r.d?.price != null) {
-      r.gainPct = (r.d.price - r.avgCost) / r.avgCost;
-      r.gainAbs = (r.d.price - r.avgCost) * r.shares;
+    // El valor de mercado (arriba) siempre es en USD — es el precio real del
+    // activo subyacente. El costo promedio, en cambio, puede haberse cargado
+    // en pesos (CEDEAR) o en USD según cómo compró el usuario, así que el
+    // P&L se calcula en la MISMA moneda que el costo, no siempre contra el
+    // precio en USD (comparar pesos contra dólares daría un % sin sentido).
+    if (r.avgCost != null) {
+      const isArs = r.costCurrency === 'ARS';
+      const currentInCostCurrency = isArs ? r.d?.cedearArs : r.d?.price;
+      if (currentInCostCurrency != null) {
+        r.gainPct = (currentInCostCurrency - r.avgCost) / r.avgCost;
+        r.gainAbs = (currentInCostCurrency - r.avgCost) * r.shares;
+        r.gainCurrency = isArs ? 'ARS' : 'USD';
+      } else if (isArs) {
+        r.gainUnavailableReason = 'Este activo no tiene CEDEAR (sin ratio ARS) — no se puede comparar el costo en pesos.';
+      }
     }
   }
 
@@ -894,10 +907,19 @@ function computePortfolioStats(holdings) {
   const concentrationRisk = topHolding && (topHolding.weight ?? 0) > 0.35;
   const sectorRisk = sectorRows[0] && sectorRows[0].pct > 0.5 ? sectorRows[0] : null;
   const sellSignals = rows.filter(r => r.d?.scoreLabel === 'Venta' || r.d?.scoreLabel === 'Reducir');
-  const totalGain = rows.every(r => r.gainAbs == null) ? null : rows.reduce((s, r) => s + (r.gainAbs ?? 0), 0);
-  const totalCost = rows.every(r => r.avgCost == null) ? null : rows.reduce((s, r) => s + (r.avgCost != null ? r.avgCost * r.shares : 0), 0);
 
-  return { rows, totalValue, weightedScore, sectorRows, topHolding, concentrationRisk, sectorRisk, sellSignals, totalGain, totalCost };
+  // Los totales agregados de P&L se calculan por separado por moneda — sumar
+  // ganancia en pesos con ganancia en dólares daría un número sin sentido.
+  const usdRows = rows.filter(r => r.gainAbs != null && r.gainCurrency === 'USD');
+  const arsRows = rows.filter(r => r.gainAbs != null && r.gainCurrency === 'ARS');
+  const sumGain = (list) => list.reduce((s, r) => s + r.gainAbs, 0);
+  const sumCost = (list) => list.reduce((s, r) => s + r.avgCost * r.shares, 0);
+  const totalGainUsd = usdRows.length ? sumGain(usdRows) : null;
+  const totalCostUsd = usdRows.length ? sumCost(usdRows) : null;
+  const totalGainArs = arsRows.length ? sumGain(arsRows) : null;
+  const totalCostArs = arsRows.length ? sumCost(arsRows) : null;
+
+  return { rows, totalValue, weightedScore, sectorRows, topHolding, concentrationRisk, sectorRisk, sellSignals, totalGainUsd, totalCostUsd, totalGainArs, totalCostArs };
 }
 
 function portfolioRiskNotes(stats) {
@@ -917,14 +939,18 @@ function portfolioHTML() {
 
   return `
     <div class="sectiontitle">Portfolio Advisor</div>
-    <div class="dash-intro">Cargá tus tenencias (ticker, cantidad y costo promedio opcional en USD) para ver diversificación, concentración y señal de cada posición con datos reales. Se guarda solo en este navegador.</div>
+    <div class="dash-intro">Cargá tus tenencias (ticker, cantidad y costo promedio opcional) para ver diversificación, concentración y señal de cada posición con datos reales. Si compraste CEDEARs en pesos, elegí "ARS (CEDEAR)" — el P&amp;L se compara contra el precio del CEDEAR en pesos (vía CCL), no contra el precio en dólares del subyacente. Se guarda solo en este navegador.</div>
 
     <div class="card port-form-card">
       <div class="port-form">
         <input list="port-ticker-list" id="port-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" autocomplete="off" style="text-transform:uppercase;" />
         <datalist id="port-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
         <input type="number" id="port-shares" class="port-input" placeholder="Cantidad" min="0" step="any" />
-        <input type="number" id="port-cost" class="port-input" placeholder="Costo promedio USD (opcional)" min="0" step="any" />
+        <input type="number" id="port-cost" class="port-input" placeholder="Costo promedio (opcional)" min="0" step="any" />
+        <select id="port-currency" class="port-input">
+          <option value="USD">USD (acción/activo subyacente)</option>
+          <option value="ARS">ARS (CEDEAR en pesos)</option>
+        </select>
         <button class="port-add-btn" id="port-add">Agregar</button>
       </div>
     </div>
@@ -934,7 +960,8 @@ function portfolioHTML() {
       <div class="card port-summary-card">
         <div class="dash-radar-title">Valor total</div>
         <div class="port-summary-value">${fmtUsd(stats.totalValue)}</div>
-        ${stats.totalGain != null ? `<div class="port-summary-sub ${stats.totalGain >= 0 ? 'up' : 'down'}">${stats.totalGain >= 0 ? '+' : ''}${fmtUsd(stats.totalGain)} (${fmtPct(stats.totalCost > 0 ? (stats.totalGain / stats.totalCost) * 100 : 0)})</div>` : ''}
+        ${stats.totalGainUsd != null ? `<div class="port-summary-sub ${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${fmtUsd(stats.totalGainUsd)} (${fmtPct(stats.totalCostUsd > 0 ? (stats.totalGainUsd / stats.totalCostUsd) * 100 : 0)}) en posiciones con costo en USD</div>` : ''}
+        ${stats.totalGainArs != null ? `<div class="port-summary-sub ${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${fmtArs(stats.totalGainArs)} (${fmtPct(stats.totalCostArs > 0 ? (stats.totalGainArs / stats.totalCostArs) * 100 : 0)}) en posiciones con costo en ARS</div>` : ''}
       </div>
       <div class="card port-summary-card">
         <div class="dash-radar-title">Score ponderado</div>
@@ -969,13 +996,20 @@ function portfolioRowHTML(r) {
     return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td>${r.shares}</td><td colspan="4"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}">×</button></td></tr>`;
   }
   const sig = scoreLabelColor(r.d.scoreLabel);
+  const fmtGain = r.gainCurrency === 'ARS' ? fmtArs : fmtUsd;
+  let pnlCell = '—';
+  if (r.gainPct != null) {
+    pnlCell = `${fmtPct(r.gainPct * 100)}<br><span class="port-pnl-abs">${r.gainAbs >= 0 ? '+' : ''}${fmtGain(r.gainAbs)}</span>`;
+  } else if (r.gainUnavailableReason) {
+    pnlCell = `<span title="${esc(r.gainUnavailableReason)}">N/D ⓘ</span>`;
+  }
   return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">
-    <td class="port-ticker-cell">${esc(r.ticker)}${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</td>
+    <td class="port-ticker-cell">${esc(r.ticker)}${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}${r.costCurrency === 'ARS' ? ' <span class="watch-stale">ARS</span>' : ''}</td>
     <td>${r.shares}</td>
-    <td>${fmtUsd(r.d.price)}</td>
+    <td>${fmtUsd(r.d.price)}${r.costCurrency === 'ARS' && r.d.cedearArs != null ? `<br><span class="port-pnl-abs">CEDEAR ${fmtArs(r.d.cedearArs)}</span>` : ''}</td>
     <td>${r.value != null ? fmtUsd(r.value) : 'N/D'}</td>
     <td>${r.weight != null ? `${Math.round(r.weight * 100)}%` : 'N/D'}</td>
-    <td class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${r.gainPct != null ? fmtPct(r.gainPct * 100) : '—'}</td>
+    <td class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${pnlCell}</td>
     <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>
     <td><button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar">×</button></td>
   </tr>`;
@@ -1001,11 +1035,13 @@ function wirePortfolioEvents() {
     const tickerEl = document.getElementById('port-ticker');
     const sharesEl = document.getElementById('port-shares');
     const costEl = document.getElementById('port-cost');
+    const currencyEl = document.getElementById('port-currency');
     const ticker = tickerEl.value.trim().toUpperCase();
     const shares = parseFloat(sharesEl.value);
     const cost = costEl.value ? parseFloat(costEl.value) : null;
+    const currency = currencyEl?.value === 'ARS' ? 'ARS' : 'USD';
     if (!ticker || !shares || shares <= 0) return;
-    addHolding(ticker, shares, cost);
+    addHolding(ticker, shares, cost, currency);
     tickerEl.value = ''; sharesEl.value = ''; costEl.value = '';
     renderReport();
   });
@@ -1137,6 +1173,7 @@ async function computeLightSignal(ticker, macro) {
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
     price: quote.usd, changePct: quote.changePct,
+    cedearArs: quote.cedearArs ?? null, // precio del CEDEAR en pesos (vía CCL) — null para cripto, que no tiene CEDEAR
     score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
     alert: priceAlert,
   };
