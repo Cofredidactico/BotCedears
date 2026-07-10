@@ -22,14 +22,41 @@
 const urlMode = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('mode') : null;
 const MODE = urlMode || (typeof window !== 'undefined' && window.CEDEAR_MODE) || 'live'; // 'live' | 'mock' — probar local sin keys con ?mode=mock
 const API_BASE = (typeof window !== 'undefined' && window.CEDEAR_API_BASE) || '/api';
-const CACHE_TTL_MS = 60 * 1000;
+// Twelve Data free tier tiene ~8 req/min compartidos entre todos los que usen
+// el sitio — el precio se refresca seguido (se siente "vivo"), pero el OHLCV
+// (velas) cambia poco minuto a minuto, así que se cachea bastante más tiempo.
+const QUOTE_TTL_MS = 60 * 1000;
+const CANDLES_TTL_MS = 5 * 60 * 1000;
 const COINGECKO = 'https://api.coingecko.com/api/v3';
+
+/* Caché en memoria (por pestaña) + respaldo en localStorage (sobrevive a
+ * recargas de página, que si no volverían a pedir todo de cero). */
+const LS_PREFIX = 'icp_cache_';
+function lsGet(key, ttl) {
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + key);
+    if (!raw) return undefined;
+    const { t, v } = JSON.parse(raw);
+    if (Date.now() - t > ttl) return undefined;
+    return v;
+  } catch { return undefined; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(LS_PREFIX + key, JSON.stringify({ t: Date.now(), v: value })); }
+  catch { /* localStorage lleno o no disponible (modo privado, SSR, etc.) — no es crítico */ }
+}
 
 const _cache = new Map();
 function cached(key, ttl, fn) {
   const hit = _cache.get(key);
   if (hit && Date.now() - hit.t < ttl) return hit.p;
-  const p = Promise.resolve().then(fn).catch(err => { _cache.delete(key); throw err; });
+  const fromDisk = lsGet(key, ttl);
+  if (fromDisk !== undefined) {
+    const p = Promise.resolve(fromDisk);
+    _cache.set(key, { t: Date.now(), p });
+    return p;
+  }
+  const p = Promise.resolve().then(fn).then(v => { lsSet(key, v); return v; }).catch(err => { _cache.delete(key); throw err; });
   _cache.set(key, { t: Date.now(), p });
   return p;
 }
@@ -93,20 +120,20 @@ const Mock = {
 /* ═════════════════════════════ LIVE ═══════════════════════════════════ */
 const Live = {
   async getCCL() {
-    return cached('ccl', CACHE_TTL_MS, async () => {
+    return cached('ccl', QUOTE_TTL_MS, async () => {
       const r = await fetch(`${API_BASE}/ccl`); if (!r.ok) throw new Error('ccl ' + r.status);
       const d = await r.json(); return { ...d, isReal: true };
     });
   },
   async getQuote(ticker) {
-    return cached('q:' + ticker, CACHE_TTL_MS, async () => {
+    return cached('q:' + ticker, QUOTE_TTL_MS, async () => {
       const r = await fetch(`${API_BASE}/quote?symbol=${encodeURIComponent(ticker)}`);
       if (!r.ok) throw new Error('quote ' + r.status);
       const d = await r.json(); return { ...d, isReal: true };
     });
   },
   async getCandles(ticker, tf = '1day', n = 200) {
-    return cached(`c:${ticker}:${tf}:${n}`, CACHE_TTL_MS, async () => {
+    return cached(`c:${ticker}:${tf}:${n}`, CANDLES_TTL_MS, async () => {
       const r = await fetch(`${API_BASE}/candles?symbol=${encodeURIComponent(ticker)}&interval=${tf}&outputsize=${n}`);
       if (!r.ok) throw new Error('candles ' + r.status);
       const d = await r.json(); return { ...d, isReal: true };
@@ -126,12 +153,19 @@ const Live = {
       const d = await r.json(); return { ...d, isReal: true };
     });
   },
+  async getMacroLive() {
+    return cached('macro-live', 5 * 60 * 1000, async () => {
+      const r = await fetch(`${API_BASE}/macro`);
+      if (!r.ok) throw new Error('macro ' + r.status);
+      return r.json();
+    });
+  },
 };
 
 /* ═══════════════════════ CoinGecko directo (cripto, sin key) ═══════════════ */
 const Crypto = {
   async getQuote(ticker, coingeckoId) {
-    return cached('cgq:' + ticker, CACHE_TTL_MS, async () => {
+    return cached('cgq:' + ticker, QUOTE_TTL_MS, async () => {
       const r = await fetch(`${COINGECKO}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true`);
       if (!r.ok) throw new Error('coingecko quote ' + r.status);
       const d = await r.json();
@@ -141,7 +175,7 @@ const Crypto = {
     });
   },
   async getCandles(ticker, coingeckoId, days = 180) {
-    return cached('cgc:' + ticker, CACHE_TTL_MS, async () => {
+    return cached('cgc:' + ticker, CANDLES_TTL_MS, async () => {
       const r = await fetch(`${COINGECKO}/coins/${coingeckoId}/ohlc?vs_currency=usd&days=${days}`);
       if (!r.ok) throw new Error('coingecko ohlc ' + r.status);
       const rows = await r.json(); // [ [time,o,h,l,c], ... ]
@@ -189,6 +223,31 @@ export async function getFundamentals(ticker) {
 
 export async function getNews(ticker) {
   return withFallback('getNews', [ticker], Mock.getNews.bind(Mock));
+}
+
+/** Combina el snapshot manual (macro.json) con la fuente en vivo (/api/macro:
+ *  riesgo país + dólares + Fear&Greed siempre; VIX/DXY solo si Twelve Data
+ *  los pudo servir). Si /api/macro falla entero, cae 100% al snapshot manual. */
+export async function getMacro() {
+  const staticSnap = await getMacroSnapshot();
+  if (MODE === 'mock') return { ...staticSnap, isReal: false };
+  try {
+    const live = await Live.getMacroLive();
+    return {
+      ...staticSnap,
+      dxy: live.dxy ?? staticSnap.dxy,
+      vix: live.vix ?? staticSnap.vix,
+      riesgoPaisArg: live.riesgoPaisArg ?? staticSnap.riesgoPaisArg,
+      riesgoPaisVariacion: live.riesgoPaisVariacion ?? null,
+      dolares: live.dolares ?? null,
+      fearGreed: live.fearGreed ?? null,
+      liveFetchedAt: live.fetchedAt ?? null,
+      isReal: true,
+    };
+  } catch (e) {
+    console.warn('[dataSource] macro en vivo falló, usando snapshot manual:', e.message);
+    return { ...staticSnap, isReal: false };
+  }
 }
 
 export const isLive = () => MODE === 'live';

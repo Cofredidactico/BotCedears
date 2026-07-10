@@ -1,6 +1,6 @@
-import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getMacroSnapshot, getCCL } from './dataSource.js';
-import { computeTechnical, resampleWeekly, weeklyConfluence } from './indicators.js';
-import { computeScore, computePlan } from './scoring.js';
+import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getMacro, getCCL } from './dataSource.js';
+import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta } from './indicators.js';
+import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 
@@ -17,7 +17,52 @@ const els = {
 };
 
 const state = { query: '', asset: null, report: null, loading: false, error: null };
-const watchState = { data: {}, loading: new Set() }; // ticker -> { price, changePct, score, scoreLabel, isReal, ts }
+function lsGetSafe(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } }
+function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
+
+const watchState = {
+  data: {}, loading: new Set(),
+  sortBy: lsGetSafe('icp_watch_sort', 'score'),
+  filterSignal: lsGetSafe('icp_watch_filter', 'all'),
+}; // ticker -> { price, changePct, score, scoreLabel, isReal, ts }
+
+const SORT_OPTIONS = [
+  { key: 'score', label: 'Score (mayor a menor)' },
+  { key: 'price', label: 'Precio (mayor a menor)' },
+  { key: 'change', label: 'Variación % (mayor a menor)' },
+  { key: 'ticker', label: 'Ticker (A-Z)' },
+];
+const SIGNAL_FILTERS = ['all', 'Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'];
+
+/* ───────────────────────── alertas de precio ───────────────────────── */
+const ALERT_META = {
+  buy: { label: 'En zona de compra', color: GREEN },
+  sell: { label: 'En zona de venta', color: AMBER },
+  stop: { label: 'Tocó el stop loss', color: RED },
+};
+let alertsEnabled = lsGetSafe('icp_alerts_enabled', '0') === '1';
+const lastAlertByTicker = {}; // ticker -> 'buy'|'sell'|'stop'|null, para notificar solo en la transición
+
+function notifyIfNewAlert(ticker, priceAlert) {
+  const prev = lastAlertByTicker[ticker] ?? null;
+  const curr = priceAlert?.type ?? null;
+  lastAlertByTicker[ticker] = curr;
+  if (!alertsEnabled || !curr || curr === prev) return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const meta = ALERT_META[curr];
+  new Notification(`${ticker}: ${meta.label}`, { body: 'Investment Copilot AI — seguimiento de precio', tag: `icp-${ticker}` });
+}
+
+async function toggleAlerts() {
+  if (!alertsEnabled) {
+    if (typeof Notification === 'undefined') { alert('Este navegador no soporta notificaciones.'); return; }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return;
+  }
+  alertsEnabled = !alertsEnabled;
+  lsSetSafe('icp_alerts_enabled', alertsEnabled ? '1' : '0');
+  renderWatchlist();
+}
 
 const CHART_TABS = [
   { key: '45min', label: '45m' },
@@ -33,7 +78,7 @@ function chartTabsForAsset(asset) {
 function chartCardBody(dailyTechnical) {
   const tf = chartState.tf;
   const entry = chartState.cache[tf];
-  if (chartState.loading.has(tf) && !entry) return `<div class="chart-empty">Cargando ${tf}…</div>`;
+  if (chartState.loading.has(tf) && !entry) return `<div class="skel skel-chart"></div>`;
   if (!entry) return `<div class="chart-empty">Sin datos para este timeframe todavía.</div>`;
   const svg = renderPriceChartSVG(entry.candles, { support: dailyTechnical.support, resistance: dailyTechnical.resistance });
   const staleNote = entry.isReal === false ? `<div class="chart-stale">Datos de demostración — sin conexión al proveedor para este timeframe.</div>` : '';
@@ -185,13 +230,17 @@ async function loadReport(ticker) {
 
   try {
     const isCripto = asset.category === 'Cripto';
-    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative] = await Promise.all([
-      getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker), getNews(ticker), getMacroSnapshot(), getCCL(),
+    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles] = await Promise.all([
+      getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker), getNews(ticker), getMacro(), getCCL(),
       isCripto ? Promise.resolve(null) : getCandles(ticker, '1week', 130),
+      ticker === 'SPY' ? Promise.resolve(null) : getCandles('SPY', '1day', 220),
     ]);
 
     const now = Date.now();
     const technical = computeTechnical(candles);
+    // Correlación/beta vs SPY: SPY se cachea 60s en dataSource, así que mirar
+    // varios tickers seguidos no multiplica los requests al proveedor.
+    const marketCorrelation = spyCandles ? correlationAndBeta(candles.c, spyCandles.c) : null;
 
     // Confirmación con el timeframe semanal: nativo (Twelve Data) para
     // acciones/CEDEARs/ETFs, resampleado de las velas diarias para cripto
@@ -208,13 +257,13 @@ async function loadReport(ticker) {
       netMargin: fundamentals.netMargin != null ? fundamentals.netMargin : null,
       peg: fundamentals.peg,
     } : null;
-    const macroForScore = { vix: macro?.vix ?? null };
-    const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: news?.sentimentScore ?? null, candles, confluence });
+    const macroForScore = { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null };
+    const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: news?.sentimentScore ?? null, candles, confluence, sector: asset.sector });
     const plan = computePlan(technical, scoreResult.score);
 
     state.report = {
       asset, quote, candles, fundamentals, news, macro, ccl,
-      technical, weeklyTechnical, confluence, ...scoreResult, plan,
+      technical, weeklyTechnical, confluence, marketCorrelation, ...scoreResult, plan,
       ts: { quote: now, candles: now, fundamentals: now, news: now },
     };
 
@@ -250,15 +299,22 @@ function technicalNarrative(t, confluence) {
   return alignTxt + rsiTxt + structTxt + srTxt + ` ${t.priceAction.full}` + confluenceTxt;
 }
 
-function fundamentalNarrative(f) {
+function fundamentalNarrative(f, sector) {
   if (!f?.hasData) return 'No hay cobertura de fundamentales para este ticker en el proveedor de datos conectado (común en ETFs, cripto o ADRs de menor liquidez). El score se calculó redistribuyendo el peso de esta categoría entre las demás.';
   const parts = [];
   if (f.revenueGrowth != null) parts.push(`el crecimiento de ingresos interanual es de ${f.revenueGrowth.toFixed(1)}%`);
   if (f.epsGrowth != null) parts.push(`el de EPS es de ${f.epsGrowth.toFixed(1)}%`);
   if (f.peg != null) parts.push(`el PEG se ubica en ${f.peg.toFixed(1)}x`);
   if (f.roe != null) parts.push(`el ROE es de ${f.roe.toFixed(1)}%`);
-  if (!parts.length) return 'Datos fundamentales parciales — el proveedor no reporta las métricas clave para este ticker.';
-  return `Según los últimos datos reportados, ${parts.join(', ')}.`;
+  const base = !parts.length ? 'Datos fundamentales parciales — el proveedor no reporta las métricas clave para este ticker.' : `Según los últimos datos reportados, ${parts.join(', ')}.`;
+
+  const range = SECTOR_PE_RANGE[sector];
+  if (!range || f.peTTM == null) return base;
+  const [lo, hi] = range;
+  const posTxt = f.peTTM <= lo ? `por debajo del rango típico del sector ${sector} (${lo}x–${hi}x), señal de valuación relativamente barata`
+    : f.peTTM <= hi ? `dentro del rango típico del sector ${sector} (${lo}x–${hi}x)`
+    : `por encima del rango típico del sector ${sector} (${lo}x–${hi}x), señal de valuación relativamente exigente`;
+  return `${base} El PE de ${f.peTTM.toFixed(1)}x está ${posTxt}.`;
 }
 
 function conclusionText(r) {
@@ -296,10 +352,41 @@ function risksAndCatalysts(r) {
   return { risks, catalysts };
 }
 
+function reportSkeletonHTML() {
+  const skelRow = (w = '100%') => `<div class="skel skel-line" style="width:${w};"></div>`;
+  return `
+    <div class="exec-grid">
+      <div class="card exec-card">
+        <div class="skel skel-title"></div>
+        ${skelRow('30%')}
+        <div style="height:20px;"></div>
+        ${skelRow('80%')}${skelRow('60%')}${skelRow('70%')}
+      </div>
+      <div class="card gauge-card">
+        <div class="skel" style="width:150px; height:150px; border-radius:50%;"></div>
+      </div>
+    </div>
+    <div class="card thermo-card">${skelRow('100%')}</div>
+    <div class="sectiontitle">Gráfico de Precio</div>
+    <div class="card chart-card"><div class="skel skel-chart"></div></div>
+    <div class="card score-card">
+      ${Array.from({ length: 6 }).map(() => `<div class="skel-row"><div class="skel" style="width:110px; height:12px;"></div><div class="skel" style="flex:1; height:8px;"></div></div>`).join('')}
+    </div>
+    <div class="grid2">
+      <div class="card panel-card">
+        <div class="skel-grid">${Array.from({ length: 8 }).map(() => skelRow('90%')).join('')}</div>
+      </div>
+      <div class="card panel-card">
+        <div class="skel-grid">${Array.from({ length: 8 }).map(() => skelRow('90%')).join('')}</div>
+      </div>
+    </div>
+  `;
+}
+
 /* ───────────────────────── render del reporte ───────────────────────── */
 function renderReport() {
   if (state.loading) {
-    els.report.innerHTML = `<div class="loadingcard">Cargando datos reales de ${esc(state.asset?.ticker ?? '')}…</div>`;
+    els.report.innerHTML = reportSkeletonHTML();
     return;
   }
   if (state.error === 'sin_activo' || (!state.report && state.asset)) {
@@ -328,7 +415,7 @@ function renderReport() {
   }
 
   const r = state.report;
-  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence } = r;
+  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation } = r;
 
   const trendUp = quote.changePct >= 0;
   const trendBg = trendUp ? 'oklch(0.28 0.06 150)' : 'oklch(0.28 0.06 25)';
@@ -418,7 +505,7 @@ function renderReport() {
         </div>
         <div class="card panel-card">
           <div class="metrics-grid">
-            ${technicalMetricRows(t, confluence).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
+            ${technicalMetricRows(t, confluence, marketCorrelation).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
           </div>
           <div class="narrative">${esc(technicalNarrative(t, confluence))}</div>
         </div>
@@ -432,7 +519,7 @@ function renderReport() {
           <div class="metrics-grid">
             ${fundamentalMetricRows(f).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
           </div>
-          <div class="narrative">${esc(fundamentalNarrative(f))}</div>
+          <div class="narrative">${esc(fundamentalNarrative(f, asset.sector))}</div>
         </div>
       </div>
     </div>
@@ -444,7 +531,7 @@ function renderReport() {
           <div class="freshness" style="color:${freshMacro.color};"><span class="dot" style="background:${freshMacro.color};"></span>${esc(freshMacro.text)}</div>
         </div>
         <div class="card macro-card">
-          ${macroChips(macro).map(mc => `<div class="macro-chip"><span class="macro-chip-label">${esc(mc.label)}: </span><span class="macro-chip-value">${esc(mc.value)}</span></div>`).join('')}
+          ${macroChips(macro).map(mc => `<div class="macro-chip">${mc.live ? '<span class="macro-chip-live" title="En vivo"></span>' : ''}<span class="macro-chip-label">${esc(mc.label)}: </span><span class="macro-chip-value">${esc(mc.value)}</span>${typeof mc.live === 'string' ? ` <span class="macro-chip-var">(${esc(mc.live)})</span>` : ''}</div>`).join('')}
         </div>
       </div>
       <div>
@@ -523,6 +610,7 @@ function horizonFor(t) {
 }
 
 function macroFreshness(macro) {
+  if (macro?.isReal && macro.liveFetchedAt) return { text: `Riesgo país/dólares en vivo, ${relativeTime(new Date(macro.liveFetchedAt).getTime())}`, color: GREEN };
   if (!macro?.lastUpdated) return { text: 'Sin datos macro', color: RED };
   const ageDays = (Date.now() - new Date(macro.lastUpdated).getTime()) / 86400000;
   if (ageDays > 14) return { text: `Snapshot manual desactualizado (${Math.round(ageDays)}d)`, color: RED };
@@ -530,13 +618,16 @@ function macroFreshness(macro) {
   return { text: `Snapshot manual (hace ${Math.round(ageDays)}d)`, color: GREEN };
 }
 
-function technicalMetricRows(t, confluence) {
+function technicalMetricRows(t, confluence, marketCorrelation) {
   const nearestFib = Object.entries(t.fib.levels).sort((a, b) => Math.abs(a[1] - t.price) - Math.abs(b[1] - t.price))[0];
   const confluenceValue = !confluence ? 'N/D — historial semanal insuficiente'
     : confluence.agree ? `✓ Confirmada (${BIAS_LABEL[confluence.dailyBias]})`
     : `⚠ Divergencia (D:${BIAS_LABEL[confluence.dailyBias]} / S:${BIAS_LABEL[confluence.weeklyBias]})`;
+  const corrValue = !marketCorrelation || marketCorrelation.correlation == null ? 'N/D'
+    : `${marketCorrelation.correlation.toFixed(2)} (beta ${marketCorrelation.beta.toFixed(2)})`;
   return [
     { label: 'Confirmación semanal', value: confluenceValue },
+    { label: 'Correlación / Beta vs SPY', value: corrValue },
     { label: 'EMA 20 / 50', value: `${fmtNum(t.ema20)} / ${fmtNum(t.ema50)}` },
     { label: 'EMA 100 / 200', value: `${fmtNum(t.ema100)} / ${fmtNum(t.ema200)}` },
     { label: 'RSI (14)', value: isNaN(t.rsi) ? 'N/D' : `${t.rsi.toFixed(0)} — ${t.rsi > 70 ? 'sobrecompra' : t.rsi < 30 ? 'sobreventa' : 'neutral'}` },
@@ -573,15 +664,28 @@ function fundamentalMetricRows(f) {
 
 function macroChips(macro) {
   if (!macro) return [];
-  return [
+  const arsFmt = (v) => v == null ? 'N/D' : `$${Math.round(v).toLocaleString('es-AR')}`;
+  const chips = [
     { label: 'FED (tasa)', value: macro.fedRateLabel ?? 'N/D' },
     { label: 'DXY', value: macro.dxy ?? 'N/D' },
     { label: 'VIX', value: macro.vix ?? 'N/D' },
     { label: 'Bono 10Y', value: macro.bond10y != null ? `${macro.bond10y}%` : 'N/D' },
     { label: 'IPC (YoY)', value: macro.cpiYoyLabel ?? 'N/D' },
     { label: 'PBI (trim.)', value: macro.gdpQoqLabel ?? 'N/D' },
-    { label: 'Riesgo país (ARG)', value: macro.riesgoPaisArg ?? 'N/D' },
+    { label: 'Riesgo país (ARG)', value: macro.riesgoPaisArg ?? 'N/D', live: macro.isReal ? macro.riesgoPaisVariacion : null },
   ];
+  if (macro.dolares) {
+    chips.push(
+      { label: 'Dólar oficial', value: arsFmt(macro.dolares.oficial), live: true },
+      { label: 'Dólar blue', value: arsFmt(macro.dolares.blue), live: true },
+      { label: 'Dólar MEP', value: arsFmt(macro.dolares.mep), live: true },
+      { label: 'Dólar CCL', value: arsFmt(macro.dolares.ccl), live: true },
+    );
+  }
+  if (macro.fearGreed) {
+    chips.push({ label: 'Fear & Greed (cripto)', value: `${macro.fearGreed.value} — ${macro.fearGreed.label}`, live: true });
+  }
+  return chips;
 }
 
 /* ───────────────────────── seguimiento (watchlist) ───────────────────────── */
@@ -593,35 +697,81 @@ function scoreLabelColor(label) {
   return { bg: 'oklch(0.28 0.07 25)', color: 'oklch(0.82 0.11 25)' }; // Venta
 }
 
+function sortAndFilterTickers(tickers) {
+  let list = tickers.slice();
+  if (watchState.filterSignal !== 'all') {
+    list = list.filter(ticker => watchState.data[ticker]?.scoreLabel === watchState.filterSignal);
+  }
+  const val = (ticker, key) => {
+    const d = watchState.data[ticker];
+    if (!d) return key === 'ticker' ? ticker : -Infinity; // sin datos todavía: al final
+    if (key === 'score') return d.score;
+    if (key === 'price') return d.price;
+    if (key === 'change') return d.changePct;
+    return ticker;
+  };
+  list.sort((a, b) => {
+    if (watchState.sortBy === 'ticker') return val(a, 'ticker').localeCompare(val(b, 'ticker'));
+    return val(b, watchState.sortBy) - val(a, watchState.sortBy);
+  });
+  return list;
+}
+
 function renderWatchlist() {
-  const tickers = getWatchlist();
-  if (!tickers.length) {
+  const allTickers = getWatchlist();
+  if (!allTickers.length) {
     els.watchlist.innerHTML = `
       <div class="sectiontitle">Seguimiento</div>
       <div class="card watch-empty">Todavía no agregaste activos. Buscá uno y tocá la ☆ para tenerlo siempre a mano acá (máx. ${WATCHLIST_MAX}).</div>`;
     return;
   }
+  const tickers = sortAndFilterTickers(allTickers);
   els.watchlist.innerHTML = `
-    <div class="sectiontitle">Seguimiento</div>
+    <div class="panel-header">
+      <div class="sectiontitle" style="margin-bottom:0;">Seguimiento</div>
+      <div class="watch-controls">
+        <button class="watch-alerts-btn ${alertsEnabled ? 'on' : ''}" id="watch-alerts-toggle" title="Avisar cuando un activo entra en zona de compra/venta o toca el stop">
+          ${alertsEnabled ? '🔔 Alertas activas' : '🔕 Activar alertas'}
+        </button>
+        <select class="watch-select" id="watch-sort">
+          ${SORT_OPTIONS.map(o => `<option value="${o.key}" ${watchState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        </select>
+        <select class="watch-select" id="watch-filter">
+          ${SIGNAL_FILTERS.map(s => `<option value="${esc(s)}" ${watchState.filterSignal === s ? 'selected' : ''}>${s === 'all' ? 'Todas las señales' : esc(s)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
     <div class="watch-grid">
-      ${tickers.map(ticker => {
+      ${!tickers.length ? `<div class="watch-empty">Ningún activo en seguimiento tiene la señal filtrada ahora mismo.</div>` : tickers.map(ticker => {
         const d = watchState.data[ticker];
         if (!d) {
+          if (watchState.loading.has(ticker)) {
+            return `<div class="watch-card" data-ticker="${esc(ticker)}">
+              <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
+              <div class="skel skel-line" style="width:50%; height:14px;"></div>
+              <div class="skel skel-line" style="width:70%; height:10px;"></div>
+              <div class="skel skel-line" style="width:60%; height:16px;"></div>
+              <div class="skel skel-line" style="width:40%; height:10px;"></div>
+              <div class="skel" style="width:80px; height:18px; border-radius:10px;"></div>
+            </div>`;
+          }
           return `<div class="watch-card" data-ticker="${esc(ticker)}">
             <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
             <div class="watch-ticker">${esc(ticker)}</div>
-            <div class="watch-loading">${watchState.loading.has(ticker) ? 'Cargando…' : 'Sin datos'}</div>
+            <div class="watch-loading">Sin datos</div>
           </div>`;
         }
         const up = d.changePct >= 0;
         const sig = scoreLabelColor(d.scoreLabel);
-        return `<div class="watch-card" data-ticker="${esc(ticker)}">
+        const am = d.alert ? ALERT_META[d.alert.type] : null;
+        return `<div class="watch-card ${am ? 'has-alert' : ''}" data-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
           <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
           <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
           <div class="watch-name">${esc(d.name ?? '')}</div>
           <div class="watch-price">${fmtUsd(d.price)}</div>
           <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
           <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
+          ${am ? `<div class="watch-alert" style="color:${am.color};">⚡ ${esc(am.label)}</div>` : ''}
         </div>`;
       }).join('')}
     </div>`;
@@ -638,11 +788,26 @@ function renderWatchlist() {
       renderWatchlist();
     });
   });
+
+  const sortSel = document.getElementById('watch-sort');
+  if (sortSel) sortSel.addEventListener('change', () => {
+    watchState.sortBy = sortSel.value;
+    lsSetSafe('icp_watch_sort', watchState.sortBy);
+    renderWatchlist();
+  });
+  const filterSel = document.getElementById('watch-filter');
+  if (filterSel) filterSel.addEventListener('change', () => {
+    watchState.filterSignal = filterSel.value;
+    lsSetSafe('icp_watch_filter', watchState.filterSignal);
+    renderWatchlist();
+  });
+  const alertsBtn = document.getElementById('watch-alerts-toggle');
+  if (alertsBtn) alertsBtn.addEventListener('click', toggleAlerts);
 }
 
 async function loadWatchlistData() {
   const tickers = getWatchlist();
-  const macro = await getMacroSnapshot();
+  const macro = await getMacro();
   await Promise.all(tickers.map(async (ticker) => {
     if (watchState.loading.has(ticker)) return;
     watchState.loading.add(ticker);
@@ -651,10 +816,13 @@ async function loadWatchlistData() {
       const asset = await getAsset(ticker);
       const [quote, candles] = await Promise.all([getQuote(ticker), getCandles(ticker, '1day', 220)]);
       const technical = computeTechnical(candles);
-      const scoreResult = computeScore({ technical, fundamentals: null, macro: { vix: macro?.vix ?? null }, newsSentiment: null, candles });
+      const scoreResult = computeScore({ technical, fundamentals: null, macro: { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null }, newsSentiment: null, candles });
+      const priceAlert = detectPriceAlert(quote.usd, technical);
+      notifyIfNewAlert(ticker, priceAlert);
       watchState.data[ticker] = {
         name: asset?.name ?? ticker, price: quote.usd, changePct: quote.changePct,
         score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
+        alert: priceAlert,
       };
     } catch (e) {
       console.warn('[watchlist] no se pudo cargar', ticker, e.message);
@@ -673,5 +841,8 @@ initSearch();
 loadWatchlistData();
 setInterval(renderTopbar, 30 * 1000);
 setInterval(() => { if (state.asset) renderReport(); }, 30 * 1000); // refresca textos de frescura sin re-fetch
-setInterval(() => { if (state.asset) loadReport(state.asset.ticker); }, 60 * 1000); // re-fetch datos en vivo
-setInterval(loadWatchlistData, 120 * 1000); // ciclo más largo: cada ticker de seguimiento suma requests a la API
+// Ciclos espaciados a propósito: candles/fundamentales/noticias no cambian
+// significativamente minuto a minuto, y Twelve Data free tier comparte ~8
+// req/min entre todos los que estén usando el sitio a la vez.
+setInterval(() => { if (state.asset) loadReport(state.asset.ticker); }, 180 * 1000);
+setInterval(loadWatchlistData, 180 * 1000);
