@@ -21,9 +21,13 @@ const FULL_WEIGHT = Object.values(WEIGHTS).reduce((a, b) => a + b, 0);
 
 const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
 
-function scoreTrend(t) {
+function scoreTrend(t, confluence) {
   let s = t.bullishAlign ? 0.88 : t.bearishAlign ? 0.15 : (t.price > t.ema200 ? 0.62 : 0.38);
   if (!isNaN(t.adx)) s += clamp((t.adx - 15) / 40, -0.15, 0.15);
+  // Confirmar con la tendencia semanal reduce falsas señales del ruido diario;
+  // una divergencia diario/semanal penaliza más de lo que suma una confirmación,
+  // porque el timeframe mayor manda.
+  if (confluence) s += confluence.agree ? 0.08 : -0.12;
   return clamp(s);
 }
 
@@ -82,9 +86,9 @@ function scoreLiquidity(candles) {
   return clamp(Math.log10(avgVol + 1) / 8);
 }
 
-export function computeScore({ technical, fundamentals, macro, newsSentiment, candles }) {
+export function computeScore({ technical, fundamentals, macro, newsSentiment, candles, confluence }) {
   const raw = {
-    trend: scoreTrend(technical),
+    trend: scoreTrend(technical, confluence),
     momentum: scoreMomentum(technical),
     fundamentals: scoreFundamentals(fundamentals),
     valuation: scoreValuation(fundamentals),
@@ -125,6 +129,14 @@ export function computeScore({ technical, fundamentals, macro, newsSentiment, ca
   else if (score >= 45) { scoreLabel = 'Mantener'; confidence = 'Media'; }
   else if (score >= 30) { scoreLabel = 'Reducir'; confidence = 'Media-Baja'; }
   else { scoreLabel = 'Venta'; confidence = 'Baja'; }
+
+  // Una divergencia entre el timeframe diario y el semanal es una razón real
+  // para desconfiar más de la señal — se refleja bajando un escalón la confianza.
+  if (confluence && !confluence.agree) {
+    const ladder = ['Baja', 'Media-Baja', 'Media', 'Media-Alta', 'Alta'];
+    const idx = ladder.indexOf(confidence);
+    if (idx > 0) confidence = ladder[idx - 1];
+  }
 
   return { score, scoreLabel, confidence, scoreBreakdown, coverageWeight: totalWeight, fullWeight: FULL_WEIGHT };
 }

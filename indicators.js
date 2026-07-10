@@ -222,6 +222,39 @@ export function priceActionLabel(closes, atrSeries) {
   return PRICE_ACTION.flat;
 }
 
+/** Agrupa velas diarias en semanales (lunes a domingo, UTC). Se usa cuando
+ *  el proveedor no da un timeframe semanal nativo (ej. cripto vía CoinGecko),
+ *  como confirmación de tendencia de mayor plazo sobre datos reales. */
+export function resampleWeekly(candles) {
+  const { o, h, l, c, v, t } = candles;
+  if (!t || t.length !== c.length) return null;
+  const weeks = new Map();
+  for (let i = 0; i < c.length; i++) {
+    const d = new Date(t[i] + 'T00:00:00Z');
+    if (isNaN(d.getTime())) continue;
+    const dow = (d.getUTCDay() + 6) % 7; // lunes=0
+    const monday = new Date(d); monday.setUTCDate(d.getUTCDate() - dow);
+    const key = monday.toISOString().slice(0, 10);
+    if (!weeks.has(key)) weeks.set(key, { o: o[i], h: h[i], l: l[i], c: c[i], v: v[i] || 0, t: key });
+    else {
+      const w = weeks.get(key);
+      w.h = Math.max(w.h, h[i]); w.l = Math.min(w.l, l[i]); w.c = c[i]; w.v += v[i] || 0;
+    }
+  }
+  const arr = Array.from(weeks.values());
+  return { o: arr.map(w => w.o), h: arr.map(w => w.h), l: arr.map(w => w.l), c: arr.map(w => w.c), v: arr.map(w => w.v), t: arr.map(w => w.t) };
+}
+
+/** Compara el sesgo direccional diario vs. semanal. Confirmar con el timeframe
+ *  mayor es una práctica estándar de análisis técnico — reduce falsas señales
+ *  del ruido de corto plazo. */
+export function weeklyConfluence(daily, weekly) {
+  if (!weekly) return null;
+  const dailyBias = daily.bullishAlign ? 'up' : daily.bearishAlign ? 'down' : (daily.price > daily.ema200 ? 'up' : 'down');
+  const weeklyBias = weekly.bullishAlign ? 'up' : weekly.bearishAlign ? 'down' : (weekly.price > weekly.ema50 ? 'up' : 'down');
+  return { dailyBias, weeklyBias, agree: dailyBias === weeklyBias };
+}
+
 /** Calcula el bloque técnico completo listo para el reporte. */
 export function computeTechnical(candles) {
   const { h, l, c, v } = candles;
