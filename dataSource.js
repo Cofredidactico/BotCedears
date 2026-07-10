@@ -93,7 +93,7 @@ const Mock = {
     const r = mulberry32(hsh(ticker) ^ 0x55);
     const usd = u.refPriceUsd, changePct = (r() - 0.45) * 4;
     const ccl = (await this.getCCL()).value;
-    return { usd, changePct, cedearArs: u.ratio ? usd / u.ratio * ccl : null, volumeArsM: Math.round(50 + r() * 1500), isReal: false };
+    return { usd, changePct, cedearArs: u.ratio ? usd / u.ratio * ccl : null, cedearSource: u.ratio ? 'estimated' : null, volumeArsM: Math.round(50 + r() * 1500), isReal: false };
   },
   async getCandles(ticker, tf = '1day', n = 200) {
     const u = (await getAsset(ticker)) || { refPriceUsd: 100 };
