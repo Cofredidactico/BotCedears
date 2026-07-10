@@ -1,4 +1,4 @@
-import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getMacro, getCCL } from './dataSource.js';
+import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getMacro, getCCL, getEarnings } from './dataSource.js';
 import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG } from './chart.js';
@@ -230,11 +230,24 @@ async function loadReport(ticker) {
 
   try {
     const isCripto = asset.category === 'Cripto';
-    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles] = await Promise.all([
+    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, earnings] = await Promise.all([
       getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker), getNews(ticker), getMacro(), getCCL(),
       isCripto ? Promise.resolve(null) : getCandles(ticker, '1week', 130),
       ticker === 'SPY' ? Promise.resolve(null) : getCandles('SPY', '1day', 220),
+      getEarnings(ticker),
     ]);
+
+    // Operar en la ventana de unos días antes de que la empresa reporte
+    // balance es mucho más incierto que un día normal — no predice qué va a
+    // pasar, solo baja la confianza de la señal técnica/fundamental.
+    let daysToEarnings = null;
+    if (earnings?.nextDate) {
+      // Comparar contra la medianoche UTC de hoy (no la hora exacta actual):
+      // si no, "earnings es hoy" redondeaba a -1 según qué hora del día fuera.
+      const todayMidnight = new Date(); todayMidnight.setUTCHours(0, 0, 0, 0);
+      daysToEarnings = Math.round((new Date(earnings.nextDate + 'T00:00:00Z') - todayMidnight) / 86400000);
+    }
+    const earningsSoon = daysToEarnings != null && daysToEarnings >= 0 && daysToEarnings <= 5;
 
     const now = Date.now();
     const technical = computeTechnical(candles);
@@ -258,12 +271,12 @@ async function loadReport(ticker) {
       peg: fundamentals.peg,
     } : null;
     const macroForScore = { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null };
-    const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: news?.sentimentScore ?? null, candles, confluence, sector: asset.sector });
+    const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: news?.sentimentScore ?? null, candles, confluence, sector: asset.sector, earningsSoon });
     const plan = computePlan(technical, scoreResult.score);
 
     state.report = {
       asset, quote, candles, fundamentals, news, macro, ccl,
-      technical, weeklyTechnical, confluence, marketCorrelation, ...scoreResult, plan,
+      technical, weeklyTechnical, confluence, marketCorrelation, earnings, daysToEarnings, earningsSoon, ...scoreResult, plan,
       ts: { quote: now, candles: now, fundamentals: now, news: now },
     };
 
@@ -296,7 +309,10 @@ function technicalNarrative(t, confluence) {
       ? ` El timeframe semanal confirma el sesgo ${BIAS_LABEL[confluence.dailyBias]} de corto plazo.`
       : ` Atención: el diario es ${BIAS_LABEL[confluence.dailyBias]} pero el semanal es ${BIAS_LABEL[confluence.weeklyBias]} — hay divergencia entre timeframes, señal menos confiable de lo habitual.`
     : '';
-  return alignTxt + rsiTxt + structTxt + srTxt + ` ${t.priceAction.full}` + confluenceTxt;
+  const obvTxt = t.obvConfirms === false ? ' El volumen (OBV) no acompaña el movimiento de precio, señal de alerta.'
+    : t.obvConfirms === true ? ' El volumen (OBV) confirma la dirección del precio.' : '';
+  const divTxt = t.divergence ? ` ${t.divergence.label}` : '';
+  return alignTxt + rsiTxt + structTxt + srTxt + ` ${t.priceAction.full}` + confluenceTxt + obvTxt + divTxt;
 }
 
 function fundamentalNarrative(f, sector) {
@@ -323,12 +339,18 @@ function conclusionText(r) {
 }
 
 function risksAndCatalysts(r) {
-  const { technical: t, fundamentals: f, macro, confluence } = r;
+  const { technical: t, fundamentals: f, macro, confluence, earningsSoon, daysToEarnings } = r;
   const risks = [];
   const catalysts = [];
 
   if (confluence && !confluence.agree) risks.push(`Divergencia entre timeframes: el diario es ${BIAS_LABEL[confluence.dailyBias]} pero el semanal es ${BIAS_LABEL[confluence.weeklyBias]} — la señal de corto plazo puede no sostenerse.`);
   if (confluence && confluence.agree) catalysts.push(`El timeframe semanal confirma la tendencia ${BIAS_LABEL[confluence.dailyBias]} del diario, mayor consistencia entre plazos.`);
+
+  if (t.divergence) risks.push(t.divergence.label);
+  if (t.obvConfirms === false) risks.push('El volumen (OBV) no acompaña el movimiento de precio reciente — mayor probabilidad de que sea una ruptura falsa.');
+  if (t.obvConfirms === true) catalysts.push('El volumen (OBV) confirma la dirección del precio, respalda la lectura técnica.');
+
+  if (earningsSoon) risks.push(`La empresa reporta balance en ${daysToEarnings === 0 ? 'el día de hoy' : `${daysToEarnings} día(s)`} — mayor volatilidad esperada e incertidumbre no capturada por el análisis técnico.`);
 
   if (t.atr / t.price > 0.03) risks.push(`Volatilidad relativa alta: ATR(14) equivale a ${(t.atr / t.price * 100).toFixed(1)}% del precio, por encima de lo típico.`);
   else catalysts.push(`Volatilidad relativa contenida: ATR(14) equivale a ${(t.atr / t.price * 100).toFixed(1)}% del precio.`);
@@ -415,7 +437,7 @@ function renderReport() {
   }
 
   const r = state.report;
-  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation } = r;
+  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation, earnings, daysToEarnings, earningsSoon } = r;
 
   const trendUp = quote.changePct >= 0;
   const trendBg = trendUp ? 'oklch(0.28 0.06 150)' : 'oklch(0.28 0.06 25)';
@@ -517,7 +539,7 @@ function renderReport() {
         </div>
         <div class="card panel-card">
           <div class="metrics-grid">
-            ${fundamentalMetricRows(f).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
+            ${fundamentalMetricRows(f, earnings, daysToEarnings).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
           </div>
           <div class="narrative">${esc(fundamentalNarrative(f, asset.sector))}</div>
         </div>
@@ -636,7 +658,8 @@ function technicalMetricRows(t, confluence, marketCorrelation) {
     { label: 'ATR (14)', value: fmtNum(t.atr) },
     { label: 'VWAP (rolling 20)', value: t.hasVolume ? fmtNum(t.vwap) : 'N/D — sin volumen' },
     { label: 'Bandas de Bollinger', value: t.bbPos ?? 'N/D' },
-    { label: 'OBV', value: t.obvTrend },
+    { label: 'OBV', value: t.obvTrend + (t.obvConfirms === true ? ' ✓ confirma' : t.obvConfirms === false ? ' ⚠ no confirma' : '') },
+    { label: 'Divergencia RSI', value: t.divergence ? (t.divergence.type === 'bearish' ? '⚠ Bajista' : '⚠ Alcista') : 'Sin divergencia' },
     { label: 'Soporte / Resistencia', value: `$${t.support.toFixed(2)} / $${t.resistance.toFixed(2)}` },
     { label: 'Acción de precio', value: t.priceAction.short },
     { label: 'Fibonacci', value: nearestFib ? `${nearestFib[0]} ≈ $${nearestFib[1].toFixed(2)}` : 'N/D' },
@@ -644,11 +667,17 @@ function technicalMetricRows(t, confluence, marketCorrelation) {
   ];
 }
 
-function fundamentalMetricRows(f) {
+function fundamentalMetricRows(f, earnings, daysToEarnings) {
   if (!f?.hasData) return [{ label: 'Cobertura', value: 'Sin datos fundamentales para este ticker' }];
   const pct = (v) => v == null ? 'N/D' : fmtPct(v);
   const x = (v) => v == null ? 'N/D' : `${v.toFixed(1)}x`;
+  const earningsValue = !earnings?.nextDate ? 'N/D'
+    : daysToEarnings < 0 ? `Reportó el ${earnings.nextDate}`
+    : daysToEarnings === 0 ? '⚠ Hoy'
+    : daysToEarnings <= 5 ? `⚠ En ${daysToEarnings} día${daysToEarnings === 1 ? '' : 's'} (${earnings.nextDate})`
+    : `${earnings.nextDate} (en ${daysToEarnings} días)`;
   return [
+    { label: 'Próximo reporte (earnings)', value: earningsValue },
     { label: 'Revenue Growth (YoY)', value: pct(f.revenueGrowth) },
     { label: 'EPS Growth (YoY)', value: pct(f.epsGrowth) },
     { label: 'PE / Forward PE', value: `${f.peTTM != null ? f.peTTM.toFixed(1) + 'x' : 'N/D'} / ${f.peForward != null ? f.peForward.toFixed(1) + 'x' : 'N/D'}` },

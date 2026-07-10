@@ -115,6 +115,7 @@ const Mock = {
   },
   async getFundamentals() { return { hasData: false, isReal: false }; },
   async getNews() { return { items: [], sentimentScore: null, isReal: false }; },
+  async getEarnings() { return { nextDate: null, isReal: false }; },
 };
 
 /* ═════════════════════════════ LIVE ═══════════════════════════════════ */
@@ -158,6 +159,13 @@ const Live = {
       const r = await fetch(`${API_BASE}/macro`);
       if (!r.ok) throw new Error('macro ' + r.status);
       return r.json();
+    });
+  },
+  async getEarnings(ticker) {
+    return cached('e:' + ticker, 6 * 60 * 60 * 1000, async () => {
+      const r = await fetch(`${API_BASE}/earnings?symbol=${encodeURIComponent(ticker)}`);
+      if (!r.ok) throw new Error('earnings ' + r.status);
+      const d = await r.json(); return { ...d, isReal: true };
     });
   },
 };
@@ -223,6 +231,12 @@ export async function getFundamentals(ticker) {
 
 export async function getNews(ticker) {
   return withFallback('getNews', [ticker], Mock.getNews.bind(Mock));
+}
+
+export async function getEarnings(ticker) {
+  const asset = await getAsset(ticker);
+  if (asset?.category === 'Cripto' || asset?.category === 'ETF') return { nextDate: null, isReal: true }; // no aplica
+  return withFallback('getEarnings', [ticker], Mock.getEarnings.bind(Mock));
 }
 
 /** Combina el snapshot manual (macro.json) con la fuente en vivo (/api/macro:

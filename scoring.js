@@ -28,13 +28,22 @@ function scoreTrend(t, confluence) {
   // una divergencia diario/semanal penaliza más de lo que suma una confirmación,
   // porque el timeframe mayor manda.
   if (confluence) s += confluence.agree ? 0.08 : -0.12;
+  // Un movimiento de precio sin que el volumen (OBV) lo acompañe es la causa
+  // más común de rupturas falsas — penaliza más de lo que suma confirmar.
+  if (t.obvConfirms === true) s += 0.06;
+  else if (t.obvConfirms === false) s -= 0.10;
   return clamp(s);
 }
 
 function scoreMomentum(t) {
   const rsiScore = isNaN(t.rsi) ? 0.5 : clamp((t.rsi - 30) / 40);
   const macdScore = isNaN(t.hist) ? 0.5 : (t.hist > 0 ? 0.65 : 0.35);
-  return clamp(rsiScore * 0.6 + macdScore * 0.4);
+  let s = clamp(rsiScore * 0.6 + macdScore * 0.4);
+  // Divergencia precio/RSI: señal de agotamiento de la tendencia actual —
+  // penaliza el momentum en la dirección donde el mercado suele fallar.
+  if (t.divergence?.type === 'bearish') s -= 0.15;
+  if (t.divergence?.type === 'bullish') s += 0.10;
+  return clamp(s);
 }
 
 function scoreFundamentals(f) {
@@ -121,7 +130,7 @@ function scoreLiquidity(candles) {
   return clamp(Math.log10(avgVol + 1) / 8);
 }
 
-export function computeScore({ technical, fundamentals, macro, newsSentiment, candles, confluence, sector }) {
+export function computeScore({ technical, fundamentals, macro, newsSentiment, candles, confluence, sector, earningsSoon }) {
   const raw = {
     trend: scoreTrend(technical, confluence),
     momentum: scoreMomentum(technical),
@@ -165,12 +174,16 @@ export function computeScore({ technical, fundamentals, macro, newsSentiment, ca
   else if (score >= 30) { scoreLabel = 'Reducir'; confidence = 'Media-Baja'; }
   else { scoreLabel = 'Venta'; confidence = 'Baja'; }
 
-  // Una divergencia entre el timeframe diario y el semanal es una razón real
-  // para desconfiar más de la señal — se refleja bajando un escalón la confianza.
-  if (confluence && !confluence.agree) {
-    const ladder = ['Baja', 'Media-Baja', 'Media', 'Media-Alta', 'Alta'];
-    const idx = ladder.indexOf(confidence);
-    if (idx > 0) confidence = ladder[idx - 1];
+  // Cada motivo real de menor confiabilidad baja un escalón la etiqueta de
+  // Confianza (nunca el score compuesto): divergencia entre timeframes,
+  // reporte de balance próximo (mayor incertidumbre que un día normal).
+  const ladder = ['Baja', 'Media-Baja', 'Media', 'Media-Alta', 'Alta'];
+  let downgrades = 0;
+  if (confluence && !confluence.agree) downgrades++;
+  if (earningsSoon) downgrades++;
+  if (downgrades > 0) {
+    const idx = Math.max(0, ladder.indexOf(confidence) - downgrades);
+    confidence = ladder[idx];
   }
 
   return { score, scoreLabel, confidence, scoreBreakdown, coverageWeight: totalWeight, fullWeight: FULL_WEIGHT };
