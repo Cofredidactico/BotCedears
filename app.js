@@ -1,5 +1,5 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getMacroSnapshot, getCCL } from './dataSource.js';
-import { computeTechnical } from './indicators.js';
+import { computeTechnical, resampleWeekly, weeklyConfluence } from './indicators.js';
 import { computeScore, computePlan } from './scoring.js';
 import { renderPriceChartSVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
@@ -131,12 +131,22 @@ async function loadReport(ticker) {
   state.asset = asset;
 
   try {
-    const [quote, candles, fundamentals, news, macro, ccl] = await Promise.all([
+    const isCripto = asset.category === 'Cripto';
+    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative] = await Promise.all([
       getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker), getNews(ticker), getMacroSnapshot(), getCCL(),
+      isCripto ? Promise.resolve(null) : getCandles(ticker, '1week', 130),
     ]);
 
     const now = Date.now();
     const technical = computeTechnical(candles);
+
+    // Confirmación con el timeframe semanal: nativo (Twelve Data) para
+    // acciones/CEDEARs/ETFs, resampleado de las velas diarias para cripto
+    // (CoinGecko no ofrece timeframe semanal en el free tier).
+    const weeklyCandles = isCripto ? resampleWeekly(candles) : weeklyNative;
+    const weeklyTechnical = weeklyCandles && weeklyCandles.c.length >= 20 ? computeTechnical(weeklyCandles) : null;
+    const confluence = weeklyTechnical ? weeklyConfluence(technical, weeklyTechnical) : null;
+
     const fundForScore = fundamentals?.hasData ? {
       hasData: true,
       revenueGrowth: fundamentals.revenueGrowth != null ? fundamentals.revenueGrowth : null,
@@ -146,12 +156,12 @@ async function loadReport(ticker) {
       peg: fundamentals.peg,
     } : null;
     const macroForScore = { vix: macro?.vix ?? null };
-    const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: news?.sentimentScore ?? null, candles });
+    const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: news?.sentimentScore ?? null, candles, confluence });
     const plan = computePlan(technical, scoreResult.score);
 
     state.report = {
       asset, quote, candles, fundamentals, news, macro, ccl,
-      technical, ...scoreResult, plan,
+      technical, weeklyTechnical, confluence, ...scoreResult, plan,
       ts: { quote: now, candles: now, fundamentals: now, news: now },
     };
     state.loading = false;
@@ -165,14 +175,21 @@ async function loadReport(ticker) {
 }
 
 /* ───────────────────────── narrativas generadas de datos reales ───────────────────────── */
-function technicalNarrative(t) {
+const BIAS_LABEL = { up: 'alcista', down: 'bajista' };
+
+function technicalNarrative(t, confluence) {
   const alignTxt = t.bullishAlign ? 'Las EMAs 20/50/100/200 están alineadas en orden alcista.'
     : t.bearishAlign ? 'Las EMAs 20/50/100/200 están alineadas en orden bajista.'
     : 'Las EMAs no muestran alineación direccional clara — el precio se ubica ' + (t.price > t.ema200 ? 'por encima' : 'por debajo') + ' de la EMA200.';
   const rsiTxt = isNaN(t.rsi) ? '' : (t.rsi > 70 ? ` RSI en ${t.rsi.toFixed(0)}, zona de sobrecompra.` : t.rsi < 30 ? ` RSI en ${t.rsi.toFixed(0)}, zona de sobreventa.` : ` RSI en ${t.rsi.toFixed(0)}, terreno neutral.`);
   const structTxt = ` ${t.structure.label}`;
   const srTxt = ` Soporte de referencia en $${t.support.toFixed(2)} y resistencia en $${t.resistance.toFixed(2)}.`;
-  return alignTxt + rsiTxt + structTxt + srTxt + ` ${t.priceAction.full}`;
+  const confluenceTxt = confluence
+    ? confluence.agree
+      ? ` El timeframe semanal confirma el sesgo ${BIAS_LABEL[confluence.dailyBias]} de corto plazo.`
+      : ` Atención: el diario es ${BIAS_LABEL[confluence.dailyBias]} pero el semanal es ${BIAS_LABEL[confluence.weeklyBias]} — hay divergencia entre timeframes, señal menos confiable de lo habitual.`
+    : '';
+  return alignTxt + rsiTxt + structTxt + srTxt + ` ${t.priceAction.full}` + confluenceTxt;
 }
 
 function fundamentalNarrative(f) {
@@ -192,9 +209,12 @@ function conclusionText(r) {
 }
 
 function risksAndCatalysts(r) {
-  const { technical: t, fundamentals: f, macro } = r;
+  const { technical: t, fundamentals: f, macro, confluence } = r;
   const risks = [];
   const catalysts = [];
+
+  if (confluence && !confluence.agree) risks.push(`Divergencia entre timeframes: el diario es ${BIAS_LABEL[confluence.dailyBias]} pero el semanal es ${BIAS_LABEL[confluence.weeklyBias]} — la señal de corto plazo puede no sostenerse.`);
+  if (confluence && confluence.agree) catalysts.push(`El timeframe semanal confirma la tendencia ${BIAS_LABEL[confluence.dailyBias]} del diario, mayor consistencia entre plazos.`);
 
   if (t.atr / t.price > 0.03) risks.push(`Volatilidad relativa alta: ATR(14) equivale a ${(t.atr / t.price * 100).toFixed(1)}% del precio, por encima de lo típico.`);
   else catalysts.push(`Volatilidad relativa contenida: ATR(14) equivale a ${(t.atr / t.price * 100).toFixed(1)}% del precio.`);
@@ -250,7 +270,7 @@ function renderReport() {
   }
 
   const r = state.report;
-  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight } = r;
+  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence } = r;
 
   const trendUp = quote.changePct >= 0;
   const trendBg = trendUp ? 'oklch(0.28 0.06 150)' : 'oklch(0.28 0.06 25)';
@@ -337,9 +357,9 @@ function renderReport() {
         </div>
         <div class="card panel-card">
           <div class="metrics-grid">
-            ${technicalMetricRows(t).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
+            ${technicalMetricRows(t, confluence).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
           </div>
-          <div class="narrative">${esc(technicalNarrative(t))}</div>
+          <div class="narrative">${esc(technicalNarrative(t, confluence))}</div>
         </div>
       </div>
       <div>
@@ -445,9 +465,13 @@ function macroFreshness(macro) {
   return { text: `Snapshot manual (hace ${Math.round(ageDays)}d)`, color: GREEN };
 }
 
-function technicalMetricRows(t) {
+function technicalMetricRows(t, confluence) {
   const nearestFib = Object.entries(t.fib.levels).sort((a, b) => Math.abs(a[1] - t.price) - Math.abs(b[1] - t.price))[0];
+  const confluenceValue = !confluence ? 'N/D — historial semanal insuficiente'
+    : confluence.agree ? `✓ Confirmada (${BIAS_LABEL[confluence.dailyBias]})`
+    : `⚠ Divergencia (D:${BIAS_LABEL[confluence.dailyBias]} / S:${BIAS_LABEL[confluence.weeklyBias]})`;
   return [
+    { label: 'Confirmación semanal', value: confluenceValue },
     { label: 'EMA 20 / 50', value: `${fmtNum(t.ema20)} / ${fmtNum(t.ema50)}` },
     { label: 'EMA 100 / 200', value: `${fmtNum(t.ema100)} / ${fmtNum(t.ema200)}` },
     { label: 'RSI (14)', value: isNaN(t.rsi) ? 'N/D' : `${t.rsi.toFixed(0)} — ${t.rsi > 70 ? 'sobrecompra' : t.rsi < 30 ? 'sobreventa' : 'neutral'}` },
