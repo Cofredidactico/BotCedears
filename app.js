@@ -18,6 +18,21 @@ const els = {
 
 const state = { query: '', asset: null, report: null, loading: false, error: null };
 function lsGetSafe(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } }
+
+/* ───────────────────────── dashboard / radar ───────────────────────── */
+// Universo curado (no todo universe.json): rankear ~230 tickers en vivo
+// pegaría contra el límite de Twelve Data (free tier, ~8 req/min) en cada
+// visita. Se eligió un subconjunto líquido y representativo de categorías
+// (tech US, bancos/energía AR, ETFs, cripto) — ampliar cuando haya más
+// margen de API (key paga o un snapshot server-side con cron).
+const DASHBOARD_UNIVERSE = [
+  'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META', 'AMZN', 'AMD', 'TSM',
+  'JPM', 'V', 'MA', 'XOM', 'KO', 'NFLX', 'CAT',
+  'MELI', 'GGAL', 'BMA', 'YPF',
+  'SPY', 'QQQ', 'GLD',
+  'BTC', 'ETH',
+];
+const dashState = { data: {}, loading: new Set(), started: false };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
 
 const watchState = {
@@ -147,7 +162,7 @@ function renderTopbar() {
 
   const r = state.report;
   let conn;
-  if (!r) conn = { text: 'Esperando selección de activo', color: AMBER, border: 'oklch(0.40 0.06 85)' };
+  if (!r) conn = { text: 'Dashboard — buscá un activo para el informe completo', color: AMBER, border: 'oklch(0.40 0.06 85)' };
   else if (r.quote.isReal && r.candles.isReal) conn = { text: 'Conectado a fuente de datos en vivo', color: GREEN, border: 'oklch(0.40 0.08 150)' };
   else if (r.quote.isReal || r.candles.isReal) conn = { text: 'Datos parcialmente en vivo — alguna fuente cayó a caché', color: AMBER, border: 'oklch(0.40 0.06 85)' };
   else conn = { text: 'Sin conexión al proveedor de datos — mostrando último valor disponible', color: RED, border: 'oklch(0.40 0.08 25)' };
@@ -428,11 +443,9 @@ function renderReport() {
     return;
   }
   if (!state.report) {
-    els.report.innerHTML = `
-      <div class="emptycard">
-        <div class="emptycard-title">Elegí un activo para ver el informe completo</div>
-        <div class="emptycard-body">Buscá por ticker o nombre arriba. El análisis técnico, fundamental, macro, noticias, score y plan operativo se calculan en el momento con datos reales.</div>
-      </div>`;
+    els.report.innerHTML = dashboardHTML();
+    wireDashboardEvents();
+    if (!dashState.started) loadDashboardData();
     return;
   }
 
@@ -746,6 +759,82 @@ function sortAndFilterTickers(tickers) {
   return list;
 }
 
+function dashCardHTML(ticker, d) {
+  const up = d.changePct >= 0;
+  const sig = scoreLabelColor(d.scoreLabel);
+  return `<div class="watch-card" data-dash-ticker="${esc(ticker)}">
+    <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
+    <div class="watch-name">${esc(d.name ?? '')}</div>
+    <div class="watch-price">${fmtUsd(d.price)}</div>
+    <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
+    <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
+  </div>`;
+}
+
+function dashboardHTML() {
+  const entries = DASHBOARD_UNIVERSE.map(ticker => ({ ticker, d: dashState.data[ticker] }));
+  const loaded = entries.filter(e => e.d);
+  const loadingCount = DASHBOARD_UNIVERSE.length - loaded.length;
+
+  const opportunities = loaded.slice().sort((a, b) => b.d.score - a.d.score).slice(0, 6);
+
+  const bySignal = {};
+  for (const e of loaded) bySignal[e.d.scoreLabel] = (bySignal[e.d.scoreLabel] || 0) + 1;
+
+  const bySector = {};
+  for (const e of loaded) {
+    if (!e.d.sector) continue;
+    if (!bySector[e.d.sector]) bySector[e.d.sector] = { sum: 0, count: 0 };
+    bySector[e.d.sector].sum += e.d.score; bySector[e.d.sector].count++;
+  }
+  const sectorRows = Object.entries(bySector)
+    .map(([sector, s]) => ({ sector, avg: Math.round(s.sum / s.count) }))
+    .sort((a, b) => b.avg - a.avg);
+
+  const byChange = loaded.slice().sort((a, b) => b.d.changePct - a.d.changePct);
+  const gainers = byChange.slice(0, 3);
+  const losers = byChange.slice(-3).reverse();
+
+  const radarRow = (label, valueHtml) => `<div class="dash-radar-row"><span class="dash-radar-label">${label}</span><span class="dash-radar-count">${valueHtml}</span></div>`;
+
+  return `
+    <div class="sectiontitle">Dashboard</div>
+    <div class="dash-intro">Oportunidades del día y radar del mercado sobre un universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos (acciones US, CEDEARs argentinos, ETFs y cripto) — no es todo el universo buscable, para no exceder el límite de requests del proveedor de datos gratuito. Elegí cualquiera para ver el informe completo, o buscá otro activo arriba.</div>
+
+    <div class="sectiontitle" style="margin-top:28px;">Oportunidades del Día</div>
+    ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
+    ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}
+
+    <div class="sectiontitle">Radar del Mercado</div>
+    <div class="dash-radar-grid">
+      <div class="card dash-radar-card">
+        <div class="dash-radar-title">Señales</div>
+        ${['Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'].map(label => {
+          const sig = scoreLabelColor(label);
+          return `<div class="dash-radar-row"><span class="dash-radar-dot" style="background:${sig.color};"></span><span class="dash-radar-label">${label}</span><span class="dash-radar-count">${bySignal[label] || 0}</span></div>`;
+        }).join('')}
+      </div>
+      <div class="card dash-radar-card">
+        <div class="dash-radar-title">Score promedio por sector</div>
+        ${sectorRows.length ? sectorRows.map(s => radarRow(esc(s.sector), s.avg)).join('') : '<div class="dash-loading-note">Cargando…</div>'}
+      </div>
+      <div class="card dash-radar-card">
+        <div class="dash-radar-title">Mayores subas</div>
+        ${gainers.length ? gainers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count up">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
+      </div>
+      <div class="card dash-radar-card">
+        <div class="dash-radar-title">Mayores bajas</div>
+        ${losers.length ? losers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count down">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
+      </div>
+    </div>`;
+}
+
+function wireDashboardEvents() {
+  els.report.querySelectorAll('[data-dash-ticker]').forEach(el => {
+    el.addEventListener('click', () => selectTicker(el.dataset.dashTicker));
+  });
+}
+
 function renderWatchlist() {
   const allTickers = getWatchlist();
   if (!allTickers.length) {
@@ -834,6 +923,27 @@ function renderWatchlist() {
   if (alertsBtn) alertsBtn.addEventListener('click', toggleAlerts);
 }
 
+/** Score liviano (quote + candles diarios, sin fundamentales/noticias/semanal
+ *  para no multiplicar requests) — usado tanto por Seguimiento como por el
+ *  Dashboard, que recorren listas de tickers en paralelo. */
+async function computeLightSignal(ticker, macro) {
+  const asset = await getAsset(ticker);
+  const [quote, candles] = await Promise.all([getQuote(ticker), getCandles(ticker, '1day', 220)]);
+  const technical = computeTechnical(candles);
+  const scoreResult = computeScore({
+    technical, fundamentals: null,
+    macro: { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null },
+    newsSentiment: null, candles,
+  });
+  const priceAlert = detectPriceAlert(quote.usd, technical);
+  return {
+    name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
+    price: quote.usd, changePct: quote.changePct,
+    score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
+    alert: priceAlert,
+  };
+}
+
 async function loadWatchlistData() {
   const tickers = getWatchlist();
   const macro = await getMacro();
@@ -842,22 +952,32 @@ async function loadWatchlistData() {
     watchState.loading.add(ticker);
     renderWatchlist();
     try {
-      const asset = await getAsset(ticker);
-      const [quote, candles] = await Promise.all([getQuote(ticker), getCandles(ticker, '1day', 220)]);
-      const technical = computeTechnical(candles);
-      const scoreResult = computeScore({ technical, fundamentals: null, macro: { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null }, newsSentiment: null, candles });
-      const priceAlert = detectPriceAlert(quote.usd, technical);
-      notifyIfNewAlert(ticker, priceAlert);
-      watchState.data[ticker] = {
-        name: asset?.name ?? ticker, price: quote.usd, changePct: quote.changePct,
-        score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
-        alert: priceAlert,
-      };
+      const signal = await computeLightSignal(ticker, macro);
+      notifyIfNewAlert(ticker, signal.alert);
+      watchState.data[ticker] = signal;
     } catch (e) {
       console.warn('[watchlist] no se pudo cargar', ticker, e.message);
     } finally {
       watchState.loading.delete(ticker);
       renderWatchlist();
+    }
+  }));
+}
+
+async function loadDashboardData() {
+  dashState.started = true;
+  const macro = await getMacro();
+  await Promise.all(DASHBOARD_UNIVERSE.map(async (ticker) => {
+    if (dashState.loading.has(ticker)) return;
+    dashState.loading.add(ticker);
+    if (!state.asset) renderReport(); // el dashboard solo se ve en la pantalla de inicio
+    try {
+      dashState.data[ticker] = await computeLightSignal(ticker, macro);
+    } catch (e) {
+      console.warn('[dashboard] no se pudo cargar', ticker, e.message);
+    } finally {
+      dashState.loading.delete(ticker);
+      if (!state.asset) renderReport();
     }
   }));
 }
@@ -868,6 +988,12 @@ renderReport();
 renderWatchlist();
 initSearch();
 loadWatchlistData();
+document.getElementById('wordmark-home')?.addEventListener('click', () => {
+  state.asset = null; state.report = null; state.error = null; state.loading = false;
+  els.tickerchip.textContent = '—';
+  renderTopbar();
+  renderReport();
+});
 setInterval(renderTopbar, 30 * 1000);
 setInterval(() => { if (state.asset) renderReport(); }, 30 * 1000); // refresca textos de frescura sin re-fetch
 // Ciclos espaciados a propósito: candles/fundamentales/noticias no cambian
@@ -875,3 +1001,4 @@ setInterval(() => { if (state.asset) renderReport(); }, 30 * 1000); // refresca 
 // req/min entre todos los que estén usando el sitio a la vez.
 setInterval(() => { if (state.asset) loadReport(state.asset.ticker); }, 180 * 1000);
 setInterval(loadWatchlistData, 180 * 1000);
+setInterval(() => { if (!state.asset) loadDashboardData(); }, 180 * 1000);

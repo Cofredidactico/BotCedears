@@ -79,6 +79,21 @@ a { color: inherit; }
 .star-btn:hover { color: oklch(0.78 0.11 85); }
 .star-btn-lg { font-size: 20px; margin-left: auto; }
 
+/* ---------- Dashboard / Radar ---------- */
+.dash-intro { font-size: 13px; color: oklch(0.60 0.01 70); line-height: 1.6; max-width: 760px; margin-bottom: 8px; }
+.dash-loading-note { font-size: 12px; color: oklch(0.55 0.01 70); margin: 8px 0 24px 0; }
+.dash-radar-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 40px; }
+.dash-radar-card { padding: 18px 20px; }
+.dash-radar-title { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: oklch(0.58 0.01 70); margin-bottom: 12px; }
+.dash-radar-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid oklch(0.25 0.008 60); font-size: 13px; }
+.dash-radar-row:last-child { border-bottom: none; }
+.dash-radar-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.dash-radar-label { flex: 1; color: oklch(0.75 0.01 75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-radar-count { font-family: 'IBM Plex Mono', monospace; color: oklch(0.85 0.01 80); }
+.dash-radar-count.up { color: oklch(0.72 0.13 150); }
+.dash-radar-count.down { color: oklch(0.72 0.13 25); }
+@media (max-width: 860px) { .dash-radar-grid { grid-template-columns: 1fr 1fr; } }
+
 /* ---------- Seguimiento (watchlist) ---------- */
 .watch-empty { padding: 20px 24px; font-size: 13px; color: oklch(0.58 0.01 70); margin-bottom: 28px; }
 .watch-controls { display: flex; gap: 8px; flex-wrap: wrap; }
