@@ -1,7 +1,7 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings } from './dataSource.js';
 import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
-import { renderPriceChartSVG, renderRadarSVG } from './chart.js';
+import { renderPriceChartSVG, renderRadarSVG, wireChartHover } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
 
@@ -29,11 +29,13 @@ function lsGetSafe(key, fallback) { try { return localStorage.getItem(key) || fa
 // pegaría contra el límite de Twelve Data (free tier, ~8 req/min) en cada
 // visita. Se eligió un subconjunto líquido y representativo de categorías
 // (tech US, bancos/energía AR, ETFs, cripto) — ampliar cuando haya más
-// margen de API (key paga o un snapshot server-side con cron).
+// margen de API (key paga o un snapshot server-side con cron). Se carga en
+// lotes (ver loadDashboardData) para no disparar más pedidos concurrentes
+// de los que el free tier de Twelve Data tolera de golpe.
 const DASHBOARD_UNIVERSE = [
   'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META', 'AMZN', 'AMD', 'TSM',
   'JPM', 'V', 'MA', 'XOM', 'KO', 'NFLX', 'CAT',
-  'MELI', 'GGAL', 'BMA', 'YPF',
+  'MELI', 'GGAL', 'BMA', 'YPF', 'PAM', 'CEPU', 'TGS', 'SUPV', 'IRS', 'CRESY', 'LOMA', 'EDN',
   'SPY', 'QQQ', 'GLD',
   'BTC', 'ETH',
 ];
@@ -819,6 +821,9 @@ function renderReport() {
   els.report.querySelectorAll('.chart-tab').forEach(btn => {
     btn.addEventListener('click', () => loadChartTf(btn.dataset.tf));
   });
+  const chartWrap = els.report.querySelector('.chart-svg-wrap');
+  const chartEntry = chartState.cache[chartState.tf];
+  if (chartWrap && chartEntry) wireChartHover(chartWrap, chartEntry.candles);
 }
 
 function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -1080,15 +1085,39 @@ function renderSidebarMarket() {
   });
 }
 
+function sparklineSVG(closes, up) {
+  if (!closes || closes.length < 2) return '';
+  const w = 120, h = 34, pad = 2;
+  const min = Math.min(...closes), max = Math.max(...closes);
+  const range = (max - min) || 1;
+  const stepX = (w - pad * 2) / (closes.length - 1);
+  const pts = closes.map((c, i) => {
+    const x = pad + i * stepX;
+    const y = h - pad - ((c - min) / range) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const color = up ? 'oklch(0.76 0.18 152)' : 'oklch(0.70 0.21 23)';
+  const linePath = `M${pts.join(' L')}`;
+  const areaPath = `${linePath} L${(w - pad).toFixed(1)},${(h - pad).toFixed(1)} L${pad.toFixed(1)},${(h - pad).toFixed(1)} Z`;
+  return `<svg class="watch-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <path d="${areaPath}" fill="${color}" fill-opacity="0.14" stroke="none"/>
+    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.6"/>
+  </svg>`;
+}
+
 function dashCardHTML(ticker, d) {
   const up = d.changePct >= 0;
   const sig = scoreLabelColor(d.scoreLabel);
-  return `<div class="watch-card" data-dash-ticker="${esc(ticker)}">
+  const am = d.alert ? ALERT_META[d.alert.type] : null;
+  return `<div class="watch-card ${am ? 'has-alert' : ''}" data-dash-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
     <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
     <div class="watch-name">${esc(d.name ?? '')}</div>
     <div class="watch-price">${fmtUsd(d.price)}</div>
     <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
+    ${sparklineSVG(d.sparkline, up)}
     <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
+    ${d.highlight ? `<div class="watch-highlight">${esc(d.highlight)}</div>` : ''}
+    ${am ? `<div class="watch-alert" style="color:${am.color};">⚡ ${esc(am.label)}</div>` : ''}
   </div>`;
 }
 
@@ -1098,6 +1127,7 @@ function dashboardHTML() {
   const loadingCount = DASHBOARD_UNIVERSE.length - loaded.length;
 
   const opportunities = loaded.slice().sort((a, b) => b.d.score - a.d.score).slice(0, 6);
+  const buyZone = loaded.filter(e => e.d.alert?.type === 'buy').sort((a, b) => b.d.score - a.d.score).slice(0, 6);
 
   const bySignal = {};
   for (const e of loaded) bySignal[e.d.scoreLabel] = (bySignal[e.d.scoreLabel] || 0) + 1;
@@ -1125,6 +1155,10 @@ function dashboardHTML() {
     ${sectionTitleHTML('Oportunidades del Día', 'trend', 'margin-top:28px;')}
     ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
     ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}
+
+    ${sectionTitleHTML('En Zona de Compra Ahora', 'target')}
+    <div class="dash-intro" style="margin-bottom:14px;">Activos del universo curado cuyo precio está, ahora mismo, en zona de compra o recién rompió el soporte según el análisis técnico (mismo criterio que las alertas de Seguimiento) — no es una recomendación, es dónde está el precio respecto al plan operativo de cada uno.</div>
+    ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : !buyZone.length ? `<div class="card watch-empty">Ningún activo del universo curado está en zona de compra en este momento.</div>` : `<div class="watch-grid">${buyZone.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
 
     ${sectionTitleHTML('Radar del Mercado', 'radar')}
     <div class="dash-radar-grid">
@@ -1767,7 +1801,23 @@ async function computeLightSignal(ticker, macro) {
     cedearSource: quote.cedearSource ?? null, // 'live' (precio real BYMA) | 'estimated' (vía CCL) | null
     score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
     alert: priceAlert,
+    sparkline: candles.c.slice(-30), // últimos cierres reales, ya obtenidos acá — sin pedidos extra
+    highlight: technicalHighlight(technical),
   };
+}
+
+/** Un solo motivo técnico real, el más relevante disponible — no una lista
+ *  completa (esa vive en la ficha del activo), solo el titular para tarjetas
+ *  compactas del Dashboard. */
+function technicalHighlight(t) {
+  if (t.divergence) return t.divergence.label;
+  if (t.obvConfirms === false) return 'El volumen (OBV) no confirma el movimiento de precio.';
+  if (!isNaN(t.rsi) && t.rsi > 70) return `RSI en ${t.rsi.toFixed(0)} — zona de sobrecompra.`;
+  if (!isNaN(t.rsi) && t.rsi < 30) return `RSI en ${t.rsi.toFixed(0)} — zona de sobreventa.`;
+  if (t.bullishAlign) return 'EMAs 20/50/100/200 alineadas en orden alcista.';
+  if (t.bearishAlign) return 'EMAs 20/50/100/200 alineadas en orden bajista.';
+  if (t.structure?.bullish != null) return t.structure.label;
+  return t.priceAction?.short ?? 'Sin señal técnica destacada.';
 }
 
 // Seguimiento no tiene una sola página fija: alimenta Watchlist, Alertas y
@@ -1797,22 +1847,34 @@ async function loadWatchlistData() {
   }));
 }
 
+// Lotes de 8 (no todo el universo junto): el free tier de Twelve Data
+// comparte ~8 req/min entre todo el sitio, así que tirar 30 pedidos de
+// golpe en un cache frío hace que varios caigan a demo por rate limit —
+// justo lo que se quiere evitar. Entre lote y lote se espera un toque para
+// repartir la carga en la ventana del minuto.
+const DASHBOARD_BATCH_SIZE = 8;
+const DASHBOARD_BATCH_DELAY_MS = 4000;
+
 async function loadDashboardData() {
   dashState.started = true;
   const macro = await getMacro();
-  await Promise.all(DASHBOARD_UNIVERSE.map(async (ticker) => {
-    if (dashState.loading.has(ticker)) return;
-    dashState.loading.add(ticker);
-    if (!state.asset) renderReport(); // el dashboard solo se ve en la pantalla de inicio
-    try {
-      dashState.data[ticker] = await computeLightSignal(ticker, macro);
-    } catch (e) {
-      console.warn('[dashboard] no se pudo cargar', ticker, e.message);
-    } finally {
-      dashState.loading.delete(ticker);
-      if (!state.asset) renderReport();
-    }
-  }));
+  const pending = DASHBOARD_UNIVERSE.filter(t => !dashState.data[t] && !dashState.loading.has(t));
+  for (let i = 0; i < pending.length; i += DASHBOARD_BATCH_SIZE) {
+    const batch = pending.slice(i, i + DASHBOARD_BATCH_SIZE);
+    await Promise.all(batch.map(async (ticker) => {
+      dashState.loading.add(ticker);
+      if (!state.asset) renderReport(); // el dashboard solo se ve en la pantalla de inicio
+      try {
+        dashState.data[ticker] = await computeLightSignal(ticker, macro);
+      } catch (e) {
+        console.warn('[dashboard] no se pudo cargar', ticker, e.message);
+      } finally {
+        dashState.loading.delete(ticker);
+        if (!state.asset) renderReport();
+      }
+    }));
+    if (i + DASHBOARD_BATCH_SIZE < pending.length) await new Promise(res => setTimeout(res, DASHBOARD_BATCH_DELAY_MS));
+  }
 }
 
 /* ───────────────────────── init ───────────────────────── */
