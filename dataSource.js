@@ -22,11 +22,17 @@
 const urlMode = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('mode') : null;
 const MODE = urlMode || (typeof window !== 'undefined' && window.CEDEAR_MODE) || 'live'; // 'live' | 'mock' — probar local sin keys con ?mode=mock
 const API_BASE = (typeof window !== 'undefined' && window.CEDEAR_API_BASE) || '/api';
-// Twelve Data free tier tiene ~8 req/min compartidos entre todos los que usen
-// el sitio — el precio se refresca seguido (se siente "vivo"), pero el OHLCV
-// (velas) cambia poco minuto a minuto, así que se cachea bastante más tiempo.
+// Twelve Data free tier comparte un cupo de créditos DIARIO entre todos los
+// visitantes del sitio (no solo ~8 req/min) — quedarse sin cupo un día tira
+// abajo el gráfico y el análisis técnico de todos hasta el día siguiente
+// (ver fix de precio no coincidente en NVDA). El precio (Finnhub, cupo propio
+// y más generoso) se refresca seguido para sentirse "vivo", pero las velas
+// cambian poco de una visita a otra dentro del mismo día — cachearlas mucho
+// más tiempo es la forma más segura de no repetir ese problema.
 const QUOTE_TTL_MS = 60 * 1000;
-const CANDLES_TTL_MS = 5 * 60 * 1000;
+const CANDLES_TTL_MS_INTRADAY = 10 * 60 * 1000; // 45min/4h: se agrega una vela nueva seguido
+const CANDLES_TTL_MS_DAILY = 45 * 60 * 1000; // 1day/1week: alcanza y sobra para análisis técnico swing
+function candlesTtlFor(tf) { return (tf === '45min' || tf === '4h') ? CANDLES_TTL_MS_INTRADAY : CANDLES_TTL_MS_DAILY; }
 const COINGECKO = 'https://api.coingecko.com/api/v3';
 
 /* Caché en memoria (por pestaña) + respaldo en localStorage (sobrevive a
@@ -135,7 +141,7 @@ const Live = {
     });
   },
   async getCandles(ticker, tf = '1day', n = 200) {
-    return cached(`c:${ticker}:${tf}:${n}`, CANDLES_TTL_MS, async () => {
+    return cached(`c:${ticker}:${tf}:${n}`, candlesTtlFor(tf), async () => {
       const r = await fetch(`${API_BASE}/candles?symbol=${encodeURIComponent(ticker)}&interval=${tf}&outputsize=${n}`);
       if (!r.ok) throw new Error('candles ' + r.status);
       const d = await r.json(); return { ...d, isReal: true };
@@ -191,7 +197,7 @@ const Crypto = {
     });
   },
   async getCandles(ticker, coingeckoId, days = 180) {
-    return cached('cgc:' + ticker, CANDLES_TTL_MS, async () => {
+    return cached('cgc:' + ticker, CANDLES_TTL_MS_DAILY, async () => {
       const r = await fetch(`${COINGECKO}/coins/${coingeckoId}/ohlc?vs_currency=usd&days=${days}`);
       if (!r.ok) throw new Error('coingecko ohlc ' + r.status);
       const rows = await r.json(); // [ [time,o,h,l,c], ... ]
