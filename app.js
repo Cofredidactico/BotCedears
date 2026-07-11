@@ -139,9 +139,65 @@ const CHART_TABS = [
   { key: '1day', label: '1D' },
   { key: '1week', label: '1S' },
 ];
-const chartState = { tf: '1day', cache: {}, loading: new Set() }; // tf -> { candles, isReal }
+const chartState = { tf: '1day', cache: {}, loading: new Set(), mode: 'institucional' }; // mode: 'institucional' | 'libre'
 function chartTabsForAsset(asset) {
   return asset?.category === 'Cripto' ? CHART_TABS.filter(t => t.key === '1day' || t.key === '1week') : CHART_TABS;
+}
+
+/** Análisis Libre: widget gratuito de TradingView embebido (tv.js), como
+ *  complemento del gráfico propio — no lo reemplaza, porque TradingView usa
+ *  su propio símbolo/datos (no el precio de CEDEAR en pesos que calculamos
+ *  acá). Da acceso a todos sus indicadores y herramientas de dibujo para
+ *  quien quiera hacer su propio análisis técnico libre sobre el mismo activo. */
+const TV_SYMBOL_OVERRIDE = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD' };
+function tvSymbolFor(asset) {
+  return TV_SYMBOL_OVERRIDE[asset.ticker] ?? asset.ticker; // TradingView resuelve tickers US sueltos (NASDAQ/NYSE/AMEX) automáticamente
+}
+
+let tvScriptPromise = null;
+function loadTradingViewScript() {
+  if (window.TradingView) return Promise.resolve();
+  if (tvScriptPromise) return tvScriptPromise;
+  tvScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://s3.tradingview.com/tv.js';
+    script.onload = resolve;
+    script.onerror = () => { tvScriptPromise = null; reject(new Error('No se pudo cargar el widget de TradingView (sin conexión o bloqueado por el navegador).')); };
+    document.head.appendChild(script);
+  });
+  return tvScriptPromise;
+}
+
+async function mountTradingViewWidget(containerId, symbol) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `<div class="tv-loading">Cargando TradingView…</div>`;
+  // Si el script queda "colgado" (bloqueador de contenido, firewall corporativo,
+  // etc. que ni cargan ni disparan onerror) hay que igual sacar al usuario del
+  // spinner infinito con un mensaje accionable, en vez de dejarlo cargando para siempre.
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Tardó demasiado en cargar — puede estar bloqueado por un adblocker o firewall. Desactivalo para este sitio y volvé a intentar.')), 12000));
+  try {
+    await Promise.race([loadTradingViewScript(), timeout]);
+    if (!document.getElementById(containerId)) return; // el usuario ya navegó a otra vista
+    el.innerHTML = '';
+    new window.TradingView.widget({
+      container_id: containerId,
+      autosize: true,
+      symbol,
+      interval: 'D',
+      timezone: 'America/Argentina/Buenos_Aires',
+      theme: 'dark',
+      style: '1',
+      locale: 'es',
+      toolbar_bg: '#12141c',
+      enable_publishing: false,
+      allow_symbol_change: true,
+      hide_side_toolbar: false,
+      studies: ['RSI@tv-basicstudies', 'MACD@tv-basicstudies'],
+    });
+  } catch (e) {
+    if (document.getElementById(containerId)) el.innerHTML = `<div class="chart-empty">${esc(e.message)}</div>`;
+  }
 }
 
 function chartCardBody(dailyTechnical, plan) {
@@ -324,6 +380,7 @@ async function selectTicker(ticker) {
   chartState.tf = '1day';
   chartState.cache = {};
   chartState.loading.clear();
+  chartState.mode = 'institucional';
   renderTopbar();
   renderReport();
   await loadReport(ticker);
@@ -849,10 +906,19 @@ function renderReportImpl() {
 
     ${sectionTitleHTML('Gráfico de Precio', 'chart')}
     <div class="card chart-card">
+      <div class="chart-mode-tabs">
+        <button class="chart-mode-tab ${chartState.mode === 'institucional' ? 'active' : ''}" data-mode="institucional">Análisis Institucional</button>
+        <button class="chart-mode-tab ${chartState.mode === 'libre' ? 'active' : ''}" data-mode="libre">Análisis Libre (TradingView)</button>
+      </div>
+      ${chartState.mode === 'libre' ? `
+      <div class="tv-note">Widget gratuito de TradingView con sus propios datos e indicadores — usalo para tu propio análisis técnico libre. El símbolo puede no coincidir 1:1 con el precio de CEDEAR en pesos que calculamos arriba (esa parte del análisis siempre es sobre ${esc(asset.name)} en USD).</div>
+      <div id="tv-widget-container" class="tv-widget-container"></div>
+      ` : `
       <div class="chart-tabs">
         ${chartTabsForAsset(asset).map(tab => `<button class="chart-tab ${chartState.tf === tab.key ? 'active' : ''}" data-tf="${tab.key}">${tab.label}</button>`).join('')}
       </div>
       ${chartCardBody(t, plan)}
+      `}
     </div>
 
     <div class="card score-card">
@@ -981,6 +1047,15 @@ function renderReportImpl() {
   const chartWrap = els.report.querySelector('.chart-svg-wrap');
   const chartEntry = chartState.cache[chartState.tf];
   if (chartWrap && chartEntry) wireChartHover(chartWrap, chartEntry.candles);
+
+  els.report.querySelectorAll('.chart-mode-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (chartState.mode === btn.dataset.mode) return;
+      chartState.mode = btn.dataset.mode;
+      renderReport();
+    });
+  });
+  if (chartState.mode === 'libre' && state.asset) mountTradingViewWidget('tv-widget-container', tvSymbolFor(state.asset));
 }
 
 function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
