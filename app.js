@@ -193,11 +193,32 @@ async function mountTradingViewWidget(containerId, symbol) {
       enable_publishing: false,
       allow_symbol_change: true,
       hide_side_toolbar: false,
-      studies: ['RSI@tv-basicstudies', 'MACD@tv-basicstudies'],
+      studies: ['RSI@tv-basicstudies', 'MACD@tv-basicstudies', 'BB@tv-basicstudies', 'Stochastic@tv-basicstudies'],
     });
   } catch (e) {
     if (document.getElementById(containerId)) el.innerHTML = `<div class="chart-empty">${esc(e.message)}</div>`;
   }
+}
+
+/** Gauge "Análisis Técnico" oficial de TradingView (Strong Buy/Buy/Neutral/
+ *  Sell/Strong Sell), calculado por ellos en vivo sobre osciladores y medias
+ *  móviles — un segundo indicador profesional siempre en vivo, distinto del
+ *  motor propio, para el mismo símbolo. Es un widget "auto-inicializable":
+ *  el <script> lee su propio texto como config JSON al cargar, así que hay
+ *  que crearlo con document.createElement (innerHTML no ejecuta <script>). */
+function mountTradingViewTAWidget(containerId, symbol) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '';
+  const script = document.createElement('script');
+  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js';
+  script.async = true;
+  script.type = 'text/javascript';
+  script.text = JSON.stringify({
+    interval: '1D', width: '100%', isTransparent: true, height: '100%',
+    symbol, showIntervalTabs: true, displayMode: 'single', locale: 'es', colorTheme: 'dark',
+  });
+  el.appendChild(script);
 }
 
 function chartCardBody(dailyTechnical, plan) {
@@ -215,6 +236,33 @@ function chartCardBody(dailyTechnical, plan) {
   const svg = renderPriceChartSVG(entry.candles, { support: dailyTechnical.support, resistance: dailyTechnical.resistance, plan: plan?.raw });
   const staleNote = entry.isReal === false ? `<div class="chart-stale">Datos de demostración — modo de prueba local.</div>` : '';
   return svg + staleNote;
+}
+
+/** Columna al lado del gráfico de TradingView (siempre en vivo): el gauge
+ *  Análisis Técnico oficial de TradingView (segunda opinión, en vivo, sobre
+ *  el mismo símbolo) + tu plan operativo propio, para comparar ambos sin
+ *  salir de la pestaña. Si el plan quedó calculado sobre datos de respaldo
+ *  (degradedCandles), se avisa explícito en vez de mostrarlo como si fuera
+ *  en vivo. */
+function tvSidePanelHTML(plan, degradedCandles) {
+  return `
+    <div class="tv-side">
+      <div class="tv-side-block">
+        <div class="tv-side-title"><span class="tv-live-dot"></span>Análisis Técnico de TradingView</div>
+        <div id="tv-ta-widget" class="tv-ta-widget"></div>
+      </div>
+      <div class="tv-side-block">
+        <div class="tv-side-title">Tu Plan Operativo</div>
+        ${degradedCandles ? `<div class="tv-side-degraded">Calculado sobre el último dato disponible, no en vivo — el proveedor de velas no respondió recién.</div>` : ''}
+        <div class="tv-plan-compact">
+          <div class="tv-plan-row"><span>Zona de compra</span><span class="plan-chip buy small">${esc(plan.compra)}</span></div>
+          <div class="tv-plan-row"><span>Zona de venta</span><span class="plan-chip sell small">${esc(plan.venta)}</span></div>
+          <div class="tv-plan-row"><span>Stop loss</span><span class="plan-chip stop small">${esc(plan.stopLoss)}</span></div>
+          <div class="tv-plan-row"><span>Objetivos</span><span class="tv-plan-tp">${esc(plan.tp1)} · ${esc(plan.tp2)} · ${esc(plan.tp3)}</span></div>
+          <div class="tv-plan-row"><span>Risk/Reward</span><span>${esc(plan.riskReward)}</span></div>
+        </div>
+      </div>
+    </div>`;
 }
 
 async function loadChartTf(tf) {
@@ -933,8 +981,11 @@ function renderReportImpl() {
         <button class="chart-mode-tab ${chartState.mode === 'libre' ? 'active' : ''}" data-mode="libre">Análisis Libre (TradingView)</button>
       </div>
       ${chartState.mode === 'libre' ? `
-      <div class="tv-note">Widget gratuito de TradingView con sus propios datos e indicadores — usalo para tu propio análisis técnico libre. El símbolo puede no coincidir 1:1 con el precio de CEDEAR en pesos que calculamos arriba (esa parte del análisis siempre es sobre ${esc(asset.name)} en USD).</div>
-      <div id="tv-widget-container" class="tv-widget-container"></div>
+      <div class="tv-note">Widget gratuito de TradingView con sus propios datos e indicadores, siempre en vivo — usalo para tu propio análisis técnico libre. El símbolo puede no coincidir 1:1 con el precio de CEDEAR en pesos que calculamos arriba (esa parte del análisis siempre es sobre ${esc(asset.name)} en USD).</div>
+      <div class="tv-layout">
+        <div id="tv-widget-container" class="tv-widget-container"></div>
+        ${tvSidePanelHTML(plan, degradedCandles)}
+      </div>
       ` : `
       <div class="chart-tabs">
         ${chartTabsForAsset(asset).map(tab => `<button class="chart-tab ${chartState.tf === tab.key ? 'active' : ''}" data-tf="${tab.key}">${tab.label}</button>`).join('')}
@@ -1077,7 +1128,11 @@ function renderReportImpl() {
       renderReport();
     });
   });
-  if (chartState.mode === 'libre' && state.asset) mountTradingViewWidget('tv-widget-container', tvSymbolFor(state.asset));
+  if (chartState.mode === 'libre' && state.asset) {
+    const symbol = tvSymbolFor(state.asset);
+    mountTradingViewWidget('tv-widget-container', symbol);
+    mountTradingViewTAWidget('tv-ta-widget', symbol);
+  }
 }
 
 function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
