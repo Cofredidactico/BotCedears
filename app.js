@@ -1,7 +1,7 @@
-import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getMacro, getCCL, getEarnings } from './dataSource.js';
+import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings } from './dataSource.js';
 import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
-import { renderPriceChartSVG } from './chart.js';
+import { renderPriceChartSVG, renderRadarSVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
 
@@ -14,9 +14,13 @@ const els = {
   tickerchip: document.getElementById('tickerchip'),
   dropdown: document.getElementById('dropdown'),
   report: document.getElementById('report'),
-  watchlist: document.getElementById('watchlist'),
+  sidebarNav: document.getElementById('sidebar-nav'),
+  sidebarMarket: document.getElementById('sidebar-market'),
 };
 
+// view: 'dashboard' | 'portfolio' | 'watchlist' | 'macro' | 'alerts' — páginas
+// reales, todas con datos en vivo. Se muestran cuando no hay un activo
+// puntual seleccionado (state.asset null); si hay un activo, se ve su ficha.
 const state = { query: '', asset: null, report: null, loading: false, error: null, view: 'dashboard' };
 function lsGetSafe(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } }
 
@@ -34,6 +38,9 @@ const DASHBOARD_UNIVERSE = [
   'BTC', 'ETH',
 ];
 const dashState = { data: {}, loading: new Set(), started: false };
+// Subconjunto del universo del dashboard para el widget "Mercado Hoy" del
+// sidebar — reusa dashState.data, no dispara requests propios.
+const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
 
 /* ───────────────────────── portfolio advisor ───────────────────────── */
 const portState = { data: {}, loading: new Set(), sortBy: lsGetSafe('icp_port_sort', 'weight'), editing: null };
@@ -88,7 +95,7 @@ async function toggleAlerts() {
   }
   alertsEnabled = !alertsEnabled;
   lsSetSafe('icp_alerts_enabled', alertsEnabled ? '1' : '0');
-  renderWatchlist();
+  refreshIfWatchlistVisible();
 }
 
 const CHART_TABS = [
@@ -164,6 +171,9 @@ const ICONS = {
   globe: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="3.6" ry="8.5"/><line x1="3.5" y1="12" x2="20.5" y2="12"/></svg>`,
   news: `<svg ${ICON_ATTR}><rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><line x1="7" y1="8.5" x2="17" y2="8.5"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="15.5" x2="13" y2="15.5"/></svg>`,
   building: `<svg ${ICON_ATTR}><rect x="5" y="3.5" width="10" height="17" rx="1"/><rect x="15" y="9" width="4.5" height="11.5" rx="1"/><line x1="8" y1="7.5" x2="8" y2="7.5"/><line x1="8" y1="11" x2="8" y2="11"/><line x1="12" y1="7.5" x2="12" y2="7.5"/><line x1="12" y1="11" x2="12" y2="11"/><line x1="8" y1="14.5" x2="8" y2="14.5"/><line x1="12" y1="14.5" x2="12" y2="14.5"/></svg>`,
+  calendar: `<svg ${ICON_ATTR}><rect x="3.5" y="5" width="17" height="16" rx="2"/><line x1="3.5" y1="9.5" x2="20.5" y2="9.5"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>`,
+  compare: `<svg ${ICON_ATTR}><path d="M7 4v14"/><path d="M3 8h4l-2 4Z"/><path d="M17 4v14"/><path d="M21 12h-4l2 4Z"/></svg>`,
+  gear: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M17.8 6.2l-1.6 1.6M7.8 16.2l-1.6 1.6M17.8 17.8l-1.6-1.6M7.8 7.8 6.2 6.2"/></svg>`,
 };
 function sectionTitleHTML(text, iconKey, style = '') {
   return `<div class="sectiontitle" ${style ? `style="${style}"` : ''}>${ICONS[iconKey] ?? ''}<span>${esc(text)}</span></div>`;
@@ -249,7 +259,7 @@ function renderDropdown() {
       const ticker = btn.dataset.star;
       toggleWatchlist(ticker);
       btn.textContent = isWatched(ticker) ? '★' : '☆';
-      renderWatchlist();
+      refreshIfWatchlistVisible();
       loadWatchlistData();
     });
   });
@@ -280,7 +290,7 @@ async function loadReport(ticker) {
   try {
     const isCripto = asset.category === 'Cripto';
     const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, earnings] = await Promise.all([
-      getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker), getNews(ticker), getMacro(), getCCL(),
+      getQuote(ticker), getCandles(ticker, '1day', 260), getFundamentals(ticker), getNews(ticker), getMacro(), getCCL(),
       isCripto ? Promise.resolve(null) : getCandles(ticker, '1week', 130),
       ticker === 'SPY' ? Promise.resolve(null) : getCandles('SPY', '1day', 220),
       getEarnings(ticker),
@@ -334,6 +344,7 @@ async function loadReport(ticker) {
     chartState.cache['1day'] = { candles, isReal: candles.isReal };
     if (weeklyCandles) chartState.cache['1week'] = { candles: weeklyCandles, isReal: isCripto ? candles.isReal : (weeklyNative?.isReal ?? false) };
     state.loading = false;
+    if (asset.sector) loadPeerRadar(asset.sector, macro); // no bloquea el render del reporte
   } catch (e) {
     console.error('[app] error cargando reporte', e);
     state.loading = false;
@@ -341,6 +352,64 @@ async function loadReport(ticker) {
   }
   renderTopbar();
   renderReport();
+}
+
+/* ───────────────────────── radar de fortalezas vs sector ───────────────────────── */
+// Promedio real de hasta 3 pares del mismo sector (universe.json), cacheado
+// por sector (no por ticker) durante 20 min — así ver varios activos del
+// mismo sector seguidos no vuelve a pedir todo de nuevo. Ejes sin cobertura
+// (ej. fundamentales de un ETF) quedan marcados "no disponible", nunca 0
+// disfrazado de dato real.
+const PEER_RADAR_KEYS = ['fundamentals', 'trend', 'momentum', 'valuation', 'risk'];
+const PEER_RADAR_LABELS = { fundamentals: 'Fundamental', trend: 'Técnico', momentum: 'Momentum', valuation: 'Valoración', risk: 'Riesgo' };
+const peerRadarState = { bySector: {}, loadingSector: null };
+
+async function loadPeerRadar(sector, macro) {
+  const cached = peerRadarState.bySector[sector];
+  if (cached && Date.now() - cached.at < 20 * 60 * 1000) { if (!state.asset) return; renderReport(); return; }
+  if (peerRadarState.loadingSector === sector) return;
+  peerRadarState.loadingSector = sector;
+
+  const peers = universe.filter(a => a.sector === sector && a.ticker !== state.asset?.ticker && a.category !== 'Cripto').slice(0, 3);
+  if (peers.length < 2) {
+    peerRadarState.bySector[sector] = { at: Date.now(), data: null, peerTickers: [] };
+    peerRadarState.loadingSector = null;
+    if (state.asset?.sector === sector) renderReport();
+    return;
+  }
+
+  try {
+    const results = await Promise.all(peers.map(async (p) => {
+      try {
+        const [quote, candles, fundamentals] = await Promise.all([getQuote(p.ticker), getCandles(p.ticker, '1day', 220), getFundamentals(p.ticker)]);
+        const technical = computeTechnical(candles);
+        const fundForScore = fundamentals?.hasData ? {
+          hasData: true,
+          revenueGrowth: fundamentals.revenueGrowth ?? null, epsGrowth: fundamentals.epsGrowth ?? null,
+          roe: fundamentals.roe ?? null, netMargin: fundamentals.netMargin ?? null, peg: fundamentals.peg,
+        } : null;
+        const macroForScore = { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null };
+        const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: null, candles, confluence: null, sector: p.sector, earningsSoon: false });
+        return scoreResult.scoreBreakdown;
+      } catch (e) {
+        console.warn('[peer-radar] no se pudo cargar', p.ticker, e.message);
+        return null;
+      }
+    }));
+
+    const valid = results.filter(Boolean);
+    const data = valid.length ? PEER_RADAR_KEYS.map(key => {
+      const vals = valid.map(rows => rows.find(row => row.key === key)).filter(row => row?.available);
+      return vals.length ? { key, pct: Math.round(vals.reduce((s, row) => s + row.pct, 0) / vals.length), available: true } : { key, pct: null, available: false };
+    }) : null;
+
+    peerRadarState.bySector[sector] = { at: Date.now(), data, peerTickers: peers.map(p => p.ticker) };
+  } catch (e) {
+    console.warn('[peer-radar] falló para sector', sector, e.message);
+  } finally {
+    peerRadarState.loadingSector = null;
+    if (state.asset?.sector === sector) renderReport();
+  }
 }
 
 /* ───────────────────────── narrativas generadas de datos reales ───────────────────────── */
@@ -455,7 +524,16 @@ function reportSkeletonHTML() {
 }
 
 /* ───────────────────────── render del reporte ───────────────────────── */
+const VIEW_PAGES = {
+  dashboard: { html: dashboardHTML, wire: wireDashboardEvents, load: () => { if (!dashState.started) loadDashboardData(); loadPortfolioData(); } },
+  portfolio: { html: portfolioHTML, wire: wirePortfolioEvents, load: loadPortfolioData },
+  watchlist: { html: watchlistPageHTML, wire: wireWatchlistEvents, load: () => {} },
+  macro: { html: macroNewsPageHTML, wire: wireMacroNewsEvents, load: loadMacroNewsData },
+  alerts: { html: alertsPageHTML, wire: wireAlertsEvents, load: () => {} },
+};
+
 function renderReport() {
+  renderSidebar();
   if (state.loading) {
     els.report.innerHTML = reportSkeletonHTML();
     return;
@@ -477,12 +555,10 @@ function renderReport() {
     return;
   }
   if (!state.report) {
-    els.report.innerHTML = homeNavHTML() + (state.view === 'portfolio' ? portfolioHTML() : dashboardHTML());
-    wireHomeNavEvents();
-    if (state.view === 'portfolio') wirePortfolioEvents();
-    else wireDashboardEvents();
-    if (state.view === 'dashboard' && !dashState.started) loadDashboardData();
-    if (state.view === 'portfolio') loadPortfolioData();
+    const page = VIEW_PAGES[state.view] ?? VIEW_PAGES.dashboard;
+    els.report.innerHTML = page.html();
+    page.wire();
+    page.load();
     return;
   }
 
@@ -506,6 +582,8 @@ function renderReport() {
   const planOpacity = (!quote.isReal && !r.candles.isReal) ? 0.55 : 1;
 
   const { risks, catalysts } = risksAndCatalysts(r);
+  const w52 = fiftyTwoWeekRange(r.candles);
+  const volStats = volumeStats(r.candles);
 
   const isCedear = (asset.category === 'CEDEAR' || asset.category === 'ETF') && asset.ratio;
   const cedearPriceTxt = quote.cedearArs != null ? `AR$${Math.round(quote.cedearArs).toLocaleString('es-AR')} por CEDEAR` : 'N/D';
@@ -517,7 +595,13 @@ function renderReport() {
       <strong>Referencia CEDEAR (solo informativa):</strong> el análisis completo se realizó sobre ${esc(asset.name)} (${esc(asset.ticker)}) cotizando en USD. El CEDEAR argentino replica esta acción con ratio de referencia 1:${asset.ratio}. Equivalente: ${cedearPriceTxt} (${cedearSourceTxt}). Ninguna recomendación de esta sección se basa en el precio en pesos.
     </div>` : '';
 
+  const breadcrumbLabel = { CEDEAR: 'Acciones / CEDEARs', ETF: 'ETFs', Cripto: 'Cripto' }[asset.category] ?? asset.category;
+  const subScoreKeys = ['fundamentals', 'trend', 'momentum', 'valuation', 'risk'];
+  const subScoreLabels = { fundamentals: 'Fundamental', trend: 'Técnico', momentum: 'Momentum', valuation: 'Valoración', risk: 'Riesgo' };
+  const subScores = subScoreKeys.map(k => scoreBreakdown.find(sb => sb.key === k)).filter(Boolean);
+
   els.report.innerHTML = `
+    <div class="breadcrumbs">Análisis <span>›</span> ${esc(breadcrumbLabel)} <span>›</span> <strong>${esc(asset.ticker)}</strong></div>
     ${sectionTitleHTML('Resumen Ejecutivo', 'briefcase')}
     <div class="exec-grid">
       <div class="card exec-card">
@@ -535,6 +619,15 @@ function renderReport() {
           <div><div class="exec-stat-label">Horizonte</div><div class="exec-stat-value">${horizonFor(t)}</div></div>
           <div><div class="exec-stat-label">Tendencia primaria</div><div class="exec-stat-value">${esc(t.primaryTrend)}</div></div>
         </div>
+        ${subScores.length ? `
+        <div class="exec-subscores">
+          ${subScores.map(sb => `
+            <div class="exec-subscore-row">
+              <span class="exec-subscore-label">${esc(subScoreLabels[sb.key])}</span>
+              <div class="score-bar-bg"><div class="score-bar-fill" style="width:${sb.pct}%; opacity:${sb.available ? 1 : 0.25};"></div></div>
+              <span class="exec-subscore-value">${sb.available ? Math.round(sb.pct) : 'N/D'}</span>
+            </div>`).join('')}
+        </div>` : ''}
       </div>
       <div class="card gauge-card">
         <div class="gauge-ring" style="background:${gaugeGradient};">
@@ -544,13 +637,57 @@ function renderReport() {
           </div>
         </div>
         <div class="gauge-label">${esc(scoreLabel)}</div>
+        <div class="gauge-conviction" title="Convicción: ${esc(confidence)}">${convictionDotsHTML(confidence)}<span>Convicción: ${esc(confidence)}</span></div>
       </div>
+    </div>
+
+    ${sectionTitleHTML('Resumen Ejecutivo IA', 'bulb')}
+    <div class="card ai-summary-card">
+      <ul class="ai-summary-list">
+        ${catalysts.slice(0, 3).map(c => `<li class="ok">${ICONS.check}<span>${esc(c)}</span></li>`).join('')}
+        ${risks.slice(0, 3).map(rk => `<li class="risk">${ICONS.warning}<span>${esc(rk)}</span></li>`).join('')}
+      </ul>
     </div>
 
     <div class="card thermo-card">
       <div class="thermo-labels"><span>Venta</span><span>Reducir</span><span>Mantener</span><span>Compra</span><span>Compra Fuerte</span></div>
       <div class="thermo-bar"><div class="thermo-marker" style="left:${thermoPos}%;"></div></div>
       <div class="thermo-valuewrap"><div class="thermo-value" style="left:${thermoPos}%;">${score}</div></div>
+    </div>
+
+    <div class="stat-cards-row">
+      <div class="card stat-card">
+        <div class="stat-card-label">Precio</div>
+        <div class="stat-card-value">${fmtUsd(quote.usd)}</div>
+        <div class="stat-card-sub ${trendUp ? 'up' : 'down'}">${fmtPct(quote.changePct)} hoy</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-card-label">${w52 ? `${w52.weeks} semanas` : '52 Semanas'}</div>
+        ${w52 ? `
+          <div class="stat-card-value" style="font-size:15px;">${fmtUsd(w52.lo)} – ${fmtUsd(w52.hi)}</div>
+          <div class="stat-card-range-bar"><div class="stat-card-range-dot" style="left:${clampNum(((w52.price - w52.lo) / (w52.hi - w52.lo || 1)) * 100, 2, 98)}%;"></div></div>
+        ` : `<div class="stat-card-value">N/D</div>`}
+      </div>
+      <div class="card stat-card">
+        <div class="stat-card-label">RSI (14)</div>
+        <div class="stat-card-value ${isNaN(t.rsi) ? '' : t.rsi > 70 ? 'down' : t.rsi < 30 ? 'up' : ''}">${isNaN(t.rsi) ? 'N/D' : t.rsi.toFixed(1)}</div>
+        <div class="stat-card-sub">${isNaN(t.rsi) ? '' : t.rsi > 70 ? 'Sobrecomprado' : t.rsi < 30 ? 'Sobrevendido' : 'Neutral'}</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-card-label">Beta (vs SPY)</div>
+        <div class="stat-card-value">${marketCorrelation?.beta != null ? marketCorrelation.beta.toFixed(2) : 'N/D'}</div>
+        <div class="stat-card-sub">${marketCorrelation?.beta != null ? (marketCorrelation.beta > 1.2 ? 'Alta' : marketCorrelation.beta < 0.8 ? 'Baja' : 'Moderada') : ''}</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-card-label">EMA 20</div>
+        <div class="stat-card-value">${fmtNum(t.ema20)}</div>
+        <div class="stat-card-sub ${t.price > t.ema20 ? 'up' : 'down'}">${t.price > t.ema20 ? 'Precio arriba' : 'Precio abajo'}</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-card-label">Volumen</div>
+        <div class="stat-card-value" style="font-size:16px;">${volStats ? fmtVolume(volStats.last) : 'N/D'}</div>
+        <div class="stat-card-sub ${volStats?.ratioPct != null ? (volStats.ratioPct >= 0 ? 'up' : 'down') : ''}">${volStats?.ratioPct != null ? `${volStats.ratioPct >= 0 ? '+' : ''}${volStats.ratioPct.toFixed(0)}% vs prom.` : 'Sin datos'}</div>
+      </div>
     </div>
 
     ${sectionTitleHTML('Gráfico de Precio', 'chart')}
@@ -636,6 +773,8 @@ function renderReport() {
       </div>
     </div>
 
+    ${radarHTML(asset, scoreBreakdown)}
+
     <div class="panel-header">
       ${sectionTitleHTML('Plan Operativo', 'target', 'margin-bottom:0;')}
       <div class="freshness" style="color:${freshPlan.color};"><span class="dot" style="background:${freshPlan.color};"></span>${esc(freshPlan.text)}</div>
@@ -651,8 +790,12 @@ function renderReport() {
       </div>
       <div class="plan-footer">
         <div class="plan-footer-item">Risk/Reward: <span>${esc(plan.riskReward)}</span></div>
-        <div class="plan-footer-item">Probabilidad estimada: <span>${esc(plan.probability)}</span></div>
         <div class="plan-footer-item">Drawdown esperado: <span>${esc(plan.drawdown)}</span></div>
+      </div>
+      <div class="probability-row">
+        <span class="probability-label">Probabilidad estimada</span>
+        <div class="probability-bar-bg"><div class="probability-bar-fill" style="width:${plan.probabilityPct}%;"></div></div>
+        <span class="probability-value">${esc(plan.probability)}</span>
       </div>
     </div>
 
@@ -669,7 +812,6 @@ function renderReport() {
     starBtn.addEventListener('click', () => {
       toggleWatchlist(asset.ticker);
       starBtn.textContent = isWatched(asset.ticker) ? '★' : '☆';
-      renderWatchlist();
       loadWatchlistData();
     });
   }
@@ -685,6 +827,46 @@ function horizonFor(t) {
   return t.adx > 22 ? '3–6 meses' : '6–12 meses';
 }
 
+/** Rango de las últimas ~52 semanas (o lo que haya disponible: candles trae
+ *  hasta 260 sesiones diarias, pero un activo recién listado puede tener
+ *  menos historial — se etiqueta según los días reales usados, nunca se
+ *  asume "52 semanas" si no hay esa cantidad de datos). */
+function fiftyTwoWeekRange(candles) {
+  const n = candles.c.length;
+  if (n < 10) return null;
+  const window = Math.min(n, 252);
+  const h = candles.h.slice(n - window), l = candles.l.slice(n - window);
+  const hi = Math.max(...h), lo = Math.min(...l);
+  const weeks = Math.round(window / 5);
+  return { hi, lo, weeks, price: candles.c[n - 1] };
+}
+
+/** Volumen de la sesión más reciente vs el promedio de las 20 previas. */
+function volumeStats(candles) {
+  const v = candles.v || [];
+  const n = v.length;
+  if (n < 5 || !v.some(x => x > 0)) return null;
+  const last = v[n - 1];
+  const windowN = Math.min(20, n - 1);
+  const prev = v.slice(n - 1 - windowN, n - 1);
+  const avg = prev.reduce((s, x) => s + x, 0) / (prev.length || 1);
+  return { last, avg, ratioPct: avg > 0 ? ((last - avg) / avg) * 100 : null };
+}
+
+function fmtVolume(n) {
+  if (n == null || isNaN(n)) return 'N/D';
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+const CONVICTION_DOTS = { 'Alta': 4, 'Media-Alta': 3, 'Media': 2, 'Media-Baja': 1, 'Baja': 0 };
+function convictionDotsHTML(confidence) {
+  const filled = CONVICTION_DOTS[confidence] ?? 2;
+  return Array.from({ length: 4 }).map((_, i) => `<span class="conviction-dot ${i < filled ? 'filled' : ''}"></span>`).join('');
+}
+
 function macroFreshness(macro) {
   if (macro?.isReal && macro.liveFetchedAt) return { text: `Riesgo país/dólares en vivo, ${relativeTime(new Date(macro.liveFetchedAt).getTime())}`, color: GREEN };
   if (!macro?.lastUpdated) return { text: 'Sin datos macro', color: RED };
@@ -692,6 +874,37 @@ function macroFreshness(macro) {
   if (ageDays > 14) return { text: `Snapshot manual desactualizado (${Math.round(ageDays)}d)`, color: RED };
   if (ageDays > 3) return { text: `Snapshot manual (hace ${Math.round(ageDays)}d)`, color: AMBER };
   return { text: `Snapshot manual (hace ${Math.round(ageDays)}d)`, color: GREEN };
+}
+
+function radarHTML(asset, scoreBreakdown) {
+  if (!asset.sector) return '';
+  const entry = peerRadarState.bySector[asset.sector];
+  const labels = PEER_RADAR_KEYS.map(k => PEER_RADAR_LABELS[k]);
+  const assetValues = PEER_RADAR_KEYS.map(k => scoreBreakdown.find(sb => sb.key === k)?.pct ?? 0);
+
+  if (!entry) {
+    return `
+      ${sectionTitleHTML('Fortalezas vs Sector', 'radar')}
+      <div class="card dash-loading-note" style="margin-bottom:36px;">Calculando promedio real de pares del sector ${esc(asset.sector)}…</div>`;
+  }
+  if (!entry.data) {
+    return `
+      ${sectionTitleHTML('Fortalezas vs Sector', 'radar')}
+      <div class="card watch-empty" style="margin-bottom:36px;">No hay suficientes pares del sector ${esc(asset.sector)} en el universo cargado para calcular un promedio real — se omite el radar antes que mostrar un número inventado.</div>`;
+  }
+  const peerValues = PEER_RADAR_KEYS.map(k => entry.data.find(d => d.key === k)?.pct ?? 0);
+  return `
+    ${sectionTitleHTML('Fortalezas vs Sector', 'radar')}
+    <div class="card radar-card" style="margin-bottom:36px;">
+      <div class="radar-layout">
+        ${renderRadarSVG(labels, assetValues, peerValues)}
+        <div class="radar-legend">
+          <div class="radar-legend-item"><i style="background:oklch(0.70 0.19 291);"></i>${esc(asset.ticker)}</div>
+          <div class="radar-legend-item"><i style="background:oklch(0.58 0.018 260);"></i>Promedio ${esc(asset.sector)} (${entry.peerTickers.map(esc).join(', ')})</div>
+          <div class="radar-legend-note">Cada eje es el sub-score real (0–100) del motor de análisis; los ejes sin cobertura de datos para algún par se excluyen del promedio, nunca se completan con un valor inventado.</div>
+        </div>
+      </div>
+    </div>`;
 }
 
 function technicalMetricRows(t, confluence, marketCorrelation) {
@@ -800,20 +1013,70 @@ function sortAndFilterTickers(tickers) {
   return list;
 }
 
-function homeNavHTML() {
-  return `
-    <div class="home-nav">
-      <button class="home-nav-btn ${state.view === 'dashboard' ? 'active' : ''}" data-view="dashboard">${ICONS.grid}Dashboard</button>
-      <button class="home-nav-btn ${state.view === 'portfolio' ? 'active' : ''}" data-view="portfolio">${ICONS.briefcase}Portfolio Advisor</button>
-    </div>`;
-}
+/* ───────────────────────── sidebar de navegación ───────────────────────── */
+const SIDEBAR_NAV = [
+  { view: 'dashboard', label: 'Dashboard', icon: 'grid' },
+  { view: 'portfolio', label: 'Portfolio Advisor', icon: 'briefcase' },
+  { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
+  { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
+  { view: 'alerts', label: 'Alertas', icon: 'warning' },
+];
+// Se muestran deshabilitadas a propósito: son funcionalidad real todavía no
+// construida, no un placeholder con datos inventados — no queda ni un solo
+// número falso detrás del botón.
+const SIDEBAR_NAV_DISABLED = [
+  { label: 'Calendario Económico', icon: 'calendar' },
+  { label: 'Comparador', icon: 'compare' },
+  { label: 'Backtesting', icon: 'chart' },
+  { label: 'Configuración', icon: 'gear' },
+];
 
-function wireHomeNavEvents() {
-  els.report.querySelectorAll('.home-nav-btn').forEach(btn => {
+function renderSidebar() {
+  if (!els.sidebarNav) return;
+  const activeView = !state.asset ? state.view : null;
+  els.sidebarNav.innerHTML = `
+    <div class="sidebar-nav-group">
+      ${SIDEBAR_NAV.map(item => `
+        <button class="sidebar-nav-btn ${activeView === item.view ? 'active' : ''}" data-view="${item.view}">
+          ${ICONS[item.icon]}<span>${esc(item.label)}</span>
+        </button>`).join('')}
+    </div>
+    <div class="sidebar-nav-group">
+      <div class="sidebar-nav-label">Próximamente</div>
+      ${SIDEBAR_NAV_DISABLED.map(item => `
+        <button class="sidebar-nav-btn disabled" disabled title="Todavía no disponible">
+          ${ICONS[item.icon]}<span>${esc(item.label)}</span>
+        </button>`).join('')}
+    </div>`;
+
+  els.sidebarNav.querySelectorAll('.sidebar-nav-btn[data-view]').forEach(btn => {
     btn.addEventListener('click', () => {
+      state.asset = null; state.report = null; state.error = null; state.loading = false;
       state.view = btn.dataset.view;
+      els.tickerchip.textContent = '—';
+      renderTopbar();
       renderReport();
     });
+  });
+
+  renderSidebarMarket();
+}
+
+function renderSidebarMarket() {
+  if (!els.sidebarMarket) return;
+  const tickers = SIDEBAR_MARKET_TICKERS.filter(t => dashState.data[t]);
+  els.sidebarMarket.innerHTML = `
+    <div class="sidebar-market-title">Mercado Hoy</div>
+    ${tickers.length ? tickers.map(t => {
+      const d = dashState.data[t];
+      const up = d.changePct >= 0;
+      return `<div class="sidebar-market-row" data-dash-ticker="${esc(t)}">
+        <span class="sidebar-market-ticker">${esc(t)}</span>
+        <span class="sidebar-market-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</span>
+      </div>`;
+    }).join('') : `<div class="sidebar-market-loading">Cargando…</div>`}`;
+  els.sidebarMarket.querySelectorAll('[data-dash-ticker]').forEach(el => {
+    el.addEventListener('click', () => selectTicker(el.dataset.dashTicker));
   });
 }
 
@@ -884,12 +1147,69 @@ function dashboardHTML() {
         <div class="dash-radar-title">Mayores bajas</div>
         ${losers.length ? losers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count down">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
       </div>
+    </div>
+
+    ${dashBottomWidgetsHTML()}`;
+}
+
+function dashBottomWidgetsHTML() {
+  const watchTickers = getWatchlist().slice(0, 6);
+  const holdings = getPortfolio();
+  const stats = holdings.length ? computePortfolioStats(holdings) : null;
+
+  return `
+    <div class="grid2">
+      <div>
+        <div class="panel-header">
+          ${sectionTitleHTML('Watchlist Rápido', 'bookmark', 'margin-bottom:0;')}
+          <a class="dash-widget-link" data-goto-view="watchlist">Ver Watchlist completa ›</a>
+        </div>
+        ${!watchTickers.length ? `<div class="card watch-empty">Todavía no agregaste activos a tu Watchlist.</div>` : `
+        <div class="watch-grid watch-grid-compact">${watchTickers.map(watchCardHTML).join('')}</div>`}
+      </div>
+      <div>
+        <div class="panel-header">
+          ${sectionTitleHTML('Mi Portfolio', 'briefcase', 'margin-bottom:0;')}
+          <a class="dash-widget-link" data-goto-view="portfolio">Ver Portfolio ›</a>
+        </div>
+        ${!holdings.length ? `<div class="card watch-empty">Todavía no cargaste tenencias en Portfolio Advisor.</div>` : `
+        <div class="card port-mini-summary">
+          <div class="port-mini-row">
+            <span class="port-mini-label">Valor total</span>
+            <span class="port-mini-value">${fmtUsd(stats.totalValue)}</span>
+          </div>
+          ${stats.totalGainUsd != null ? `<div class="port-mini-row"><span class="port-mini-label">Ganancia (costo USD)</span><span class="port-mini-value ${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${fmtUsd(stats.totalGainUsd)}</span></div>` : ''}
+          ${stats.totalGainArs != null ? `<div class="port-mini-row"><span class="port-mini-label">Ganancia (costo ARS)</span><span class="port-mini-value ${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${fmtArs(stats.totalGainArs)}</span></div>` : ''}
+          <div class="port-mini-row">
+            <span class="port-mini-label">Score ponderado</span>
+            <span class="port-mini-value">${stats.weightedScore ?? 'N/D'}</span>
+          </div>
+          <div class="port-mini-row">
+            <span class="port-mini-label">Posiciones</span>
+            <span class="port-mini-value">${holdings.length}</span>
+          </div>
+        </div>`}
+      </div>
     </div>`;
 }
 
 function wireDashboardEvents() {
   els.report.querySelectorAll('[data-dash-ticker]').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.dashTicker));
+  });
+  els.report.querySelectorAll('.watch-card').forEach(el => {
+    el.addEventListener('click', (e) => { if (e.target.closest('.watch-remove')) return; selectTicker(el.dataset.ticker); });
+  });
+  els.report.querySelectorAll('.watch-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleWatchlist(btn.dataset.remove);
+      delete watchState.data[btn.dataset.remove];
+      renderReport();
+    });
+  });
+  els.report.querySelectorAll('[data-goto-view]').forEach(el => {
+    el.addEventListener('click', () => { state.view = el.dataset.gotoView; renderReport(); });
   });
 }
 
@@ -1266,23 +1586,55 @@ async function loadPortfolioData() {
       console.warn('[portfolio] no se pudo cargar', h.ticker, e.message);
     } finally {
       portState.loading.delete(h.ticker);
-      if (!state.asset && state.view === 'portfolio') renderReport();
+      if (!state.asset && (state.view === 'portfolio' || state.view === 'dashboard')) renderReport();
     }
   }));
 }
 
-function renderWatchlist() {
+function watchCardHTML(ticker) {
+  const d = watchState.data[ticker];
+  if (!d) {
+    if (watchState.loading.has(ticker)) {
+      return `<div class="watch-card" data-ticker="${esc(ticker)}">
+        <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
+        <div class="skel skel-line" style="width:50%; height:14px;"></div>
+        <div class="skel skel-line" style="width:70%; height:10px;"></div>
+        <div class="skel skel-line" style="width:60%; height:16px;"></div>
+        <div class="skel skel-line" style="width:40%; height:10px;"></div>
+        <div class="skel" style="width:80px; height:18px; border-radius:10px;"></div>
+      </div>`;
+    }
+    return `<div class="watch-card" data-ticker="${esc(ticker)}">
+      <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
+      <div class="watch-ticker">${esc(ticker)}</div>
+      <div class="watch-loading">Sin datos</div>
+    </div>`;
+  }
+  const up = d.changePct >= 0;
+  const sig = scoreLabelColor(d.scoreLabel);
+  const am = d.alert ? ALERT_META[d.alert.type] : null;
+  return `<div class="watch-card ${am ? 'has-alert' : ''}" data-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
+    <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
+    <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
+    <div class="watch-name">${esc(d.name ?? '')}</div>
+    <div class="watch-price">${fmtUsd(d.price)}</div>
+    <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
+    <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
+    ${am ? `<div class="watch-alert" style="color:${am.color};">⚡ ${esc(am.label)}</div>` : ''}
+  </div>`;
+}
+
+function watchlistPageHTML() {
   const allTickers = getWatchlist();
   if (!allTickers.length) {
-    els.watchlist.innerHTML = `
-      ${sectionTitleHTML('Seguimiento', 'bookmark')}
+    return `
+      ${sectionTitleHTML('Watchlist', 'bookmark')}
       <div class="card watch-empty">Todavía no agregaste activos. Buscá uno y tocá la ☆ para tenerlo siempre a mano acá (máx. ${WATCHLIST_MAX}).</div>`;
-    return;
   }
   const tickers = sortAndFilterTickers(allTickers);
-  els.watchlist.innerHTML = `
+  return `
     <div class="panel-header">
-      ${sectionTitleHTML('Seguimiento', 'bookmark', 'margin-bottom:0;')}
+      ${sectionTitleHTML('Watchlist', 'bookmark', 'margin-bottom:0;')}
       <div class="watch-controls">
         <button class="watch-alerts-btn ${alertsEnabled ? 'on' : ''}" id="watch-alerts-toggle" title="Avisar cuando un activo entra en zona de compra/venta o toca el stop">
           ${alertsEnabled ? '🔔 Alertas activas' : '🔕 Activar alertas'}
@@ -1296,50 +1648,21 @@ function renderWatchlist() {
       </div>
     </div>
     <div class="watch-grid">
-      ${!tickers.length ? `<div class="watch-empty">Ningún activo en seguimiento tiene la señal filtrada ahora mismo.</div>` : tickers.map(ticker => {
-        const d = watchState.data[ticker];
-        if (!d) {
-          if (watchState.loading.has(ticker)) {
-            return `<div class="watch-card" data-ticker="${esc(ticker)}">
-              <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
-              <div class="skel skel-line" style="width:50%; height:14px;"></div>
-              <div class="skel skel-line" style="width:70%; height:10px;"></div>
-              <div class="skel skel-line" style="width:60%; height:16px;"></div>
-              <div class="skel skel-line" style="width:40%; height:10px;"></div>
-              <div class="skel" style="width:80px; height:18px; border-radius:10px;"></div>
-            </div>`;
-          }
-          return `<div class="watch-card" data-ticker="${esc(ticker)}">
-            <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
-            <div class="watch-ticker">${esc(ticker)}</div>
-            <div class="watch-loading">Sin datos</div>
-          </div>`;
-        }
-        const up = d.changePct >= 0;
-        const sig = scoreLabelColor(d.scoreLabel);
-        const am = d.alert ? ALERT_META[d.alert.type] : null;
-        return `<div class="watch-card ${am ? 'has-alert' : ''}" data-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
-          <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
-          <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
-          <div class="watch-name">${esc(d.name ?? '')}</div>
-          <div class="watch-price">${fmtUsd(d.price)}</div>
-          <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
-          <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
-          ${am ? `<div class="watch-alert" style="color:${am.color};">⚡ ${esc(am.label)}</div>` : ''}
-        </div>`;
-      }).join('')}
+      ${!tickers.length ? `<div class="watch-empty">Ningún activo en seguimiento tiene la señal filtrada ahora mismo.</div>` : tickers.map(watchCardHTML).join('')}
     </div>`;
+}
 
-  els.watchlist.querySelectorAll('.watch-card').forEach(el => {
+function wireWatchlistEvents() {
+  els.report.querySelectorAll('.watch-card').forEach(el => {
     el.addEventListener('click', (e) => { if (e.target.closest('.watch-remove')) return; selectTicker(el.dataset.ticker); });
   });
-  els.watchlist.querySelectorAll('.watch-remove').forEach(btn => {
+  els.report.querySelectorAll('.watch-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const ticker = btn.dataset.remove;
       toggleWatchlist(ticker);
       delete watchState.data[ticker];
-      renderWatchlist();
+      renderReport();
     });
   });
 
@@ -1347,16 +1670,81 @@ function renderWatchlist() {
   if (sortSel) sortSel.addEventListener('change', () => {
     watchState.sortBy = sortSel.value;
     lsSetSafe('icp_watch_sort', watchState.sortBy);
-    renderWatchlist();
+    renderReport();
   });
   const filterSel = document.getElementById('watch-filter');
   if (filterSel) filterSel.addEventListener('change', () => {
     watchState.filterSignal = filterSel.value;
     lsSetSafe('icp_watch_filter', watchState.filterSignal);
-    renderWatchlist();
+    renderReport();
   });
   const alertsBtn = document.getElementById('watch-alerts-toggle');
   if (alertsBtn) alertsBtn.addEventListener('click', toggleAlerts);
+}
+
+/** Página de Noticias & Macro: chips macro (ya reales, misma fuente que la
+ *  ficha de cada activo) + noticias generales de mercado (no ligadas a un
+ *  ticker puntual). */
+const macroNewsState = { macro: null, news: null, loading: false, loadedAt: 0 };
+function macroNewsPageHTML() {
+  const macro = macroNewsState.macro;
+  const news = macroNewsState.news;
+  return `
+    ${sectionTitleHTML('Noticias & Macro', 'globe')}
+    <div class="dash-intro">Contexto macroeconómico y noticias generales del mercado — la misma fuente que se usa en cada ficha individual, acá agregada en una sola vista.</div>
+    <div class="card macro-card" style="margin-bottom:28px;">
+      ${macro ? macroChips(macro).map(mc => `<div class="macro-chip">${mc.live ? '<span class="macro-chip-live" title="En vivo"></span>' : ''}<span class="macro-chip-label">${esc(mc.label)}: </span><span class="macro-chip-value">${esc(mc.value)}</span>${typeof mc.live === 'string' ? ` <span class="macro-chip-var">(${esc(mc.live)})</span>` : ''}</div>`).join('') : `<div class="dash-loading-note">Cargando…</div>`}
+    </div>
+    ${sectionTitleHTML('Noticias generales', 'news', 'margin-top:8px;')}
+    <div class="card news-card">
+      ${!news ? `<div class="dash-loading-note">Cargando…</div>` : news.items?.length ? news.items.map(n => `
+        <div class="news-item">
+          <div class="news-tag" style="background:${n.bg}; color:${n.color};">${esc(n.tag)}</div>
+          <div class="news-text">${esc(n.text)}${n.source ? ` <span class="news-source">— ${esc(n.source)}</span>` : ''}</div>
+        </div>`).join('') : `<div class="news-empty">Sin noticias generales disponibles en este momento.</div>`}
+    </div>`;
+}
+function wireMacroNewsEvents() { /* sin interacciones propias por ahora */ }
+async function loadMacroNewsData() {
+  if (macroNewsState.loading || Date.now() - macroNewsState.loadedAt < 3 * 60 * 1000) return;
+  macroNewsState.loading = true;
+  try {
+    const [macro, news] = await Promise.all([getMacro(), getGeneralNews()]);
+    macroNewsState.macro = macro;
+    macroNewsState.news = news;
+    macroNewsState.loadedAt = Date.now();
+  } catch (e) {
+    console.warn('[macro-news] no se pudo cargar', e.message);
+  } finally {
+    macroNewsState.loading = false;
+    if (!state.asset && state.view === 'macro') renderReport();
+  }
+}
+
+/** Página de Alertas: activos en seguimiento cuya señal de precio está
+ *  activa ahora mismo (zona de compra/venta o stop) — deriva 100% de
+ *  watchState.data, ya calculado por Seguimiento, sin pedidos propios. */
+function alertsPageHTML() {
+  const tickers = getWatchlist().filter(t => watchState.data[t]?.alert);
+  return `
+    ${sectionTitleHTML('Alertas', 'warning')}
+    <div class="dash-intro">Activos en tu Watchlist que están, ahora mismo, en zona de compra, zona de venta o tocaron el stop loss según el análisis técnico. Activá las notificaciones del navegador desde Watchlist para recibir un aviso apenas cambie una señal.</div>
+    ${!tickers.length ? `<div class="card watch-empty">Ningún activo en seguimiento tiene una alerta activa en este momento.</div>` : `
+    <div class="watch-grid">${tickers.map(watchCardHTML).join('')}</div>`}`;
+}
+function wireAlertsEvents() {
+  els.report.querySelectorAll('.watch-card').forEach(el => {
+    el.addEventListener('click', (e) => { if (e.target.closest('.watch-remove')) return; selectTicker(el.dataset.ticker); });
+  });
+  els.report.querySelectorAll('.watch-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ticker = btn.dataset.remove;
+      toggleWatchlist(ticker);
+      delete watchState.data[ticker];
+      renderReport();
+    });
+  });
 }
 
 /** Score liviano (quote + candles diarios, sin fundamentales/noticias/semanal
@@ -1382,13 +1770,20 @@ async function computeLightSignal(ticker, macro) {
   };
 }
 
+// Seguimiento no tiene una sola página fija: alimenta Watchlist, Alertas y
+// (más abajo) el widget "Watchlist Rápido" del Dashboard — se refresca la
+// pantalla solo si alguna de esas vistas está activa en este momento.
+function refreshIfWatchlistVisible() {
+  if (!state.asset && (state.view === 'watchlist' || state.view === 'alerts' || state.view === 'dashboard')) renderReport();
+}
+
 async function loadWatchlistData() {
   const tickers = getWatchlist();
   const macro = await getMacro();
   await Promise.all(tickers.map(async (ticker) => {
     if (watchState.loading.has(ticker)) return;
     watchState.loading.add(ticker);
-    renderWatchlist();
+    refreshIfWatchlistVisible();
     try {
       const signal = await computeLightSignal(ticker, macro);
       notifyIfNewAlert(ticker, signal.alert);
@@ -1397,7 +1792,7 @@ async function loadWatchlistData() {
       console.warn('[watchlist] no se pudo cargar', ticker, e.message);
     } finally {
       watchState.loading.delete(ticker);
-      renderWatchlist();
+      refreshIfWatchlistVisible();
     }
   }));
 }
@@ -1423,11 +1818,11 @@ async function loadDashboardData() {
 /* ───────────────────────── init ───────────────────────── */
 renderTopbar();
 renderReport();
-renderWatchlist();
 initSearch();
 loadWatchlistData();
 document.getElementById('wordmark-home')?.addEventListener('click', () => {
   state.asset = null; state.report = null; state.error = null; state.loading = false;
+  state.view = 'dashboard';
   els.tickerchip.textContent = '—';
   renderTopbar();
   renderReport();
@@ -1441,3 +1836,4 @@ setInterval(() => { if (state.asset) loadReport(state.asset.ticker); }, 180 * 10
 setInterval(loadWatchlistData, 180 * 1000);
 setInterval(() => { if (!state.asset) loadDashboardData(); }, 180 * 1000);
 setInterval(() => { if (!state.asset && state.view === 'portfolio') { portState.data = {}; loadPortfolioData(); } }, 180 * 1000);
+setInterval(() => { if (!state.asset && state.view === 'macro') loadMacroNewsData(); }, 180 * 1000);

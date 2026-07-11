@@ -207,3 +207,53 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
       <span><i style="background:${TP_COLOR};"></i>Take profit 1</span>` : ''}
     </div>`;
 }
+
+/** Radar/spider chart SVG puro: compara los sub-scores del activo (0-100
+ *  por eje) contra el promedio real de sus pares del mismo sector. Ejes con
+ *  valor no disponible (fundamentales sin cobertura, etc.) se dibujan en el
+ *  centro (0) en vez de inventarse — el label lo aclara aparte. */
+const RADAR_ACCENT = 'oklch(0.70 0.19 291)', RADAR_PEER = 'oklch(0.58 0.018 260)';
+export function renderRadarSVG(labels, assetValues, peerValues) {
+  const n = labels.length;
+  if (n < 3) return '<div class="chart-empty">Ejes insuficientes para el radar.</div>';
+  const size = 300, cx = size / 2, cy = size / 2 - 6, maxR = 92;
+  const angleFor = (i) => -Math.PI / 2 + i * (2 * Math.PI / n);
+  const pointFor = (i, val) => {
+    const r = (Math.max(0, Math.min(100, val ?? 0)) / 100) * maxR;
+    const a = angleFor(i);
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  };
+  const polygon = (values, color, fillOpacity) => {
+    const pts = values.map((v, i) => pointFor(i, v).map(n => n.toFixed(1)).join(',')).join(' ');
+    return `<polygon points="${pts}" fill="${color}" fill-opacity="${fillOpacity}" stroke="${color}" stroke-width="1.8"/>`;
+  };
+
+  let gridSvg = '';
+  for (const frac of [0.25, 0.5, 0.75, 1]) {
+    const pts = labels.map((_, i) => {
+      const a = angleFor(i);
+      return [cx + frac * maxR * Math.cos(a), cy + frac * maxR * Math.sin(a)].map(n => n.toFixed(1)).join(',');
+    }).join(' ');
+    gridSvg += `<polygon points="${pts}" fill="none" stroke="${GRID}" stroke-width="1"/>`;
+  }
+  let axisSvg = '', labelSvg = '';
+  labels.forEach((label, i) => {
+    const [ex, ey] = pointFor(i, 100);
+    axisSvg += `<line x1="${cx}" y1="${cy}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" stroke="${GRID}" stroke-width="1"/>`;
+    const [lx, ly] = pointFor(i, 122);
+    const anchor = Math.abs(lx - cx) < 4 ? 'middle' : lx > cx ? 'start' : 'end';
+    labelSvg += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" fill="${AXIS_TEXT}" font-size="11" font-family="IBM Plex Sans, sans-serif" text-anchor="${anchor}" dominant-baseline="middle">${label}</text>`;
+  });
+
+  const peerSvg = peerValues ? polygon(peerValues, RADAR_PEER, 0.12) : '';
+  const assetSvg = polygon(assetValues, RADAR_ACCENT, 0.22);
+
+  return `
+    <svg viewBox="0 0 ${size} ${size - 10}" width="100%" height="260" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Radar comparativo vs sector">
+      ${gridSvg}
+      ${axisSvg}
+      ${peerSvg}
+      ${assetSvg}
+      ${labelSvg}
+    </svg>`;
+}
