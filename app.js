@@ -5,7 +5,7 @@ import { renderPriceChartSVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
 
-const GREEN = 'oklch(0.68 0.13 150)', AMBER = 'oklch(0.72 0.11 85)', RED = 'oklch(0.65 0.15 25)';
+const GREEN = 'oklch(0.76 0.18 152)', AMBER = 'oklch(0.75 0.15 70)', RED = 'oklch(0.70 0.21 23)';
 
 const els = {
   datebadge: document.getElementById('datebadge'),
@@ -102,12 +102,12 @@ function chartTabsForAsset(asset) {
   return asset?.category === 'Cripto' ? CHART_TABS.filter(t => t.key === '1day' || t.key === '1week') : CHART_TABS;
 }
 
-function chartCardBody(dailyTechnical) {
+function chartCardBody(dailyTechnical, plan) {
   const tf = chartState.tf;
   const entry = chartState.cache[tf];
   if (chartState.loading.has(tf) && !entry) return `<div class="skel skel-chart"></div>`;
   if (!entry) return `<div class="chart-empty">Sin datos para este timeframe todavía.</div>`;
-  const svg = renderPriceChartSVG(entry.candles, { support: dailyTechnical.support, resistance: dailyTechnical.resistance });
+  const svg = renderPriceChartSVG(entry.candles, { support: dailyTechnical.support, resistance: dailyTechnical.resistance, plan: plan?.raw });
   const staleNote = entry.isReal === false ? `<div class="chart-stale">Datos de demostración — sin conexión al proveedor para este timeframe.</div>` : '';
   return svg + staleNote;
 }
@@ -148,6 +148,27 @@ const fmtPct = (n, digits = 1) => n == null || isNaN(n) ? 'N/D' : `${n >= 0 ? '+
 const fmtNum = (n, digits = 2) => n == null || isNaN(n) ? 'N/D' : n.toFixed(digits);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+/* ───────────────────────── iconografía (SVG inline, sin dependencias) ───────────────────────── */
+const ICON_ATTR = 'class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
+const ICONS = {
+  chart: `<svg ${ICON_ATTR}><polyline points="3,17 9,10 13,14 21,5"/><circle cx="21" cy="5" r="1.4" fill="currentColor" stroke="none"/></svg>`,
+  briefcase: `<svg ${ICON_ATTR}><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`,
+  warning: `<svg ${ICON_ATTR}><path d="M12 3.5 21.5 20h-19z"/><line x1="12" y1="9.5" x2="12" y2="14"/><circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none"/></svg>`,
+  bulb: `<svg ${ICON_ATTR}><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.5.4.8 1 .8 1.6V16h5.4v-.5c0-.6.3-1.2.8-1.6A6 6 0 0 0 12 3Z"/></svg>`,
+  target: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.8"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg>`,
+  check: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="8.5"/><polyline points="8,12.5 11,15.5 16,9"/></svg>`,
+  grid: `<svg ${ICON_ATTR}><rect x="3" y="3" width="7.5" height="7.5" rx="1.2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.2"/></svg>`,
+  trend: `<svg ${ICON_ATTR}><polyline points="3,16 10,9 14,13 21,5"/><polyline points="15,5 21,5 21,11"/></svg>`,
+  radar: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.2"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><line x1="12" y1="12" x2="18" y2="6.5"/></svg>`,
+  bookmark: `<svg ${ICON_ATTR}><path d="M6 3.5h12a1 1 0 0 1 1 1V21l-7-4.2L5 21V4.5a1 1 0 0 1 1-1Z"/></svg>`,
+  globe: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="3.6" ry="8.5"/><line x1="3.5" y1="12" x2="20.5" y2="12"/></svg>`,
+  news: `<svg ${ICON_ATTR}><rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><line x1="7" y1="8.5" x2="17" y2="8.5"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="15.5" x2="13" y2="15.5"/></svg>`,
+  building: `<svg ${ICON_ATTR}><rect x="5" y="3.5" width="10" height="17" rx="1"/><rect x="15" y="9" width="4.5" height="11.5" rx="1"/><line x1="8" y1="7.5" x2="8" y2="7.5"/><line x1="8" y1="11" x2="8" y2="11"/><line x1="12" y1="7.5" x2="12" y2="7.5"/><line x1="12" y1="11" x2="12" y2="11"/><line x1="8" y1="14.5" x2="8" y2="14.5"/><line x1="12" y1="14.5" x2="12" y2="14.5"/></svg>`,
+};
+function sectionTitleHTML(text, iconKey, style = '') {
+  return `<div class="sectiontitle" ${style ? `style="${style}"` : ''}>${ICONS[iconKey] ?? ''}<span>${esc(text)}</span></div>`;
+}
+
 function relativeTime(ts) {
   if (!ts) return 'sin datos';
   const diffMs = Date.now() - ts;
@@ -175,10 +196,10 @@ function renderTopbar() {
 
   const r = state.report;
   let conn;
-  if (!r) conn = { text: 'Dashboard — buscá un activo para el informe completo', color: AMBER, border: 'oklch(0.40 0.06 85)' };
-  else if (r.quote.isReal && r.candles.isReal) conn = { text: 'Conectado a fuente de datos en vivo', color: GREEN, border: 'oklch(0.40 0.08 150)' };
-  else if (r.quote.isReal || r.candles.isReal) conn = { text: 'Datos parcialmente en vivo — alguna fuente cayó a caché', color: AMBER, border: 'oklch(0.40 0.06 85)' };
-  else conn = { text: 'Sin conexión al proveedor de datos — mostrando último valor disponible', color: RED, border: 'oklch(0.40 0.08 25)' };
+  if (!r) conn = { text: 'Dashboard — buscá un activo para el informe completo', color: AMBER, border: 'oklch(0.42 0.08 70)' };
+  else if (r.quote.isReal && r.candles.isReal) conn = { text: 'Conectado a fuente de datos en vivo', color: GREEN, border: 'oklch(0.45 0.10 152)' };
+  else if (r.quote.isReal || r.candles.isReal) conn = { text: 'Datos parcialmente en vivo — alguna fuente cayó a caché', color: AMBER, border: 'oklch(0.42 0.08 70)' };
+  else conn = { text: 'Sin conexión al proveedor de datos — mostrando último valor disponible', color: RED, border: 'oklch(0.45 0.12 23)' };
 
   els.connbanner.style.color = conn.color;
   els.connbanner.style.border = `1px solid ${conn.border}`;
@@ -417,7 +438,7 @@ function reportSkeletonHTML() {
       </div>
     </div>
     <div class="card thermo-card">${skelRow('100%')}</div>
-    <div class="sectiontitle">Gráfico de Precio</div>
+    ${sectionTitleHTML('Gráfico de Precio', 'chart')}
     <div class="card chart-card"><div class="skel skel-chart"></div></div>
     <div class="card score-card">
       ${Array.from({ length: 6 }).map(() => `<div class="skel-row"><div class="skel" style="width:110px; height:12px;"></div><div class="skel" style="flex:1; height:8px;"></div></div>`).join('')}
@@ -469,12 +490,12 @@ function renderReport() {
   const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation, earnings, daysToEarnings, earningsSoon } = r;
 
   const trendUp = quote.changePct >= 0;
-  const trendBg = trendUp ? 'oklch(0.28 0.06 150)' : 'oklch(0.28 0.06 25)';
-  const trendColor = trendUp ? 'oklch(0.82 0.11 150)' : 'oklch(0.82 0.11 25)';
+  const trendBg = trendUp ? 'oklch(0.30 0.09 152)' : 'oklch(0.30 0.10 23)';
+  const trendColor = trendUp ? 'oklch(0.87 0.14 152)' : 'oklch(0.86 0.15 23)';
   const trendLabel = `${trendUp ? 'Tendencia Alcista' : 'Tendencia Bajista'} (${fmtPct(quote.changePct)})`;
 
   const deg = Math.round(clampNum(score, 0, 100) / 100 * 360);
-  const gaugeGradient = `conic-gradient(oklch(0.72 0.11 85) ${deg}deg, oklch(0.30 0.01 60) ${deg}deg)`;
+  const gaugeGradient = `conic-gradient(oklch(0.80 0.15 85) ${deg}deg, oklch(0.28 0.03 262) ${deg}deg)`;
   const thermoPos = Math.min(97, Math.max(3, score));
 
   const freshTechnical = freshnessFor(ts.candles, quote.isReal && r.candles.isReal);
@@ -497,7 +518,7 @@ function renderReport() {
     </div>` : '';
 
   els.report.innerHTML = `
-    <div class="sectiontitle">Resumen Ejecutivo</div>
+    ${sectionTitleHTML('Resumen Ejecutivo', 'briefcase')}
     <div class="exec-grid">
       <div class="card exec-card">
         <div class="exec-name-row">
@@ -532,16 +553,16 @@ function renderReport() {
       <div class="thermo-valuewrap"><div class="thermo-value" style="left:${thermoPos}%;">${score}</div></div>
     </div>
 
-    <div class="sectiontitle">Gráfico de Precio</div>
+    ${sectionTitleHTML('Gráfico de Precio', 'chart')}
     <div class="card chart-card">
       <div class="chart-tabs">
         ${chartTabsForAsset(asset).map(tab => `<button class="chart-tab ${chartState.tf === tab.key ? 'active' : ''}" data-tf="${tab.key}">${tab.label}</button>`).join('')}
       </div>
-      ${chartCardBody(t)}
+      ${chartCardBody(t, plan)}
     </div>
 
     <div class="card score-card">
-      <div class="score-card-title">Composición del Score ${coverageWeight < fullWeight ? `<span style="text-transform:none; letter-spacing:0; color:oklch(0.55 0.01 70);">— calculado sobre ${coverageWeight}/${fullWeight} puntos de peso (categorías sin datos excluidas y redistribuidas)</span>` : ''}</div>
+      <div class="score-card-title">Composición del Score ${coverageWeight < fullWeight ? `<span style="text-transform:none; letter-spacing:0; color:oklch(0.58 0.018 260);">— calculado sobre ${coverageWeight}/${fullWeight} puntos de peso (categorías sin datos excluidas y redistribuidas)</span>` : ''}</div>
       <div class="score-rows">
         ${scoreBreakdown.map(sb => `
           <div class="score-row">
@@ -555,7 +576,7 @@ function renderReport() {
     <div class="grid2">
       <div>
         <div class="panel-header">
-          <div class="panel-title">Análisis Técnico</div>
+          <div class="panel-title">${ICONS.chart}<span>Análisis Técnico</span></div>
           <div class="freshness" style="color:${freshTechnical.color};"><span class="dot" style="background:${freshTechnical.color};"></span>${esc(freshTechnical.text)}</div>
         </div>
         <div class="card panel-card">
@@ -567,7 +588,7 @@ function renderReport() {
       </div>
       <div>
         <div class="panel-header">
-          <div class="panel-title">Análisis Fundamental</div>
+          <div class="panel-title">${ICONS.building}<span>Análisis Fundamental</span></div>
           <div class="freshness" style="color:${freshFundamental.color};"><span class="dot" style="background:${freshFundamental.color};"></span>${esc(freshFundamental.text)}</div>
         </div>
         <div class="card panel-card">
@@ -582,7 +603,7 @@ function renderReport() {
     <div class="grid2-macronews">
       <div>
         <div class="panel-header">
-          <div class="panel-title">Contexto Macro</div>
+          <div class="panel-title">${ICONS.globe}<span>Contexto Macro</span></div>
           <div class="freshness" style="color:${freshMacro.color};"><span class="dot" style="background:${freshMacro.color};"></span>${esc(freshMacro.text)}</div>
         </div>
         <div class="card macro-card">
@@ -591,7 +612,7 @@ function renderReport() {
       </div>
       <div>
         <div class="panel-header">
-          <div class="panel-title">Noticias Recientes</div>
+          <div class="panel-title">${ICONS.news}<span>Noticias Recientes</span></div>
           <div class="freshness" style="color:${freshNews.color};"><span class="dot" style="background:${freshNews.color};"></span>${esc(freshNews.text)}</div>
         </div>
         <div class="card news-card">
@@ -606,17 +627,17 @@ function renderReport() {
 
     <div class="grid2">
       <div>
-        <div class="sectiontitle">Riesgos</div>
+        ${sectionTitleHTML('Riesgos', 'warning')}
         <div class="card rc-card"><ul class="rc-list">${risks.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
       </div>
       <div>
-        <div class="sectiontitle">Catalizadores</div>
+        ${sectionTitleHTML('Catalizadores', 'bulb')}
         <div class="card rc-card"><ul class="rc-list">${catalysts.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
       </div>
     </div>
 
     <div class="panel-header">
-      <div class="sectiontitle" style="margin-bottom:0;">Plan Operativo</div>
+      ${sectionTitleHTML('Plan Operativo', 'target', 'margin-bottom:0;')}
       <div class="freshness" style="color:${freshPlan.color};"><span class="dot" style="background:${freshPlan.color};"></span>${esc(freshPlan.text)}</div>
     </div>
     <div class="card plan-card" style="opacity:${planOpacity};">
@@ -635,7 +656,7 @@ function renderReport() {
       </div>
     </div>
 
-    <div class="sectiontitle">Conclusión</div>
+    ${sectionTitleHTML('Conclusión', 'check')}
     <div class="card conclusion-card">
       <div class="conclusion-text">${esc(conclusionText(r))}</div>
     </div>
@@ -752,11 +773,11 @@ function macroChips(macro) {
 
 /* ───────────────────────── seguimiento (watchlist) ───────────────────────── */
 function scoreLabelColor(label) {
-  if (label === 'Compra Fuerte') return { bg: 'oklch(0.30 0.07 150)', color: 'oklch(0.85 0.10 150)' };
-  if (label === 'Compra Moderada') return { bg: 'oklch(0.27 0.05 150)', color: 'oklch(0.78 0.09 150)' };
-  if (label === 'Mantener') return { bg: 'oklch(0.28 0.05 85)', color: 'oklch(0.78 0.09 85)' };
-  if (label === 'Reducir') return { bg: 'oklch(0.28 0.06 45)', color: 'oklch(0.78 0.10 45)' };
-  return { bg: 'oklch(0.28 0.07 25)', color: 'oklch(0.82 0.11 25)' }; // Venta
+  if (label === 'Compra Fuerte') return { bg: 'oklch(0.32 0.11 152)', color: 'oklch(0.90 0.16 152)' };
+  if (label === 'Compra Moderada') return { bg: 'oklch(0.28 0.08 152)', color: 'oklch(0.83 0.14 152)' };
+  if (label === 'Mantener') return { bg: 'oklch(0.30 0.09 70)', color: 'oklch(0.85 0.13 70)' };
+  if (label === 'Reducir') return { bg: 'oklch(0.30 0.10 45)', color: 'oklch(0.85 0.14 45)' };
+  return { bg: 'oklch(0.30 0.12 23)', color: 'oklch(0.88 0.16 23)' }; // Venta
 }
 
 function sortAndFilterTickers(tickers) {
@@ -782,8 +803,8 @@ function sortAndFilterTickers(tickers) {
 function homeNavHTML() {
   return `
     <div class="home-nav">
-      <button class="home-nav-btn ${state.view === 'dashboard' ? 'active' : ''}" data-view="dashboard">Dashboard</button>
-      <button class="home-nav-btn ${state.view === 'portfolio' ? 'active' : ''}" data-view="portfolio">Portfolio Advisor</button>
+      <button class="home-nav-btn ${state.view === 'dashboard' ? 'active' : ''}" data-view="dashboard">${ICONS.grid}Dashboard</button>
+      <button class="home-nav-btn ${state.view === 'portfolio' ? 'active' : ''}" data-view="portfolio">${ICONS.briefcase}Portfolio Advisor</button>
     </div>`;
 }
 
@@ -835,14 +856,14 @@ function dashboardHTML() {
   const radarRow = (label, valueHtml) => `<div class="dash-radar-row"><span class="dash-radar-label">${label}</span><span class="dash-radar-count">${valueHtml}</span></div>`;
 
   return `
-    <div class="sectiontitle">Dashboard</div>
+    ${sectionTitleHTML('Dashboard', 'grid')}
     <div class="dash-intro">Oportunidades del día y radar del mercado sobre un universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos (acciones US, CEDEARs argentinos, ETFs y cripto) — no es todo el universo buscable, para no exceder el límite de requests del proveedor de datos gratuito. Elegí cualquiera para ver el informe completo, o buscá otro activo arriba.</div>
 
-    <div class="sectiontitle" style="margin-top:28px;">Oportunidades del Día</div>
+    ${sectionTitleHTML('Oportunidades del Día', 'trend', 'margin-top:28px;')}
     ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
     ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}
 
-    <div class="sectiontitle">Radar del Mercado</div>
+    ${sectionTitleHTML('Radar del Mercado', 'radar')}
     <div class="dash-radar-grid">
       <div class="card dash-radar-card">
         <div class="dash-radar-title">Señales</div>
@@ -948,10 +969,10 @@ function portfolioRiskNotes(stats) {
  *  mismo "Compra Fuerte" en general que "Compra Fuerte" cuando ya estás
  *  parado en la posición y perdiendo, ganando, o recién por entrar. */
 const RECO_TONE = {
-  buy: { bg: 'oklch(0.30 0.07 150)', color: 'oklch(0.85 0.10 150)' },
-  hold: { bg: 'oklch(0.28 0.05 85)', color: 'oklch(0.78 0.09 85)' },
-  reduce: { bg: 'oklch(0.28 0.06 45)', color: 'oklch(0.78 0.10 45)' },
-  sell: { bg: 'oklch(0.28 0.07 25)', color: 'oklch(0.82 0.11 25)' },
+  buy: { bg: 'oklch(0.32 0.11 152)', color: 'oklch(0.90 0.16 152)' },
+  hold: { bg: 'oklch(0.30 0.09 70)', color: 'oklch(0.85 0.13 70)' },
+  reduce: { bg: 'oklch(0.30 0.10 45)', color: 'oklch(0.85 0.14 45)' },
+  sell: { bg: 'oklch(0.30 0.12 23)', color: 'oklch(0.88 0.16 23)' },
 };
 
 function portfolioRecommendation(r) {
@@ -1026,7 +1047,7 @@ function portfolioHTML() {
   const editingHolding = portState.editing ? holdings.find(h => h.ticker === portState.editing) : null;
 
   return `
-    <div class="sectiontitle">Portfolio Advisor</div>
+    ${sectionTitleHTML('Portfolio Advisor', 'briefcase')}
     <div class="dash-intro">Cargá tus tenencias (ticker, cantidad y costo promedio opcional) para ver diversificación, concentración y señal de cada posición con datos reales. Si compraste CEDEARs en pesos, elegí "ARS (CEDEAR)" — el P&amp;L se compara contra el precio del CEDEAR en pesos (vía CCL), no contra el precio en dólares del subyacente. Se guarda solo en este navegador.</div>
 
     <div class="card port-form-card">
@@ -1254,14 +1275,14 @@ function renderWatchlist() {
   const allTickers = getWatchlist();
   if (!allTickers.length) {
     els.watchlist.innerHTML = `
-      <div class="sectiontitle">Seguimiento</div>
+      ${sectionTitleHTML('Seguimiento', 'bookmark')}
       <div class="card watch-empty">Todavía no agregaste activos. Buscá uno y tocá la ☆ para tenerlo siempre a mano acá (máx. ${WATCHLIST_MAX}).</div>`;
     return;
   }
   const tickers = sortAndFilterTickers(allTickers);
   els.watchlist.innerHTML = `
     <div class="panel-header">
-      <div class="sectiontitle" style="margin-bottom:0;">Seguimiento</div>
+      ${sectionTitleHTML('Seguimiento', 'bookmark', 'margin-bottom:0;')}
       <div class="watch-controls">
         <button class="watch-alerts-btn ${alertsEnabled ? 'on' : ''}" id="watch-alerts-toggle" title="Avisar cuando un activo entra en zona de compra/venta o toca el stop">
           ${alertsEnabled ? '🔔 Alertas activas' : '🔕 Activar alertas'}

@@ -1,13 +1,14 @@
 /**
  * chart.js — Gráfico de precio en SVG puro (sin dependencias externas).
  * Panel de precio (velas + EMA20/50 + Bandas de Bollinger + soporte/
- * resistencia) con paneles de Volumen y RSI debajo, todo sobre el mismo
- * OHLCV real que usa indicators.js — nada se simula acá.
+ * resistencia + zonas de compra/venta del plan operativo) con paneles de
+ * Volumen y RSI debajo, todo sobre el mismo OHLCV real que usa
+ * indicators.js — nada se simula acá.
  */
 import { ema, bollinger, rsi } from './indicators.js';
 
 const W = 960;
-const PAD_L = 6, PAD_R = 60;
+const PAD_L = 6, PAD_R = 76;
 const GAP = 16;
 const PRICE_H = 240, VOL_H = 56, RSI_H = 80;
 const DATE_H = 24;
@@ -19,10 +20,14 @@ const RSI_TOP = VOL_BOTTOM + GAP;
 const RSI_BOTTOM = RSI_TOP + RSI_H;
 const H = RSI_BOTTOM + DATE_H;
 
-const GREEN = 'oklch(0.62 0.15 150)', RED = 'oklch(0.60 0.16 25)';
-const GOLD = 'oklch(0.72 0.11 85)', WHITE = 'oklch(0.85 0.012 80)';
-const BLUE = 'oklch(0.68 0.12 250)';
-const GRID = 'oklch(0.30 0.01 60)', AXIS_TEXT = 'oklch(0.55 0.01 70)', PANEL_LABEL = 'oklch(0.60 0.01 70)';
+const GREEN = 'oklch(0.72 0.17 152)', RED = 'oklch(0.68 0.19 23)';
+const GOLD = 'oklch(0.80 0.15 85)', WHITE = 'oklch(0.90 0.012 260)';
+const BLUE = 'oklch(0.78 0.13 199)';
+const GRID = 'oklch(0.32 0.03 262)', AXIS_TEXT = 'oklch(0.58 0.018 260)', PANEL_LABEL = 'oklch(0.62 0.018 260)';
+const BUY_ZONE_FILL = 'oklch(0.72 0.17 152 / 0.16)', BUY_ZONE_LINE = 'oklch(0.76 0.18 152 / 0.55)';
+const SELL_ZONE_FILL = 'oklch(0.75 0.15 70 / 0.16)', SELL_ZONE_LINE = 'oklch(0.75 0.15 70 / 0.55)';
+const STOP_COLOR = 'oklch(0.70 0.21 23)';
+const TP_COLOR = 'oklch(0.80 0.15 85)';
 
 function scaleY(value, min, max, top, bottom) {
   if (max === min) return (top + bottom) / 2;
@@ -44,7 +49,7 @@ function polyline(series, x, y, color, opacity = 0.9) {
   return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" opacity="${opacity}"/>` : '';
 }
 
-export function renderPriceChartSVG(candles, { support, resistance } = {}, windowSize = 130) {
+export function renderPriceChartSVG(candles, { support, resistance, plan } = {}, windowSize = 130) {
   const nTotal = candles.c.length;
   if (nTotal < 5) return '<div class="chart-empty">Historial insuficiente para graficar.</div>';
 
@@ -73,9 +78,45 @@ export function renderPriceChartSVG(candles, { support, resistance } = {}, windo
   if (bbValsLower.length) pMin = Math.min(pMin, ...bbValsLower);
   if (support != null && isFinite(support)) pMin = Math.min(pMin, support);
   if (resistance != null && isFinite(resistance)) pMax = Math.max(pMax, resistance);
+  if (plan) {
+    if (isFinite(plan.buyLow)) pMin = Math.min(pMin, plan.buyLow);
+    if (isFinite(plan.stopLoss)) pMin = Math.min(pMin, plan.stopLoss);
+    if (isFinite(plan.tp1)) pMax = Math.max(pMax, plan.tp1);
+    if (isFinite(plan.sellHigh)) pMax = Math.max(pMax, plan.sellHigh);
+  }
   const pPad = (pMax - pMin) * 0.08 || pMax * 0.02 || 1;
   pMin -= pPad; pMax += pPad;
   const yPrice = (val) => scaleY(val, pMin, pMax, PRICE_TOP, PRICE_BOTTOM);
+
+  /* ── zonas de compra/venta del plan operativo (señal visual del análisis) ── */
+  let zonesSvg = '';
+  const pillLabel = (xLeft, yCenter, label, bg, fg, anchor = 'start') => {
+    const w = label.length * 6.3 + 12;
+    const rectX = anchor === 'start' ? xLeft : xLeft - w;
+    return `<rect x="${rectX.toFixed(1)}" y="${(yCenter - 8).toFixed(1)}" width="${w.toFixed(1)}" height="16" rx="3" fill="${bg}"/>
+      <text x="${(anchor === 'start' ? xLeft + 5 : xLeft - 5).toFixed(1)}" y="${yCenter.toFixed(1)}" fill="${fg}" font-size="10" font-weight="700" font-family="IBM Plex Mono, monospace" letter-spacing="0.3" text-anchor="${anchor === 'start' ? 'start' : 'end'}" dominant-baseline="middle">${label}</text>`;
+  };
+  const zoneBand = (lo, hi, fill, lineColor, label, pillBg, pillFg) => {
+    if (lo == null || hi == null || !isFinite(lo) || !isFinite(hi)) return '';
+    const yTop = yPrice(Math.max(lo, hi)), yBottom = yPrice(Math.min(lo, hi));
+    const bandH = Math.max(1, yBottom - yTop);
+    return `<rect x="${PAD_L}" y="${yTop.toFixed(1)}" width="${(W - PAD_L - PAD_R)}" height="${bandH.toFixed(1)}" fill="${fill}"/>
+      <line x1="${PAD_L}" y1="${yTop.toFixed(1)}" x2="${W - PAD_R}" y2="${yTop.toFixed(1)}" stroke="${lineColor}" stroke-width="1" stroke-dasharray="2 3"/>
+      <line x1="${PAD_L}" y1="${yBottom.toFixed(1)}" x2="${W - PAD_R}" y2="${yBottom.toFixed(1)}" stroke="${lineColor}" stroke-width="1" stroke-dasharray="2 3"/>
+      ${pillLabel(PAD_L + 8, yTop + 11, label, pillBg, pillFg)}`;
+  };
+  const zoneLine = (value, color, label, textColor) => {
+    if (value == null || !isFinite(value)) return '';
+    const yy = yPrice(value);
+    return `<line x1="${PAD_L}" y1="${yy.toFixed(1)}" x2="${W - PAD_R}" y2="${yy.toFixed(1)}" stroke="${color}" stroke-width="1.4" stroke-dasharray="6 3" opacity="0.9"/>
+      ${pillLabel(W - PAD_R + 6, yy, label, color, textColor)}`;
+  };
+  if (plan) {
+    zonesSvg += zoneBand(plan.buyLow, plan.buyHigh, BUY_ZONE_FILL, BUY_ZONE_LINE, 'ZONA DE COMPRA', 'oklch(0.30 0.09 152 / 0.85)', GREEN);
+    zonesSvg += zoneBand(plan.sellLow, plan.sellHigh, SELL_ZONE_FILL, SELL_ZONE_LINE, 'ZONA DE VENTA', 'oklch(0.32 0.08 70 / 0.85)', GOLD);
+    zonesSvg += zoneLine(plan.stopLoss, STOP_COLOR, `STOP ${niceFmt(plan.stopLoss)}`, 'oklch(0.16 0.03 23)');
+    zonesSvg += zoneLine(plan.tp1, TP_COLOR, `TP1 ${niceFmt(plan.tp1)}`, 'oklch(0.18 0.03 85)');
+  }
 
   let candlesSvg = '';
   for (let i = 0; i < count; i++) {
@@ -91,15 +132,10 @@ export function renderPriceChartSVG(candles, { support, resistance } = {}, windo
   const bbSvg = polyline(bbUpper, x, yPrice, BLUE, 0.55) + polyline(bbLower, x, yPrice, BLUE, 0.55);
   const emaSvg = polyline(ema20, x, yPrice, GOLD) + polyline(ema50, x, yPrice, WHITE);
 
-  let refSvg = '';
-  const refLine = (value, color, label) => {
-    if (value == null || !isFinite(value)) return '';
-    const yy = yPrice(value).toFixed(1);
-    return `<line x1="${PAD_L}" y1="${yy}" x2="${W - PAD_R}" y2="${yy}" stroke="${color}" stroke-width="1" stroke-dasharray="4 4" opacity="0.7"/>
-      <text x="${W - PAD_R + 6}" y="${yy}" fill="${color}" font-size="10" font-family="IBM Plex Mono, monospace" dominant-baseline="middle">${label}</text>`;
-  };
-  refSvg += refLine(resistance, RED, niceFmt(resistance));
-  refSvg += refLine(support, GREEN, niceFmt(support));
+  // Soporte/resistencia ya no se dibujan como líneas propias: la zona de
+  // compra/venta del plan operativo (abajo) se construye a partir de ellos
+  // y muestra la misma información de forma más accionable, sin duplicar
+  // etiquetas superpuestas en el margen derecho.
 
   let priceGridSvg = '';
   for (let i = 0; i <= 4; i++) {
@@ -149,7 +185,7 @@ export function renderPriceChartSVG(candles, { support, resistance } = {}, windo
   return `
     <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Gráfico de precio con volumen y RSI">
       ${priceGridSvg}
-      ${refSvg}
+      ${zonesSvg}
       ${bbSvg}
       ${candlesSvg}
       ${emaSvg}
@@ -164,7 +200,10 @@ export function renderPriceChartSVG(candles, { support, resistance } = {}, windo
       <span><i style="background:${GOLD};"></i>EMA 20 / RSI</span>
       <span><i style="background:${WHITE};"></i>EMA 50</span>
       <span><i style="background:${BLUE};"></i>Bollinger</span>
-      <span><i style="background:${RED}; opacity:0.7;"></i>Resistencia</span>
-      <span><i style="background:${GREEN}; opacity:0.7;"></i>Soporte</span>
+      ${plan ? `
+      <span><i style="background:${GREEN}; opacity:0.35;"></i>Zona de compra</span>
+      <span><i style="background:${GOLD}; opacity:0.35;"></i>Zona de venta</span>
+      <span><i style="background:${STOP_COLOR};"></i>Stop loss</span>
+      <span><i style="background:${TP_COLOR};"></i>Take profit 1</span>` : ''}
     </div>`;
 }
