@@ -1,4 +1,4 @@
-import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings } from './dataSource.js';
+import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings, isLive } from './dataSource.js';
 import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
@@ -205,8 +205,15 @@ function chartCardBody(dailyTechnical, plan) {
   const entry = chartState.cache[tf];
   if (chartState.loading.has(tf) && !entry) return `<div class="skel skel-chart"></div>`;
   if (!entry) return `<div class="chart-empty">Sin datos para este timeframe todavía.</div>`;
+  // En modo live, si el proveedor de velas falló y se cayó a datos simulados,
+  // no se dibuja el gráfico: mostrarlo con una nota chica al pie no evita que
+  // el precio/escala fake se confunda con el real (el motivo de este fix).
+  // En ?mode=mock (prueba local explícita) sí se muestra, como siempre.
+  if (entry.isReal === false && isLive()) {
+    return `<div class="chart-empty chart-empty-degraded">Gráfico no disponible en este momento — el proveedor de velas no respondió o alcanzó su límite diario. No se muestra un gráfico simulado para no confundirlo con datos reales. Probá la pestaña <strong>Análisis Libre (TradingView)</strong> arriba, o volvé a intentar en unos minutos.</div>`;
+  }
   const svg = renderPriceChartSVG(entry.candles, { support: dailyTechnical.support, resistance: dailyTechnical.resistance, plan: plan?.raw });
-  const staleNote = entry.isReal === false ? `<div class="chart-stale">Datos de demostración — sin conexión al proveedor para este timeframe.</div>` : '';
+  const staleNote = entry.isReal === false ? `<div class="chart-stale">Datos de demostración — modo de prueba local.</div>` : '';
   return svg + staleNote;
 }
 
@@ -813,8 +820,23 @@ function renderReportImpl() {
   const subScoreLabels = { fundamentals: 'Fundamental', trend: 'Técnico', momentum: 'Momentum', valuation: 'Valoración', risk: 'Riesgo' };
   const subScores = subScoreKeys.map(k => scoreBreakdown.find(sb => sb.key === k)).filter(Boolean);
 
+  // Si el proveedor de velas (Twelve Data) no respondió o agotó su cupo
+  // diario, dataSource.js cae a velas simuladas ancladas a un precio de
+  // referencia estático — score, RSI, EMAs, soporte/resistencia y el gráfico
+  // quedan calculados sobre ESE precio simulado, que puede no tener ninguna
+  // relación con el precio real de arriba (que sí sigue siendo real, viene
+  // de Finnhub). Se avisa explícito acá en vez de mostrarlo silenciosamente
+  // como si fuera un análisis en vivo confiable.
+  const degradedCandles = isLive() && r.candles.isReal === false;
+  const degradedNote = degradedCandles ? `
+    <div class="card degraded-note">
+      ${ICONS.warning}
+      <div><strong>Score, gráfico e indicadores técnicos no disponibles en este momento.</strong> El proveedor de velas (Twelve Data) no respondió o alcanzó su límite diario — para no mostrar un análisis calculado sobre datos simulados como si fuera real, esta sección usa un precio de referencia que puede no coincidir con el precio actual de ${esc(asset.ticker)} (arriba, ese sí es real). Volvé a intentar en unos minutos, o mirá la pestaña <strong>Análisis Libre (TradingView)</strong> más abajo para un gráfico en vivo mientras tanto.</div>
+    </div>` : '';
+
   els.report.innerHTML = `
     <div class="breadcrumbs">Análisis <span>›</span> ${esc(breadcrumbLabel)} <span>›</span> <strong>${esc(asset.ticker)}</strong></div>
+    ${degradedNote}
     ${sectionTitleHTML('Resumen Ejecutivo', 'briefcase')}
     <div class="exec-grid">
       <div class="card exec-card">

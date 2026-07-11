@@ -586,6 +586,17 @@ select.port-input { cursor: pointer; }
 }
 .cedear-note strong { color: var(--accent-text); }
 
+/* ---------- Aviso de datos degradados (fallback en vivo) ---------- */
+.degraded-note {
+  display: flex; align-items: flex-start; gap: 14px; padding: 18px 22px; margin-bottom: 24px;
+  border: 1px solid oklch(0.75 0.15 70 / 0.4); border-radius: 14px;
+  background: oklch(0.24 0.05 70 / 0.18); font-size: 12.5px; color: var(--text-dim); line-height: 1.6;
+}
+.degraded-note .sec-icon { color: var(--amber); flex-shrink: 0; margin-top: 2px; width: 18px; height: 18px; filter: none; }
+.degraded-note strong { color: var(--amber-text); }
+.chart-empty-degraded { padding: 40px 24px; max-width: 560px; margin: 0 auto; line-height: 1.7; }
+.chart-empty-degraded strong { color: var(--accent-text); }
+
 /* ---------- Footer ---------- */
 .footer-legal {
   font-size: 11px; color: var(--text-faint); line-height: 1.6;
