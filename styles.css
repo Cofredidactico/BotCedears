@@ -512,8 +512,21 @@ select.port-input { cursor: pointer; }
 .chart-mode-tab:hover { color: var(--text); }
 .chart-mode-tab.active { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
 .tv-note { font-size: 11.5px; color: var(--text-faint); line-height: 1.5; margin-bottom: 12px; }
+.tv-layout { display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; }
 .tv-widget-container { height: 560px; border-radius: 10px; overflow: hidden; }
 .tv-loading { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 13px; color: var(--text-mute); }
+.tv-side { display: flex; flex-direction: column; gap: 14px; }
+.tv-side-block { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--bg-input); }
+.tv-side-title { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-mute); margin-bottom: 10px; }
+.tv-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--up); box-shadow: 0 0 6px var(--up); flex-shrink: 0; animation: tvLivePulse 1.8s ease-in-out infinite; }
+@keyframes tvLivePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.tv-ta-widget { height: 300px; }
+.tv-side-degraded { font-size: 11px; color: var(--amber-text); line-height: 1.5; margin-bottom: 10px; }
+.tv-plan-compact { display: flex; flex-direction: column; gap: 9px; }
+.tv-plan-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--text-mute); }
+.tv-plan-tp { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); text-align: right; }
+.plan-chip.small { font-size: 12px; padding: 3px 8px; }
+@media (max-width: 860px) { .tv-layout { grid-template-columns: 1fr; } }
 .chart-stale { font-size: 11px; color: var(--down-text); margin-top: 8px; }
 
 /* ---------- Score breakdown ---------- */
