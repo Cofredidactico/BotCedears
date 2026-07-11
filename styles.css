@@ -502,6 +502,18 @@ select.port-input { cursor: pointer; }
 .chart-legend span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-mute); }
 .chart-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
 .chart-empty { font-size: 13px; color: var(--text-mute); padding: 24px 0; text-align: center; }
+.chart-mode-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border-soft); }
+.chart-mode-tab {
+  background: transparent; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--text-mute); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; font-weight: 500;
+  padding: 8px 4px; cursor: pointer; transition: color 0.15s, border-color 0.15s;
+}
+.chart-mode-tab + .chart-mode-tab { margin-left: 18px; }
+.chart-mode-tab:hover { color: var(--text); }
+.chart-mode-tab.active { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
+.tv-note { font-size: 11.5px; color: var(--text-faint); line-height: 1.5; margin-bottom: 12px; }
+.tv-widget-container { height: 560px; border-radius: 10px; overflow: hidden; }
+.tv-loading { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 13px; color: var(--text-mute); }
 .chart-stale { font-size: 11px; color: var(--down-text); margin-top: 8px; }
 
 /* ---------- Score breakdown ---------- */
