@@ -38,7 +38,7 @@ function niceFmt(v) {
   return v >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 0 }) : v.toFixed(2);
 }
 
-function polyline(series, x, y, color, opacity = 0.9) {
+function polyline(series, x, y, color, opacity = 0.9, width = 1.5) {
   let d = '', started = false;
   for (let i = 0; i < series.length; i++) {
     const v = series[i];
@@ -46,7 +46,7 @@ function polyline(series, x, y, color, opacity = 0.9) {
     d += `${started ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)} `;
     started = true;
   }
-  return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" opacity="${opacity}"/>` : '';
+  return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" opacity="${opacity}"/>` : '';
 }
 
 export function renderPriceChartSVG(candles, { support, resistance, plan } = {}, windowSize = 130) {
@@ -280,6 +280,82 @@ export function wireChartHover(container, candles, windowSize = 130) {
 }
 
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
+
+/** Comparador: superpone el retorno % (no el precio absoluto, que no es
+ *  comparable entre tickers de escalas distintas) de hasta 3 activos sobre
+ *  la misma ventana de velas diarias reales, alineados por índice (no por
+ *  fecha calendario exacta — simplificación razonable ya que son todas
+ *  velas diarias recientes del mismo proveedor). */
+const COMPARE_COLORS = ['oklch(0.72 0.19 291)', 'oklch(0.78 0.15 70)', 'oklch(0.72 0.17 152)'];
+export function renderCompareOverlaySVG(seriesList, windowSize = 130) {
+  const trimmed = seriesList.filter(s => s.closes?.length >= 2);
+  if (trimmed.length < 2) return '<div class="chart-empty">Se necesitan al menos 2 activos con historial para comparar.</div>';
+
+  const count = Math.min(windowSize, ...trimmed.map(s => s.closes.length));
+  const aligned = trimmed.map(s => ({
+    ticker: s.ticker,
+    closes: s.closes.slice(s.closes.length - count),
+    dates: (s.dates || []).slice((s.dates || []).length - count),
+  }));
+  const pctSeries = aligned.map(s => { const base = s.closes[0]; return s.closes.map(v => ((v - base) / base) * 100); });
+
+  const padL = 6, padR = 150, top = 14, bottom = 244, dateY = 268;
+  const plotW = W - padL - padR;
+  const x = (i) => padL + (count > 1 ? (plotW * i) / (count - 1) : plotW / 2);
+
+  const allVals = pctSeries.flat().concat([0]);
+  let vMin = Math.min(...allVals), vMax = Math.max(...allVals);
+  const vPad = (vMax - vMin) * 0.1 || 1;
+  vMin -= vPad; vMax += vPad;
+  const y = (val) => scaleY(val, vMin, vMax, top, bottom);
+
+  let gridSvg = '';
+  for (let i = 0; i <= 4; i++) {
+    const val = vMin + ((vMax - vMin) * i) / 4;
+    const yy = y(val).toFixed(1);
+    gridSvg += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="${GRID}" stroke-width="1"/>`;
+    gridSvg += `<text x="${W - padR + 6}" y="${yy}" fill="${AXIS_TEXT}" font-size="10" font-family="IBM Plex Mono, monospace" dominant-baseline="middle">${val >= 0 ? '+' : ''}${val.toFixed(0)}%</text>`;
+  }
+  const zeroY = y(0).toFixed(1);
+  gridSvg += `<line x1="${padL}" y1="${zeroY}" x2="${W - padR}" y2="${zeroY}" stroke="${AXIS_TEXT}" stroke-width="1.2" stroke-dasharray="3 3"/>`;
+
+  let linesSvg = '';
+  const pills = pctSeries.map((series, idx) => {
+    const color = COMPARE_COLORS[idx % COMPARE_COLORS.length];
+    linesSvg += polyline(series, x, y, color, 0.95, 2.2);
+    const lastVal = series[series.length - 1];
+    return { color, yy: y(lastVal), label: `${aligned[idx].ticker} ${lastVal >= 0 ? '+' : ''}${lastVal.toFixed(1)}%` };
+  });
+  // Evita que dos series con retorno final parecido dibujen sus etiquetas
+  // superpuestas: separa verticalmente las que quedan a menos de 20px.
+  pills.sort((a, b) => a.yy - b.yy);
+  for (let i = 1; i < pills.length; i++) {
+    if (pills[i].yy - pills[i - 1].yy < 20) pills[i].yy = pills[i - 1].yy + 20;
+  }
+  let labelsSvg = '';
+  for (const { color, yy, label } of pills) {
+    const lw = label.length * 6.3 + 12;
+    labelsSvg += `<rect x="${(W - padR + 6).toFixed(1)}" y="${(yy - 9).toFixed(1)}" width="${lw.toFixed(1)}" height="18" rx="3" fill="${color}"/>
+      <text x="${(W - padR + 12).toFixed(1)}" y="${yy.toFixed(1)}" fill="oklch(0.16 0.02 260)" font-size="10.5" font-weight="700" font-family="IBM Plex Mono, monospace" dominant-baseline="middle">${esc(label)}</text>`;
+  }
+
+  let dateSvg = '';
+  const refDates = aligned[0].dates;
+  if (refDates.length === count) {
+    for (let k = 0; k <= 4; k++) {
+      const i = Math.min(count - 1, Math.round((k * (count - 1)) / 4));
+      dateSvg += `<text x="${x(i).toFixed(1)}" y="${dateY}" fill="${AXIS_TEXT}" font-size="10" font-family="IBM Plex Mono, monospace" text-anchor="middle">${(refDates[i] || '').slice(5)}</text>`;
+    }
+  }
+
+  return `
+    <svg viewBox="0 0 ${W} ${dateY + 10}" width="100%" height="${dateY + 10}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Comparación de retorno porcentual">
+      ${gridSvg}
+      ${linesSvg}
+      ${labelsSvg}
+      ${dateSvg}
+    </svg>`;
+}
 
 /** Radar/spider chart SVG puro: compara los sub-scores del activo (0-100
  *  por eje) contra el promedio real de sus pares del mismo sector. Ejes con

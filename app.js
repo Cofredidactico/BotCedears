@@ -1,7 +1,7 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings } from './dataSource.js';
 import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
-import { renderPriceChartSVG, renderRadarSVG, wireChartHover } from './chart.js';
+import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
 
@@ -78,6 +78,21 @@ const ALERT_META = {
 };
 let alertsEnabled = lsGetSafe('icp_alerts_enabled', '0') === '1';
 const lastAlertByTicker = {}; // ticker -> 'buy'|'sell'|'stop'|null, para notificar solo en la transición
+
+/* ───────────────────────── configuración (preferencias reales) ───────────────────────── */
+// Reglas de tamaño máximo de posición por perfil de riesgo — determinísticas,
+// no una recomendación de IA: afectan directamente el texto de recomendación
+// del Portfolio Advisor comparando contra el peso real que ya tiene cada
+// holding en la cartera cargada.
+const RISK_PROFILES = {
+  conservador: { label: 'Conservador', maxPositionPct: 8 },
+  moderado: { label: 'Moderado', maxPositionPct: 15 },
+  agresivo: { label: 'Agresivo', maxPositionPct: 25 },
+};
+const settingsState = {
+  defaultCurrency: lsGetSafe('icp_default_currency', 'USD'), // 'USD' | 'ARS' — moneda que lidera el precio grande de la ficha
+  riskProfile: lsGetSafe('icp_risk_profile', 'moderado'), // afecta el tope de posición sugerido en Portfolio Advisor
+};
 
 function notifyIfNewAlert(ticker, priceAlert) {
   const prev = lastAlertByTicker[ticker] ?? null;
@@ -176,6 +191,7 @@ const ICONS = {
   calendar: `<svg ${ICON_ATTR}><rect x="3.5" y="5" width="17" height="16" rx="2"/><line x1="3.5" y1="9.5" x2="20.5" y2="9.5"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>`,
   compare: `<svg ${ICON_ATTR}><path d="M7 4v14"/><path d="M3 8h4l-2 4Z"/><path d="M17 4v14"/><path d="M21 12h-4l2 4Z"/></svg>`,
   gear: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M17.8 6.2l-1.6 1.6M7.8 16.2l-1.6 1.6M17.8 17.8l-1.6-1.6M7.8 7.8 6.2 6.2"/></svg>`,
+  filter: `<svg ${ICON_ATTR}><path d="M3.5 4.5h17l-6.2 8v6.5l-4.6 2v-8.5Z"/></svg>`,
 };
 function sectionTitleHTML(text, iconKey, style = '') {
   return `<div class="sectiontitle" ${style ? `style="${style}"` : ''}>${ICONS[iconKey] ?? ''}<span>${esc(text)}</span></div>`;
@@ -597,6 +613,9 @@ const VIEW_PAGES = {
   alerts: { html: alertsPageHTML, wire: wireAlertsEvents, load: () => {} },
   backtest: { html: backtestPageHTML, wire: wireBacktestEvents, load: () => {} },
   calendar: { html: calendarPageHTML, wire: wireCalendarEvents, load: loadCalendarData },
+  screener: { html: screenerPageHTML, wire: wireScreenerEvents, load: () => { if (!dashState.started) loadDashboardData(); } },
+  compare: { html: comparePageHTML, wire: wireCompareEvents, load: () => {} },
+  settings: { html: settingsPageHTML, wire: wireSettingsEvents, load: () => {} },
 };
 
 function renderReport() {
@@ -663,6 +682,14 @@ function renderReport() {
     </div>` : '';
 
   const breadcrumbLabel = { CEDEAR: 'Acciones / CEDEARs', ETF: 'ETFs', Cripto: 'Cripto' }[asset.category] ?? asset.category;
+  // Moneda de referencia elegida en Configuración: si el usuario prefiere ARS
+  // y hay precio de CEDEAR disponible, lidera el precio grande de la ficha —
+  // el análisis y el plan operativo siguen siendo 100% en USD (subyacente).
+  const showArsPrimary = settingsState.defaultCurrency === 'ARS' && quote.cedearArs != null;
+  const execPricePrimary = showArsPrimary ? fmtArs(quote.cedearArs) : fmtUsd(quote.usd);
+  const execPriceSecondary = showArsPrimary
+    ? `<div class="exec-price-secondary">${fmtUsd(quote.usd)} USD (subyacente)</div>`
+    : quote.cedearArs != null ? `<div class="exec-price-secondary">CEDEAR ${fmtArs(quote.cedearArs)}</div>` : '';
   const subScoreKeys = ['fundamentals', 'trend', 'momentum', 'valuation', 'risk'];
   const subScoreLabels = { fundamentals: 'Fundamental', trend: 'Técnico', momentum: 'Momentum', valuation: 'Valoración', risk: 'Riesgo' };
   const subScores = subScoreKeys.map(k => scoreBreakdown.find(sb => sb.key === k)).filter(Boolean);
@@ -678,7 +705,8 @@ function renderReport() {
           <button class="star-btn star-btn-lg" id="exec-star" title="Agregar a seguimiento">${isWatched(asset.ticker) ? '★' : '☆'}</button>
         </div>
         <div class="exec-price-row">
-          <div class="exec-price">${fmtUsd(quote.usd)}</div>
+          <div class="exec-price">${execPricePrimary}</div>
+          ${execPriceSecondary}
           <div class="exec-trend" style="background:${trendBg}; color:${trendColor};">${esc(trendLabel)}</div>
         </div>
         <div class="exec-stats">
@@ -1088,18 +1116,19 @@ const SIDEBAR_NAV = [
   { view: 'dashboard', label: 'Dashboard', icon: 'grid' },
   { view: 'portfolio', label: 'Portfolio Advisor', icon: 'briefcase' },
   { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
+  { view: 'screener', label: 'Screener', icon: 'filter' },
+  { view: 'compare', label: 'Comparador', icon: 'compare' },
   { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
   { view: 'alerts', label: 'Alertas', icon: 'warning' },
   { view: 'calendar', label: 'Calendario Económico', icon: 'calendar' },
   { view: 'backtest', label: 'Backtesting', icon: 'trend' },
+  { view: 'settings', label: 'Configuración', icon: 'gear' },
 ];
-// Se muestran deshabilitadas a propósito: son funcionalidad real todavía no
-// construida, no un placeholder con datos inventados — no queda ni un solo
-// número falso detrás del botón.
-const SIDEBAR_NAV_DISABLED = [
-  { label: 'Comparador', icon: 'compare' },
-  { label: 'Configuración', icon: 'gear' },
-];
+// Ninguna funcionalidad queda deshabilitada por ahora: cada ítem del sidebar
+// corresponde a una vista real con datos en vivo. Si se agrega una nueva
+// función todavía sin terminar, va acá con datos omitidos por completo (no
+// un placeholder con números inventados) hasta que esté lista.
+const SIDEBAR_NAV_DISABLED = [];
 
 function renderSidebar() {
   if (!els.sidebarNav) return;
@@ -1111,13 +1140,14 @@ function renderSidebar() {
           ${ICONS[item.icon]}<span>${esc(item.label)}</span>
         </button>`).join('')}
     </div>
+    ${SIDEBAR_NAV_DISABLED.length ? `
     <div class="sidebar-nav-group">
       <div class="sidebar-nav-label">Próximamente</div>
       ${SIDEBAR_NAV_DISABLED.map(item => `
         <button class="sidebar-nav-btn disabled" disabled title="Todavía no disponible">
           ${ICONS[item.icon]}<span>${esc(item.label)}</span>
         </button>`).join('')}
-    </div>`;
+    </div>` : ''}`;
 
   els.sidebarNav.querySelectorAll('.sidebar-nav-btn[data-view]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1312,6 +1342,273 @@ function wireDashboardEvents() {
   });
 }
 
+/** Página de Screener: filtra/ordena el mismo universo curado del Dashboard
+ *  (dashState.data, ya calculado con datos reales) por score, sector,
+ *  categoría, señal técnica y RSI — sin pedidos propios, reusa la carga
+ *  batcheada de loadDashboardData(). */
+const SCREENER_SORT_OPTIONS = [
+  { key: 'score', label: 'Score (mayor a menor)' },
+  { key: 'change', label: 'Variación % (mayor a menor)' },
+  { key: 'rsi', label: 'RSI (menor a mayor)' },
+  { key: 'ticker', label: 'Ticker (A-Z)' },
+];
+const screenerState = { minScore: 0, category: 'all', sector: 'all', signal: 'all', rsiFilter: 'all', sortBy: 'score' };
+
+function screenerSectorOptions() {
+  const set = new Set();
+  for (const ticker of DASHBOARD_UNIVERSE) {
+    const a = universe.find(x => x.ticker === ticker);
+    if (a?.sector) set.add(a.sector);
+  }
+  return Array.from(set).sort();
+}
+
+function screenerRows() {
+  let rows = DASHBOARD_UNIVERSE.map(ticker => ({ ticker, d: dashState.data[ticker] })).filter(e => e.d);
+  if (screenerState.category !== 'all') rows = rows.filter(e => e.d.category === screenerState.category);
+  if (screenerState.sector !== 'all') rows = rows.filter(e => e.d.sector === screenerState.sector);
+  if (screenerState.signal !== 'all') rows = rows.filter(e => e.d.scoreLabel === screenerState.signal);
+  if (screenerState.minScore > 0) rows = rows.filter(e => e.d.score >= screenerState.minScore);
+  if (screenerState.rsiFilter === 'oversold') rows = rows.filter(e => e.d.rsi != null && e.d.rsi < 30);
+  else if (screenerState.rsiFilter === 'overbought') rows = rows.filter(e => e.d.rsi != null && e.d.rsi > 70);
+  else if (screenerState.rsiFilter === 'neutral') rows = rows.filter(e => e.d.rsi != null && e.d.rsi >= 30 && e.d.rsi <= 70);
+  const sorters = {
+    score: (a, b) => b.d.score - a.d.score,
+    change: (a, b) => b.d.changePct - a.d.changePct,
+    rsi: (a, b) => (a.d.rsi ?? 999) - (b.d.rsi ?? 999),
+    ticker: (a, b) => a.ticker.localeCompare(b.ticker),
+  };
+  return rows.slice().sort(sorters[screenerState.sortBy] ?? sorters.score);
+}
+
+function screenerPageHTML() {
+  const rows = screenerRows();
+  const totalLoaded = DASHBOARD_UNIVERSE.filter(t => dashState.data[t]).length;
+  const sectorOptions = screenerSectorOptions();
+  const selectField = (id, label, options) => `
+    <label class="screener-filter"><span>${esc(label)}</span>
+      <select id="${id}" class="watch-select">${options}</select>
+    </label>`;
+  return `
+    ${sectionTitleHTML('Screener', 'filter')}
+    <div class="dash-intro">Filtrá el universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos por score, sector, categoría, señal técnica y RSI — mismo motor de análisis que el resto de la plataforma, sin pedidos extra.${totalLoaded < DASHBOARD_UNIVERSE.length ? ` Cargando datos de ${DASHBOARD_UNIVERSE.length - totalLoaded} activo(s) más…` : ''}</div>
+    <div class="card screener-filters-card">
+      <div class="screener-filters">
+        ${selectField('scr-minscore', 'Score mínimo', [0, 30, 45, 65, 80].map(v => `<option value="${v}" ${screenerState.minScore === v ? 'selected' : ''}>${v === 0 ? 'Cualquiera' : `${v}+`}</option>`).join(''))}
+        ${selectField('scr-signal', 'Señal', SIGNAL_FILTERS.map(s => `<option value="${esc(s)}" ${screenerState.signal === s ? 'selected' : ''}>${s === 'all' ? 'Todas' : esc(s)}</option>`).join(''))}
+        ${selectField('scr-sector', 'Sector', `<option value="all" ${screenerState.sector === 'all' ? 'selected' : ''}>Todos</option>` + sectorOptions.map(s => `<option value="${esc(s)}" ${screenerState.sector === s ? 'selected' : ''}>${esc(s)}</option>`).join(''))}
+        ${selectField('scr-category', 'Categoría', ['all', 'CEDEAR', 'ETF', 'Cripto'].map(c => `<option value="${c}" ${screenerState.category === c ? 'selected' : ''}>${c === 'all' ? 'Todas' : c}</option>`).join(''))}
+        ${selectField('scr-rsi', 'RSI', `
+          <option value="all" ${screenerState.rsiFilter === 'all' ? 'selected' : ''}>Cualquiera</option>
+          <option value="oversold" ${screenerState.rsiFilter === 'oversold' ? 'selected' : ''}>Sobreventa (&lt;30)</option>
+          <option value="neutral" ${screenerState.rsiFilter === 'neutral' ? 'selected' : ''}>Neutral (30-70)</option>
+          <option value="overbought" ${screenerState.rsiFilter === 'overbought' ? 'selected' : ''}>Sobrecompra (&gt;70)</option>`)}
+        ${selectField('scr-sort', 'Ordenar por', SCREENER_SORT_OPTIONS.map(o => `<option value="${o.key}" ${screenerState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join(''))}
+      </div>
+    </div>
+    <div class="card bt-table-card">
+      <div class="bt-table-wrap">
+        <table class="bt-table screener-table">
+          <thead><tr><th class="scr-left">Ticker</th><th class="scr-left">Nombre</th><th class="scr-left">Sector</th><th>Precio</th><th>Var %</th><th>RSI</th><th class="scr-left">Señal</th><th>Score</th></tr></thead>
+          <tbody>
+            ${!rows.length ? `<tr><td colspan="8" class="bt-nd" style="text-align:center; padding:26px;">Ningún activo del universo curado cumple estos filtros ahora mismo.</td></tr>` : rows.map(({ ticker, d }) => `
+              <tr class="screener-row" data-ticker="${esc(ticker)}">
+                <td class="scr-left" style="font-weight:700;">${esc(ticker)}</td>
+                <td class="scr-left" style="color:var(--text-mute);">${esc(d.name)}</td>
+                <td class="scr-left" style="color:var(--text-mute);">${esc(d.sector ?? 'N/D')}</td>
+                <td>${fmtUsd(d.price)}</td>
+                <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
+                <td>${d.rsi != null ? d.rsi.toFixed(0) : 'N/D'}</td>
+                <td class="scr-left"><span class="bt-label-dot" style="background:${scoreLabelColor(d.scoreLabel).color};"></span>${esc(d.scoreLabel)}</td>
+                <td style="font-weight:700;">${d.score}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function wireScreenerEvents() {
+  const bind = (id, key, parse = (v) => v) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => { screenerState[key] = parse(el.value); renderReport(); });
+  };
+  bind('scr-minscore', 'minScore', Number);
+  bind('scr-signal', 'signal');
+  bind('scr-sector', 'sector');
+  bind('scr-category', 'category');
+  bind('scr-rsi', 'rsiFilter');
+  bind('scr-sort', 'sortBy');
+  els.report.querySelectorAll('.screener-row').forEach(el => {
+    el.addEventListener('click', () => selectTicker(el.dataset.ticker));
+  });
+}
+
+/** Página de Comparador: hasta 3 tickers elegidos por el usuario, con score
+ *  y su desglose, fundamentales/valuación clave y el retorno % superpuesto
+ *  en el mismo gráfico — todo con datos reales pedidos on-demand (mismo
+ *  patrón que el radar de sector: nada precalculado ni simulado). */
+const COMPARE_MAX = 3;
+const compareState = { tickers: [], loading: false, error: null, results: [] };
+
+async function computeCompareEntry(ticker, macro) {
+  const asset = await getAsset(ticker);
+  if (!asset) throw new Error(`"${ticker}" no está en el universo cargado.`);
+  const [quote, candles, fundamentals] = await Promise.all([getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker)]);
+  const technical = computeTechnical(candles);
+  const fundForScore = fundamentals?.hasData ? {
+    hasData: true, revenueGrowth: fundamentals.revenueGrowth ?? null, epsGrowth: fundamentals.epsGrowth ?? null,
+    roe: fundamentals.roe ?? null, netMargin: fundamentals.netMargin ?? null, peg: fundamentals.peg,
+  } : null;
+  const macroForScore = { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null };
+  const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: null, candles, confluence: null, sector: asset.sector, earningsSoon: false });
+  return {
+    ticker, name: asset.name, sector: asset.sector, category: asset.category,
+    price: quote.usd, changePct: quote.changePct, isReal: quote.isReal && candles.isReal,
+    score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, scoreBreakdown: scoreResult.scoreBreakdown,
+    fundamentals, rsi: isNaN(technical.rsi) ? null : technical.rsi, atr: technical.atr,
+    closes: candles.c, dates: candles.t,
+  };
+}
+
+async function runCompare(tickers) {
+  compareState.loading = true;
+  compareState.error = null;
+  renderReport();
+  try {
+    const macro = await getMacro();
+    compareState.results = await Promise.all(tickers.map(t => computeCompareEntry(t, macro)));
+  } catch (e) {
+    compareState.error = e.message;
+    compareState.results = [];
+  } finally {
+    compareState.loading = false;
+    if (!state.asset && state.view === 'compare') renderReport();
+  }
+}
+
+function comparePageHTML() {
+  const slots = Array.from({ length: COMPARE_MAX }, (_, i) => compareState.tickers[i] ?? '');
+  const results = compareState.results;
+  return `
+    ${sectionTitleHTML('Comparador de Activos', 'compare')}
+    <div class="dash-intro">Compará hasta ${COMPARE_MAX} activos lado a lado: score y su desglose por categoría, fundamentales, valuación y retorno % superpuesto en el mismo gráfico — todo calculado en el momento con datos reales.</div>
+    <div class="card port-form-card">
+      <div class="port-form">
+        ${slots.map((v, i) => `
+          <input list="cmp-ticker-list" data-cmp-slot="${i}" class="port-input cmp-input" placeholder="Ticker ${i + 1}${i < 2 ? '' : ' (opcional)'}" autocomplete="off" style="text-transform:uppercase;" value="${esc(v)}" />`).join('')}
+        <datalist id="cmp-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
+        <button class="port-add-btn" id="cmp-run" ${compareState.loading ? 'disabled' : ''}>${compareState.loading ? 'Comparando…' : 'Comparar'}</button>
+      </div>
+    </div>
+    ${compareState.error ? `<div class="card watch-empty">${esc(compareState.error)}</div>` : ''}
+    ${!results.length ? '' : `
+      <div class="card chart-card" style="margin-bottom:24px;">
+        ${renderCompareOverlaySVG(results.map(r => ({ ticker: r.ticker, closes: r.closes, dates: r.dates })))}
+      </div>
+      <div class="card bt-table-card" style="margin-bottom:24px;">
+        <div class="bt-table-wrap">
+          <table class="bt-table">
+            <thead><tr>
+              <th class="scr-left">Métrica</th>
+              ${results.map(r => `<th>${esc(r.ticker)}</th>`).join('')}
+            </tr></thead>
+            <tbody>
+              <tr><td class="scr-left" style="font-weight:600;">Score</td>${results.map(r => `<td style="font-weight:700; color:${scoreLabelColor(r.scoreLabel).color};">${r.score} · ${esc(r.scoreLabel)}</td>`).join('')}</tr>
+              <tr><td class="scr-left">Precio</td>${results.map(r => `<td>${fmtUsd(r.price)}</td>`).join('')}</tr>
+              <tr><td class="scr-left">Variación diaria</td>${results.map(r => `<td class="${r.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(r.changePct)}</td>`).join('')}</tr>
+              <tr><td class="scr-left">Sector</td>${results.map(r => `<td>${esc(r.sector ?? 'N/D')}</td>`).join('')}</tr>
+              <tr><td class="scr-left">RSI (14)</td>${results.map(r => `<td>${r.rsi != null ? r.rsi.toFixed(0) : 'N/D'}</td>`).join('')}</tr>
+              ${['trend', 'momentum', 'fundamentals', 'valuation', 'risk', 'liquidity'].map(key => {
+                const label = results[0].scoreBreakdown.find(x => x.key === key)?.label ?? key;
+                return `<tr><td class="scr-left">${esc(label)}</td>${results.map(r => {
+                  const sb = r.scoreBreakdown.find(x => x.key === key);
+                  return `<td class="${!sb?.available ? 'bt-nd' : ''}">${sb?.available ? `${sb.pct}%` : 'N/D'}</td>`;
+                }).join('')}</tr>`;
+              }).join('')}
+              <tr><td class="scr-left">PE (TTM)</td>${results.map(r => `<td>${r.fundamentals?.peTTM != null ? `${r.fundamentals.peTTM.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
+              <tr><td class="scr-left">PEG</td>${results.map(r => `<td>${r.fundamentals?.peg != null ? `${r.fundamentals.peg.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
+              <tr><td class="scr-left">ROE</td>${results.map(r => `<td>${r.fundamentals?.roe != null ? `${r.fundamentals.roe.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>
+              <tr><td class="scr-left">Crecimiento de ingresos</td>${results.map(r => `<td>${r.fundamentals?.revenueGrowth != null ? `${r.fundamentals.revenueGrowth.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="bt-disclaimer">El gráfico superpone el retorno porcentual (no el precio absoluto, no comparable entre tickers de escalas distintas) de cada activo sobre la misma ventana de velas diarias, alineadas por cantidad de velas — no por fecha calendario exacta.</div>
+    `}`;
+}
+
+function wireCompareEvents() {
+  els.report.querySelectorAll('.cmp-input').forEach(input => {
+    input.addEventListener('input', () => {
+      const i = Number(input.dataset.cmpSlot);
+      compareState.tickers[i] = input.value.toUpperCase();
+    });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('cmp-run')?.click(); });
+  });
+  const runBtn = document.getElementById('cmp-run');
+  if (runBtn) runBtn.addEventListener('click', () => {
+    const tickers = Array.from(new Set(compareState.tickers.map(t => (t || '').trim().toUpperCase()).filter(Boolean)));
+    if (tickers.length < 2) { compareState.error = `Ingresá al menos 2 tickers para comparar.`; renderReport(); return; }
+    runCompare(tickers.slice(0, COMPARE_MAX));
+  });
+}
+
+/** Página de Configuración: dos preferencias que afectan la app de verdad,
+ *  no un placeholder — moneda que lidera el precio grande de la ficha de
+ *  cada activo, y perfil de riesgo que ajusta el tope de posición sugerido
+ *  en Portfolio Advisor (ver portfolioRecommendation). Persiste en
+ *  localStorage, mismo patrón que el resto de las preferencias de la app. */
+function settingsPageHTML() {
+  return `
+    ${sectionTitleHTML('Configuración', 'gear')}
+    <div class="dash-intro">Preferencias que afectan directamente el análisis que ya usás — no hay nada acá que sea solo cosmético.</div>
+
+    <div class="card settings-card">
+      <div class="settings-row-title">Moneda de referencia en la ficha del activo</div>
+      <div class="settings-row-desc">El análisis, el score y el plan operativo siempre se calculan en USD (precio del activo subyacente) — esta preferencia solo decide qué precio aparece grande arriba de todo en la ficha de cada activo.</div>
+      <div class="settings-options">
+        <label class="settings-option ${settingsState.defaultCurrency === 'USD' ? 'active' : ''}">
+          <input type="radio" name="set-currency" value="USD" ${settingsState.defaultCurrency === 'USD' ? 'checked' : ''} />
+          <span>USD (activo subyacente)</span>
+        </label>
+        <label class="settings-option ${settingsState.defaultCurrency === 'ARS' ? 'active' : ''}">
+          <input type="radio" name="set-currency" value="ARS" ${settingsState.defaultCurrency === 'ARS' ? 'checked' : ''} />
+          <span>ARS (precio de CEDEAR, cuando esté disponible)</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="card settings-card">
+      <div class="settings-row-title">Perfil de riesgo</div>
+      <div class="settings-row-desc">Fija el peso máximo sugerido por posición en Portfolio Advisor. Cuando una tenencia tiene señal de compra, la recomendación te avisa si ya estás en (o por encima de) ese tope según el peso real que tiene hoy en tu cartera cargada.</div>
+      <div class="settings-options">
+        ${Object.entries(RISK_PROFILES).map(([key, p]) => `
+          <label class="settings-option ${settingsState.riskProfile === key ? 'active' : ''}">
+            <input type="radio" name="set-risk" value="${key}" ${settingsState.riskProfile === key ? 'checked' : ''} />
+            <span>${esc(p.label)} <span class="settings-option-sub">(tope ${p.maxPositionPct}% por posición)</span></span>
+          </label>`).join('')}
+      </div>
+    </div>`;
+}
+
+function wireSettingsEvents() {
+  els.report.querySelectorAll('input[name="set-currency"]').forEach(input => {
+    input.addEventListener('change', () => {
+      settingsState.defaultCurrency = input.value;
+      lsSetSafe('icp_default_currency', input.value);
+      renderReport();
+    });
+  });
+  els.report.querySelectorAll('input[name="set-risk"]').forEach(input => {
+    input.addEventListener('change', () => {
+      settingsState.riskProfile = input.value;
+      lsSetSafe('icp_risk_profile', input.value);
+      renderReport();
+    });
+  });
+}
+
 /** Agrega los holdings con su señal ya resuelta en portState.data: valor
  *  total, score ponderado por peso en la cartera, concentración por activo
  *  y por sector, y qué posiciones tienen señal de Venta/Reducir. Todo a
@@ -1395,6 +1692,25 @@ const RECO_TONE = {
 };
 
 function portfolioRecommendation(r) {
+  const reco = baseRecommendation(r);
+  // El perfil de riesgo (Configuración) fija un tope real de peso por
+  // posición — se compara contra r.weight, el peso REAL que ya tiene esa
+  // tenencia en la cartera cargada, no un número inventado. Solo aplica
+  // cuando el análisis técnico sugiere sumar (tone 'buy'): frena o confirma
+  // esa sugerencia según cuánto margen quede hasta el tope del perfil.
+  if (reco && reco.tone === 'buy' && r.weight != null) {
+    const profile = RISK_PROFILES[settingsState.riskProfile] ?? RISK_PROFILES.moderado;
+    const capPct = profile.maxPositionPct;
+    const weightPct = r.weight * 100;
+    if (weightPct >= capPct) {
+      return { ...reco, detail: `${reco.detail} Ojo: esta posición ya pesa ${weightPct.toFixed(1)}% de tu cartera, en o por encima del tope de ${capPct}% de tu perfil ${profile.label} — el análisis técnico sugiere sumar, pero tu perfil sugiere no concentrar más acá.` };
+    }
+    return { ...reco, detail: `${reco.detail} Tu perfil ${profile.label} sugiere un tope de ${capPct}% por posición — hoy pesa ${weightPct.toFixed(1)}%, con margen para sumar hasta ${(capPct - weightPct).toFixed(1)} puntos porcentuales más.` };
+  }
+  return reco;
+}
+
+function baseRecommendation(r) {
   const signal = r.d?.scoreLabel;
   const gainPct = r.gainPct; // fracción (0.213 = +21.3%), null si no hay costo cargado
   if (!signal) return null;
@@ -2032,6 +2348,7 @@ async function computeLightSignal(ticker, macro) {
     cedearSource: quote.cedearSource ?? null, // 'live' (precio real BYMA) | 'estimated' (vía CCL) | null
     score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
     alert: priceAlert,
+    rsi: isNaN(technical.rsi) ? null : technical.rsi, // ya calculado acá — sin pedidos extra, para el Screener
     sparkline: candles.c.slice(-30), // últimos cierres reales, ya obtenidos acá — sin pedidos extra
     highlight: technicalHighlight(technical),
   };
