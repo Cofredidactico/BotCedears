@@ -65,7 +65,9 @@ a { color: inherit; }
   display: flex; flex-direction: column; gap: 22px; padding: 22px 14px;
 }
 .sidebar-brand { cursor: pointer; padding: 2px 8px 18px 8px; border-bottom: 1px solid var(--border-soft); }
-.sidebar-brand .wordmark { font-size: 19px; }
+.sidebar-brand-row { display: flex; align-items: center; gap: 11px; }
+.brand-mark { width: 34px; height: 34px; flex-shrink: 0; filter: drop-shadow(0 0 10px oklch(0.70 0.19 291 / 0.45)); }
+.sidebar-brand .wordmark { font-size: 17px; }
 .sidebar-brand .subtitle { display: block; margin-top: 4px; }
 .sidebar-nav { display: flex; flex-direction: column; gap: 18px; flex: 1; }
 .sidebar-nav-group { display: flex; flex-direction: column; gap: 2px; }
@@ -255,6 +257,33 @@ select.port-input { cursor: pointer; }
 .dash-radar-count.down { color: var(--down-text); }
 @media (max-width: 860px) { .dash-radar-grid { grid-template-columns: 1fr 1fr; } }
 
+/* ---------- Dashboard hero ---------- */
+.dash-hero {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 24px;
+  padding: 26px 32px; margin-bottom: 28px; border-radius: 16px;
+  background: linear-gradient(135deg, oklch(0.24 0.045 291 / 0.55), oklch(0.20 0.035 199 / 0.35)), var(--bg-card);
+  border: 1px solid var(--border); position: relative; overflow: hidden;
+}
+.dash-hero::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(600px 200px at 15% 0%, oklch(0.70 0.19 291 / 0.16), transparent 70%);
+}
+.dash-hero-text { position: relative; z-index: 1; max-width: 420px; }
+.dash-hero-title { font-family: 'Newsreader', serif; font-size: 24px; margin-bottom: 8px; }
+.dash-hero-sub { font-size: 13px; color: var(--text-mute); line-height: 1.6; }
+.dash-hero-stats { display: flex; gap: 28px; flex-wrap: wrap; position: relative; z-index: 1; }
+.dash-hero-stat { text-align: center; min-width: 90px; }
+.dash-hero-stat-value { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 600; color: var(--text); }
+.dash-hero-stat-value.small { font-size: 15px; }
+.dash-hero-stat-label { font-size: 10.5px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-mute); margin-top: 4px; }
+@media (max-width: 860px) { .dash-hero { padding: 22px; } .dash-hero-stats { gap: 18px; } .dash-hero-stat { min-width: 70px; } }
+
+/* ---------- Estados vacíos con ícono ---------- */
+.empty-state { padding: 34px 24px; text-align: center; margin-bottom: 28px; }
+.empty-state-icon { display: flex; justify-content: center; margin-bottom: 12px; opacity: 0.55; }
+.empty-state-icon .sec-icon { width: 30px; height: 30px; }
+.empty-state-text { font-size: 13px; color: var(--text-mute); max-width: 440px; margin: 0 auto; line-height: 1.6; }
+
 /* ---------- Seguimiento (watchlist) ---------- */
 .watch-empty { padding: 20px 24px; font-size: 13px; color: var(--text-mute); margin-bottom: 28px; }
 .watch-controls { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -355,13 +384,21 @@ select.port-input { cursor: pointer; }
 .exec-subscore-value { font-family: 'IBM Plex Mono', monospace; font-size: 12px; text-align: right; color: var(--text-dim); }
 
 .gauge-card { padding: 28px 32px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.gauge-ring { width: 152px; height: 152px; border-radius: 50%; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 0 22px oklch(0.80 0.15 85 / 0.35)); }
+.gauge-ring {
+  width: 152px; height: 152px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  transition: filter 0.4s ease; position: relative;
+}
+.gauge-ring::before {
+  content: ''; position: absolute; inset: -6px; border-radius: 50%;
+  background: repeating-conic-gradient(var(--border-soft) 0deg 1.2deg, transparent 1.2deg 9deg);
+  opacity: 0.7;
+}
 .gauge-inner {
   width: 112px; height: 112px; border-radius: 50%; background: var(--bg-card);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  box-shadow: inset 0 0 0 1px var(--border);
+  box-shadow: inset 0 0 0 1px var(--border); position: relative; z-index: 1;
 }
-.gauge-score { font-family: 'Newsreader', serif; font-size: 40px; }
+.gauge-score { font-family: 'Newsreader', serif; font-size: 40px; font-variant-numeric: tabular-nums; }
 .gauge-outof { font-size: 10px; letter-spacing: 1px; color: var(--text-mute); text-transform: uppercase; }
 .gauge-label { margin-top: 16px; font-size: 14px; font-weight: 700; color: var(--gold-text); }
 .gauge-conviction { display: flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 11px; color: var(--text-mute); }
@@ -603,6 +640,40 @@ select.port-input { cursor: pointer; }
 .settings-option.active { border-color: var(--accent); background: var(--bg-input); }
 .settings-option input { accent-color: var(--accent); }
 .settings-option-sub { color: var(--text-mute); font-size: 12px; }
+
+/* ---------- Toasts ---------- */
+.toast-container {
+  position: fixed; bottom: 24px; right: 24px; z-index: 999;
+  display: flex; flex-direction: column-reverse; gap: 10px; pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 12px;
+  background: var(--bg-card); border: 1px solid var(--border); box-shadow: 0 8px 28px oklch(0 0 0 / 0.35);
+  font-size: 13px; color: var(--text); max-width: 340px;
+  opacity: 0; transform: translateY(10px) scale(0.97); transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.toast.show { opacity: 1; transform: translateY(0) scale(1); }
+.toast-icon {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+}
+.toast-success .toast-icon { background: oklch(0.32 0.11 152); color: oklch(0.90 0.16 152); }
+.toast-info .toast-icon { background: oklch(0.30 0.09 199); color: oklch(0.85 0.13 199); }
+.toast-error .toast-icon { background: oklch(0.30 0.12 23); color: oklch(0.88 0.16 23); }
+.toast-msg { line-height: 1.4; }
+
+/* ---------- Transiciones de contenido ---------- */
+@keyframes reportFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.report-fade { animation: reportFadeIn 0.28s ease; }
+@keyframes execPricePop { from { opacity: 0; transform: translateY(4px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.exec-price { animation: execPricePop 0.4s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .report-fade, .exec-price { animation: none; }
+}
+@media (max-width: 860px) {
+  .toast-container { left: 16px; right: 16px; bottom: 16px; }
+  .toast { max-width: none; }
+}
 
 @media (max-width: 860px) {
   .app-shell { flex-direction: column; }

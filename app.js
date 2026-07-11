@@ -16,7 +16,24 @@ const els = {
   report: document.getElementById('report'),
   sidebarNav: document.getElementById('sidebar-nav'),
   sidebarMarket: document.getElementById('sidebar-market'),
+  toastContainer: document.getElementById('toast-container'),
 };
+
+/* ───────────────────────── toasts (feedback de acciones) ───────────────────────── */
+const TOAST_ICON = { success: '✓', info: 'ℹ', error: '✕' };
+function showToast(message, type = 'success', durationMs = 3200) {
+  if (!els.toastContainer) return;
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<span class="toast-icon">${TOAST_ICON[type] ?? TOAST_ICON.success}</span><span class="toast-msg"></span>`;
+  el.querySelector('.toast-msg').textContent = message; // textContent, no esc(): evita doble-escapado en innerHTML ya armado
+  els.toastContainer.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 280);
+  }, durationMs);
+}
 
 // view: 'dashboard' | 'portfolio' | 'watchlist' | 'macro' | 'alerts' — páginas
 // reales, todas con datos en vivo. Se muestran cuando no hay un activo
@@ -112,6 +129,7 @@ async function toggleAlerts() {
   }
   alertsEnabled = !alertsEnabled;
   lsSetSafe('icp_alerts_enabled', alertsEnabled ? '1' : '0');
+  showToast(alertsEnabled ? 'Notificaciones de alertas activadas' : 'Notificaciones de alertas desactivadas', 'info');
   refreshIfWatchlistVisible();
 }
 
@@ -171,6 +189,9 @@ const fmtArs = (n) => n == null || isNaN(n) ? 'N/D' : `AR$${Math.round(n).toLoca
 const fmtPct = (n, digits = 1) => n == null || isNaN(n) ? 'N/D' : `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`;
 const fmtNum = (n, digits = 2) => n == null || isNaN(n) ? 'N/D' : n.toFixed(digits);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Inserta un canal alpha en un oklch(...) sin parsear componentes — solo
+// para glows/sombras decorativas sobre colores ya definidos en el código.
+const withAlpha = (oklchStr, alpha) => oklchStr.replace(/\)\s*$/, ` / ${alpha})`);
 
 /* ───────────────────────── iconografía (SVG inline, sin dependencias) ───────────────────────── */
 const ICON_ATTR = 'class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
@@ -195,6 +216,15 @@ const ICONS = {
 };
 function sectionTitleHTML(text, iconKey, style = '') {
   return `<div class="sectiontitle" ${style ? `style="${style}"` : ''}>${ICONS[iconKey] ?? ''}<span>${esc(text)}</span></div>`;
+}
+
+/** Estado vacío con ícono — mismo mensaje real que antes, con más peso
+ *  visual que un párrafo suelto para la primera impresión de cada página. */
+function emptyStateHTML(iconKey, text) {
+  return `<div class="card empty-state">
+    <div class="empty-state-icon">${ICONS[iconKey] ?? ''}</div>
+    <div class="empty-state-text">${text}</div>
+  </div>`;
 }
 
 function relativeTime(ts) {
@@ -619,6 +649,36 @@ const VIEW_PAGES = {
 };
 
 function renderReport() {
+  renderReportImpl();
+  triggerReportTransition();
+}
+
+/** Reinicia la animación de fade-in del panel principal en cada render
+ *  (reemplazar innerHTML no reinicia una animación CSS ya asignada al
+ *  contenedor — hace falta forzar un reflow) y anima el score del gauge
+ *  con un conteo ascendente cuando hay un informe de ticker cargado. */
+function triggerReportTransition() {
+  els.report.classList.remove('report-fade');
+  void els.report.offsetWidth;
+  els.report.classList.add('report-fade');
+  if (state.report) {
+    const gaugeEl = els.report.querySelector('.gauge-score');
+    if (gaugeEl) animateCountUp(gaugeEl, state.report.score);
+  }
+}
+
+function animateCountUp(el, target, duration = 700) {
+  const startTime = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  function tick(now) {
+    const progress = Math.min(1, (now - startTime) / duration);
+    el.textContent = Math.round(target * ease(progress));
+    if (progress < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function renderReportImpl() {
   renderSidebar();
   if (state.loading) {
     els.report.innerHTML = reportSkeletonHTML();
@@ -657,7 +717,9 @@ function renderReport() {
   const trendLabel = `${trendUp ? 'Tendencia Alcista' : 'Tendencia Bajista'} (${fmtPct(quote.changePct)})`;
 
   const deg = Math.round(clampNum(score, 0, 100) / 100 * 360);
-  const gaugeGradient = `conic-gradient(oklch(0.80 0.15 85) ${deg}deg, oklch(0.28 0.03 262) ${deg}deg)`;
+  const gaugeColor = scoreLabelColor(scoreLabel).color;
+  const gaugeGradient = `conic-gradient(from -90deg, ${gaugeColor} ${deg}deg, oklch(0.28 0.03 262) ${deg}deg)`;
+  const gaugeGlow = withAlpha(gaugeColor, 0.4);
   const thermoPos = Math.min(97, Math.max(3, score));
 
   const freshTechnical = freshnessFor(ts.candles, quote.isReal && r.candles.isReal);
@@ -725,7 +787,7 @@ function renderReport() {
         </div>` : ''}
       </div>
       <div class="card gauge-card">
-        <div class="gauge-ring" style="background:${gaugeGradient};">
+        <div class="gauge-ring" style="background:${gaugeGradient}; filter: drop-shadow(0 0 22px ${gaugeGlow});">
           <div class="gauge-inner">
             <div class="gauge-score">${score}</div>
             <div class="gauge-outof">de 100</div>
@@ -906,7 +968,9 @@ function renderReport() {
   if (starBtn) {
     starBtn.addEventListener('click', () => {
       toggleWatchlist(asset.ticker);
-      starBtn.textContent = isWatched(asset.ticker) ? '★' : '☆';
+      const nowWatched = isWatched(asset.ticker);
+      starBtn.textContent = nowWatched ? '★' : '☆';
+      showToast(nowWatched ? `${asset.ticker} agregado a tu Watchlist` : `${asset.ticker} sacado de tu Watchlist`, nowWatched ? 'success' : 'info');
       loadWatchlistData();
     });
   }
@@ -1180,6 +1244,7 @@ function renderSidebarMarket() {
   });
 }
 
+let sparklineIdSeq = 0;
 function sparklineSVG(closes, up) {
   if (!closes || closes.length < 2) return '';
   const w = 120, h = 34, pad = 2;
@@ -1194,8 +1259,13 @@ function sparklineSVG(closes, up) {
   const color = up ? 'oklch(0.76 0.18 152)' : 'oklch(0.70 0.21 23)';
   const linePath = `M${pts.join(' L')}`;
   const areaPath = `${linePath} L${(w - pad).toFixed(1)},${(h - pad).toFixed(1)} L${pad.toFixed(1)},${(h - pad).toFixed(1)} Z`;
+  const gradId = `sparkGrad${sparklineIdSeq++}`; // id único por instancia — varias tarjetas comparten la página
   return `<svg class="watch-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-    <path d="${areaPath}" fill="${color}" fill-opacity="0.14" stroke="none"/>
+    <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${color}" stop-opacity="0.38"/>
+      <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${areaPath}" fill="url(#${gradId})" stroke="none"/>
     <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.6"/>
   </svg>`;
 }
@@ -1243,7 +1313,23 @@ function dashboardHTML() {
 
   const radarRow = (label, valueHtml) => `<div class="dash-radar-row"><span class="dash-radar-label">${label}</span><span class="dash-radar-count">${valueHtml}</span></div>`;
 
+  const avgScore = loaded.length ? Math.round(loaded.reduce((s, e) => s + e.d.score, 0) / loaded.length) : null;
+  const topSignal = Object.entries(bySignal).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const heroStat = (value, label, small) => `<div class="dash-hero-stat"><div class="dash-hero-stat-value${small ? ' small' : ''}">${value}</div><div class="dash-hero-stat-label">${label}</div></div>`;
+
   return `
+    <div class="dash-hero">
+      <div class="dash-hero-text">
+        <div class="dash-hero-title">Tu mesa de análisis, en un vistazo</div>
+        <div class="dash-hero-sub">Score compuesto, plan operativo y contexto macro con datos reales — sin señales inventadas.</div>
+      </div>
+      <div class="dash-hero-stats">
+        ${heroStat(`${loaded.length}/${DASHBOARD_UNIVERSE.length}`, 'Activos en vivo')}
+        ${heroStat(buyZone.length, 'En zona de compra')}
+        ${heroStat(avgScore ?? '—', 'Score promedio')}
+        ${heroStat(esc(topSignal ?? '—'), 'Señal dominante', true)}
+      </div>
+    </div>
     ${sectionTitleHTML('Dashboard', 'grid')}
     <div class="dash-intro">Oportunidades del día y radar del mercado sobre un universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos (acciones US, CEDEARs argentinos, ETFs y cripto) — no es todo el universo buscable, para no exceder el límite de requests del proveedor de datos gratuito. Elegí cualquiera para ver el informe completo, o buscá otro activo arriba.</div>
 
@@ -1293,7 +1379,7 @@ function dashBottomWidgetsHTML() {
           ${sectionTitleHTML('Watchlist Rápido', 'bookmark', 'margin-bottom:0;')}
           <a class="dash-widget-link" data-goto-view="watchlist">Ver Watchlist completa ›</a>
         </div>
-        ${!watchTickers.length ? `<div class="card watch-empty">Todavía no agregaste activos a tu Watchlist.</div>` : `
+        ${!watchTickers.length ? emptyStateHTML('bookmark', 'Todavía no agregaste activos a tu Watchlist.') : `
         <div class="watch-grid watch-grid-compact">${watchTickers.map(watchCardHTML).join('')}</div>`}
       </div>
       <div>
@@ -1301,7 +1387,7 @@ function dashBottomWidgetsHTML() {
           ${sectionTitleHTML('Mi Portfolio', 'briefcase', 'margin-bottom:0;')}
           <a class="dash-widget-link" data-goto-view="portfolio">Ver Portfolio ›</a>
         </div>
-        ${!holdings.length ? `<div class="card watch-empty">Todavía no cargaste tenencias en Portfolio Advisor.</div>` : `
+        ${!holdings.length ? emptyStateHTML('briefcase', 'Todavía no cargaste tenencias en Portfolio Advisor.') : `
         <div class="card port-mini-summary">
           <div class="port-mini-row">
             <span class="port-mini-label">Valor total</span>
@@ -1478,9 +1564,11 @@ async function runCompare(tickers) {
   try {
     const macro = await getMacro();
     compareState.results = await Promise.all(tickers.map(t => computeCompareEntry(t, macro)));
+    showToast(`Comparación de ${tickers.join(', ')} lista`, 'success');
   } catch (e) {
     compareState.error = e.message;
     compareState.results = [];
+    showToast(e.message, 'error');
   } finally {
     compareState.loading = false;
     if (!state.asset && state.view === 'compare') renderReport();
@@ -1597,6 +1685,7 @@ function wireSettingsEvents() {
     input.addEventListener('change', () => {
       settingsState.defaultCurrency = input.value;
       lsSetSafe('icp_default_currency', input.value);
+      showToast(`Moneda de referencia: ${input.value === 'ARS' ? 'ARS (CEDEAR)' : 'USD'}`, 'success');
       renderReport();
     });
   });
@@ -1604,6 +1693,7 @@ function wireSettingsEvents() {
     input.addEventListener('change', () => {
       settingsState.riskProfile = input.value;
       lsSetSafe('icp_risk_profile', input.value);
+      showToast(`Perfil de riesgo: ${RISK_PROFILES[input.value].label}`, 'success');
       renderReport();
     });
   });
@@ -1806,7 +1896,7 @@ function portfolioHTML() {
       <input type="file" id="port-import-file" accept=".csv,text/csv" style="display:none;" />
     </div>
 
-    ${!holdings.length ? `<div class="card watch-empty">Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}). Podés empezar cargando una a la vez arriba, o importar un CSV (columnas: ticker,shares,avgCost,costCurrency).</div>` : `
+    ${!holdings.length ? emptyStateHTML('briefcase', `Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}). Podés empezar cargando una a la vez arriba, o importar un CSV (columnas: ticker,shares,avgCost,costCurrency).`) : `
     <div class="port-summary-grid">
       <div class="card port-summary-card">
         <div class="dash-radar-title">Valor total</div>
@@ -1923,9 +2013,11 @@ function wirePortfolioEvents() {
   els.report.querySelectorAll('.port-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      removeHolding(btn.dataset.portRemove);
-      delete portState.data[btn.dataset.portRemove];
-      if (portState.editing === btn.dataset.portRemove) portState.editing = null;
+      const ticker = btn.dataset.portRemove;
+      removeHolding(ticker);
+      delete portState.data[ticker];
+      if (portState.editing === ticker) portState.editing = null;
+      showToast(`${ticker} eliminado de tu Portfolio`, 'info');
       renderReport();
     });
   });
@@ -1953,9 +2045,11 @@ function wirePortfolioEvents() {
     const cost = costEl.value ? parseFloat(costEl.value) : null;
     const currency = currencyEl?.value === 'ARS' ? 'ARS' : 'USD';
     if (!ticker || !shares || shares <= 0) return;
+    const wasEditing = portState.editing != null;
     addHolding(ticker, shares, cost, currency);
     portState.editing = null;
     tickerEl.value = ''; sharesEl.value = ''; costEl.value = '';
+    showToast(wasEditing ? `${ticker} actualizado en tu Portfolio` : `${ticker} agregado a tu Portfolio`, 'success');
     renderReport();
   });
   const sortSel = document.getElementById('port-sort');
@@ -1967,6 +2061,7 @@ function wirePortfolioEvents() {
   const exportBtn = document.getElementById('port-export');
   if (exportBtn) exportBtn.addEventListener('click', () => {
     downloadTextFile('portfolio.csv', holdingsToCsv(getPortfolio()), 'text/csv');
+    showToast('CSV de tu Portfolio descargado', 'success');
   });
   const importBtn = document.getElementById('port-import');
   const importFile = document.getElementById('port-import-file');
@@ -1979,6 +2074,7 @@ function wirePortfolioEvents() {
       const parsed = parseHoldingsCsv(text);
       for (const h of parsed) addHolding(h.ticker, h.shares, h.avgCost, h.costCurrency);
       importFile.value = '';
+      showToast(`${parsed.length} tenencia(s) importada(s) desde CSV`, 'success');
       renderReport();
     });
   }
@@ -2044,7 +2140,7 @@ function watchlistPageHTML() {
   if (!allTickers.length) {
     return `
       ${sectionTitleHTML('Watchlist', 'bookmark')}
-      <div class="card watch-empty">Todavía no agregaste activos. Buscá uno y tocá la ☆ para tenerlo siempre a mano acá (máx. ${WATCHLIST_MAX}).</div>`;
+      ${emptyStateHTML('bookmark', `Todavía no agregaste activos. Buscá uno y tocá la ☆ para tenerlo siempre a mano acá (máx. ${WATCHLIST_MAX}).`)}`;
   }
   const tickers = sortAndFilterTickers(allTickers);
   return `
@@ -2224,8 +2320,10 @@ function wireBacktestEvents() {
       const asset = await getAsset(ticker);
       if (!asset) { backtestState.error = `"${ticker}" no está en el universo cargado.`; return; }
       backtestState.result = await runBacktest(ticker);
+      if (!backtestState.result.insufficientData) showToast(`Backtest de ${ticker} listo`, 'success');
     } catch (e) {
       backtestState.error = `No se pudo correr el backtest de ${ticker}: ${e.message}`;
+      showToast(backtestState.error, 'error');
     } finally {
       backtestState.loading = false;
       if (!state.asset && state.view === 'backtest') renderReport();

@@ -118,6 +118,18 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
     zonesSvg += zoneLine(plan.tp1, TP_COLOR, `TP1 ${niceFmt(plan.tp1)}`, 'oklch(0.18 0.03 85)');
   }
 
+  /* ── área degradada bajo el precio de cierre (glow sutil, detrás de las
+   *  velas) — puramente decorativa, misma serie de cierres reales ya usada
+   *  para las velas, sin datos extra. ── */
+  const closeLine = polyline(c, x, yPrice, WHITE, 0).replace(/^<path d="([^"]*)".*$/, '$1');
+  const areaFill = closeLine
+    ? `<path d="${closeLine} L${x(count - 1).toFixed(1)},${PRICE_BOTTOM} L${x(0).toFixed(1)},${PRICE_BOTTOM} Z" fill="url(#priceAreaGrad)" opacity="0.5"/>`
+    : '';
+  const areaDefsSvg = `<defs><linearGradient id="priceAreaGrad" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="oklch(0.70 0.19 291)" stop-opacity="0.32"/>
+    <stop offset="100%" stop-color="oklch(0.70 0.19 291)" stop-opacity="0"/>
+  </linearGradient></defs>`;
+
   let candlesSvg = '';
   for (let i = 0; i < count; i++) {
     const up = c[i] >= o[i];
@@ -195,7 +207,9 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
   return `
     <div class="chart-svg-wrap">
     <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Gráfico de precio con volumen y RSI">
+      ${areaDefsSvg}
       ${priceGridSvg}
+      ${areaFill}
       ${zonesSvg}
       ${bbSvg}
       ${candlesSvg}
@@ -376,6 +390,10 @@ export function renderRadarSVG(labels, assetValues, peerValues) {
     const pts = values.map((v, i) => pointFor(i, v).map(n => n.toFixed(1)).join(',')).join(' ');
     return `<polygon points="${pts}" fill="${color}" fill-opacity="${fillOpacity}" stroke="${color}" stroke-width="1.8"/>`;
   };
+  const vertexDots = (values, color) => values.map((v, i) => {
+    const [px, py] = pointFor(i, v ?? 0);
+    return `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="3" fill="${color}"/>`;
+  }).join('');
 
   let gridSvg = '';
   for (const frac of [0.25, 0.5, 0.75, 1]) {
@@ -395,10 +413,16 @@ export function renderRadarSVG(labels, assetValues, peerValues) {
   });
 
   const peerSvg = peerValues ? polygon(peerValues, RADAR_PEER, 0.12) : '';
-  const assetSvg = polygon(assetValues, RADAR_ACCENT, 0.22);
+  const assetSvg = polygon(assetValues, RADAR_ACCENT, 0.22) + vertexDots(assetValues, RADAR_ACCENT);
+  const glowSvg = `<defs><radialGradient id="radarGlow" cx="50%" cy="50%" r="55%">
+    <stop offset="0%" stop-color="${RADAR_ACCENT}" stop-opacity="0.16"/>
+    <stop offset="100%" stop-color="${RADAR_ACCENT}" stop-opacity="0"/>
+  </radialGradient></defs>
+  <circle cx="${cx}" cy="${cy}" r="${maxR + 12}" fill="url(#radarGlow)"/>`;
 
   return `
     <svg viewBox="0 0 ${size} ${size - 10}" width="100%" height="260" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Radar comparativo vs sector">
+      ${glowSvg}
       ${gridSvg}
       ${axisSvg}
       ${peerSvg}
