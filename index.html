@@ -10,37 +10,45 @@
 </head>
 <body>
 
-  <div class="topbar">
-    <div class="wordmark-group">
-      <div class="wordmark" id="wordmark-home" title="Volver al Dashboard" style="cursor:pointer;">Investment Copilot AI</div>
-      <div class="subtitle">Mesa de Análisis Institucional</div>
-    </div>
-    <div class="topbar-right">
-      <div class="datebadge" id="datebadge"></div>
-      <div class="connbanner" id="connbanner"></div>
-    </div>
-  </div>
+  <div class="app-shell">
 
-  <div class="container">
-
-    <div class="searchwrap">
-      <div class="searchbox">
-        <span class="searchicon">⌕</span>
-        <input type="text" id="searchinput" class="searchinput" placeholder="Buscar activo por ticker o nombre (ej. NVDA, GGAL, oro, BTC)..." autocomplete="off" />
-        <span class="tickerchip" id="tickerchip">—</span>
+    <aside class="sidebar">
+      <div class="sidebar-brand" id="wordmark-home" title="Volver al Dashboard">
+        <div class="wordmark">Investment Copilot AI</div>
+        <div class="subtitle">Mesa de Análisis Institucional</div>
       </div>
-      <div class="dropdown" id="dropdown" style="display:none;"></div>
+      <nav class="sidebar-nav" id="sidebar-nav"></nav>
+      <div class="sidebar-market" id="sidebar-market"></div>
+    </aside>
+
+    <div class="main-area">
+
+      <div class="topbar">
+        <div class="searchwrap">
+          <div class="searchbox">
+            <span class="searchicon">⌕</span>
+            <input type="text" id="searchinput" class="searchinput" placeholder="Buscar activo por ticker o nombre (ej. NVDA, GGAL, oro, BTC)..." autocomplete="off" />
+            <span class="tickerchip" id="tickerchip">—</span>
+          </div>
+          <div class="dropdown" id="dropdown" style="display:none;"></div>
+        </div>
+        <div class="topbar-right">
+          <div class="datebadge" id="datebadge"></div>
+          <div class="connbanner" id="connbanner"></div>
+        </div>
+      </div>
+
+      <div class="container">
+        <div class="searchhint">Universo: acciones y CEDEARs de todo el panel, ETFs y cripto (BTC, ETH). Fundamentales completos solo disponibles para acciones/CEDEARs con cobertura en el proveedor de datos.</div>
+
+        <div id="report"></div>
+
+        <div class="footer-legal">
+          Este informe se genera con datos de mercado reales (Finnhub, Twelve Data, dolarapi, CoinGecko) y un motor de indicadores propio. No constituye asesoramiento financiero ni una recomendación de inversión. Ningún activo se garantiza que subirá o bajará; todo análisis se expresa en términos probabilísticos y puede estar incompleto o demorado según la disponibilidad de cada fuente.
+        </div>
+      </div>
+
     </div>
-    <div class="searchhint">Universo: acciones y CEDEARs de todo el panel, ETFs y cripto (BTC, ETH). Fundamentales completos solo disponibles para acciones/CEDEARs con cobertura en el proveedor de datos.</div>
-
-    <div id="watchlist"></div>
-
-    <div id="report"></div>
-
-    <div class="footer-legal">
-      Este informe se genera con datos de mercado reales (Finnhub, Twelve Data, dolarapi, CoinGecko) y un motor de indicadores propio. No constituye asesoramiento financiero ni una recomendación de inversión. Ningún activo se garantiza que subirá o bajará; todo análisis se expresa en términos probabilísticos y puede estar incompleto o demorado según la disponibilidad de cada fuente.
-    </div>
-
   </div>
 
 <script type="module" src="./app.js"></script>

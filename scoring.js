@@ -159,6 +159,7 @@ export function computeScore({ technical, fundamentals, macro, newsSentiment, ca
   const scoreBreakdown = Object.keys(WEIGHTS).map(key => {
     const s = raw[key];
     return {
+      key,
       label: LABELS[key],
       weight: WEIGHTS[key],
       value: s == null ? 0 : Math.round(s * WEIGHTS[key]),
@@ -229,6 +230,7 @@ export function computePlan(technical, score) {
     tp1: fmt(tp1), tp2: fmt(tp2), tp3: fmt(tp3),
     riskReward: isNaN(riskReward) || riskReward <= 0 ? 'N/D' : `${riskReward.toFixed(1)}:1`,
     probability: `~${Math.round(probability * 100)}%`,
+    probabilityPct: Math.round(probability * 100),
     drawdown: `-${Math.round(drawdownPct * 100 * 1.5)}% a -${Math.round(drawdownPct * 100 * 2.5)}%`,
     // Valores numéricos crudos, para comparar contra el precio (alertas) sin
     // tener que re-parsear los strings formateados de arriba. supportRef/

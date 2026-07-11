@@ -115,6 +115,7 @@ const Mock = {
   },
   async getFundamentals() { return { hasData: false, isReal: false }; },
   async getNews() { return { items: [], sentimentScore: null, isReal: false }; },
+  async getGeneralNews() { return { items: [], sentimentScore: null, isReal: false }; },
   async getEarnings() { return { nextDate: null, isReal: false }; },
 };
 
@@ -151,6 +152,13 @@ const Live = {
     return cached('n:' + ticker, 15 * 60 * 1000, async () => {
       const r = await fetch(`${API_BASE}/news?symbol=${encodeURIComponent(ticker)}`);
       if (!r.ok) throw new Error('news ' + r.status);
+      const d = await r.json(); return { ...d, isReal: true };
+    });
+  },
+  async getGeneralNews() {
+    return cached('n:general', 10 * 60 * 1000, async () => {
+      const r = await fetch(`${API_BASE}/news?general=1`);
+      if (!r.ok) throw new Error('news general ' + r.status);
       const d = await r.json(); return { ...d, isReal: true };
     });
   },
@@ -231,6 +239,10 @@ export async function getFundamentals(ticker) {
 
 export async function getNews(ticker) {
   return withFallback('getNews', [ticker], Mock.getNews.bind(Mock));
+}
+
+export async function getGeneralNews() {
+  return withFallback('getGeneralNews', [], Mock.getGeneralNews.bind(Mock));
 }
 
 export async function getEarnings(ticker) {
