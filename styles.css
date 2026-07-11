@@ -273,7 +273,7 @@ select.port-input { cursor: pointer; }
 .watch-alerts-btn.on { background: var(--gold-soft); border-color: oklch(0.80 0.15 85 / 0.5); color: var(--gold-text); box-shadow: var(--glow-gold); }
 .watch-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; margin-top: 14px; }
 .watch-card {
-  position: relative; cursor: pointer; width: 168px;
+  position: relative; cursor: pointer; width: 190px;
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 13px;
   padding: 14px 16px 16px 16px; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
   box-shadow: var(--shadow-card);
@@ -292,6 +292,8 @@ select.port-input { cursor: pointer; }
 .watch-change { font-family: 'IBM Plex Mono', monospace; font-size: 12px; margin-bottom: 10px; }
 .watch-change.up { color: var(--up-text); }
 .watch-change.down { color: var(--down-text); }
+.watch-sparkline { width: 100%; height: 34px; display: block; margin-bottom: 10px; }
+.watch-highlight { font-size: 10.5px; color: var(--text-mute); line-height: 1.4; margin-top: 6px; }
 .watch-signal { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 10px; }
 .watch-loading { font-size: 12px; color: var(--text-mute); padding: 10px 0; }
 .watch-stale { font-size: 9px; color: var(--text-mute); font-weight: 400; letter-spacing: 0.5px; text-transform: uppercase; }
@@ -437,6 +439,19 @@ select.port-input { cursor: pointer; }
 /* ---------- Gráfico de precio ---------- */
 .chart-card { padding: 20px 24px 12px 24px; margin-bottom: 36px; }
 .chart-card svg { display: block; }
+.chart-svg-wrap { position: relative; }
+.chart-svg-wrap svg { cursor: crosshair; }
+.chart-hover-tooltip {
+  display: none; position: absolute; z-index: 5; pointer-events: none;
+  background: oklch(0.16 0.03 262 / 0.96); border: 1px solid var(--border-strong); border-radius: 8px;
+  padding: 8px 11px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; min-width: 118px;
+  box-shadow: var(--shadow-card-hover);
+}
+.ch-date { color: var(--text-mute); font-size: 10px; margin-bottom: 5px; }
+.ch-row { display: flex; justify-content: space-between; gap: 14px; color: var(--text-dim); line-height: 1.5; }
+.ch-row b { color: var(--text); font-weight: 600; }
+.ch-row b.ch-up { color: var(--up-text); }
+.ch-row b.ch-down { color: var(--down-text); }
 .chart-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
 .chart-tab {
   background: transparent; border: 1px solid var(--border); border-radius: 8px;

@@ -132,6 +132,14 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
   const bbSvg = polyline(bbUpper, x, yPrice, BLUE, 0.55) + polyline(bbLower, x, yPrice, BLUE, 0.55);
   const emaSvg = polyline(ema20, x, yPrice, GOLD) + polyline(ema50, x, yPrice, WHITE);
 
+  /* ── línea de último precio (referencia rápida de dónde está parado hoy) ── */
+  const lastPrice = c[count - 1];
+  const lastUp = count > 1 ? lastPrice >= c[count - 2] : true;
+  const lastColor = lastUp ? GREEN : RED;
+  const lastY = yPrice(lastPrice);
+  const lastPriceSvg = `<line x1="${PAD_L}" y1="${lastY.toFixed(1)}" x2="${W - PAD_R}" y2="${lastY.toFixed(1)}" stroke="${lastColor}" stroke-width="1" stroke-dasharray="2 2" opacity="0.85"/>
+    ${pillLabel(W - PAD_R + 6, lastY, niceFmt(lastPrice), lastColor, lastUp ? 'oklch(0.16 0.03 152)' : 'oklch(0.16 0.03 23)')}`;
+
   // Soporte/resistencia ya no se dibujan como líneas propias: la zona de
   // compra/venta del plan operativo (abajo) se construye a partir de ellos
   // y muestra la misma información de forma más accionable, sin duplicar
@@ -182,18 +190,25 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
   const sepSvg = `<line x1="${PAD_L}" y1="${PRICE_BOTTOM + GAP / 2}" x2="${W - PAD_R}" y2="${PRICE_BOTTOM + GAP / 2}" stroke="${GRID}" stroke-width="1"/>
     <line x1="${PAD_L}" y1="${VOL_BOTTOM + GAP / 2}" x2="${W - PAD_R}" y2="${VOL_BOTTOM + GAP / 2}" stroke="${GRID}" stroke-width="1"/>`;
 
+  const crosshairSvg = `<line class="chart-ch-line" x1="0" y1="${PRICE_TOP}" x2="0" y2="${RSI_BOTTOM}" stroke="${WHITE}" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>`;
+
   return `
+    <div class="chart-svg-wrap">
     <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Gráfico de precio con volumen y RSI">
       ${priceGridSvg}
       ${zonesSvg}
       ${bbSvg}
       ${candlesSvg}
       ${emaSvg}
+      ${lastPriceSvg}
       ${sepSvg}
       ${volSvg}
       ${rsiSvg}
       ${dateSvg}
+      ${crosshairSvg}
     </svg>
+    <div class="chart-hover-tooltip"></div>
+    </div>
     <div class="chart-legend">
       <span><i style="background:${GREEN};"></i>Alcista</span>
       <span><i style="background:${RED};"></i>Bajista</span>
@@ -207,6 +222,64 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
       <span><i style="background:${TP_COLOR};"></i>Take profit 1</span>` : ''}
     </div>`;
 }
+
+/** Wire de interactividad post-render: como renderPriceChartSVG solo genera
+ *  un string, el hover/crosshair se conecta acá con addEventListener sobre
+ *  el <svg> ya insertado en el DOM. Recalcula la misma geometría que el
+ *  render (misma ventana, mismo padding de precio) para ubicar candle/precio
+ *  a partir de la posición del mouse. */
+export function wireChartHover(container, candles, windowSize = 130) {
+  const svg = container.querySelector('svg');
+  const tooltip = container.querySelector('.chart-hover-tooltip');
+  const chLine = container.querySelector('.chart-ch-line');
+  if (!svg || !tooltip || !chLine) return;
+
+  const nTotal = candles.c.length;
+  const start = Math.max(0, nTotal - windowSize);
+  const o = candles.o.slice(start), h = candles.h.slice(start), l = candles.l.slice(start), c = candles.c.slice(start);
+  const v = (candles.v || []).slice(start);
+  const t = (candles.t || []).slice(start);
+  const count = c.length;
+  if (count < 2) return;
+  const plotW = W - PAD_L - PAD_R;
+  const slot = plotW / count;
+
+  const onMove = (e) => {
+    const rect = svg.getBoundingClientRect();
+    const scale = W / rect.width;
+    const svgX = (e.clientX - rect.left) * scale;
+    let i = Math.floor((svgX - PAD_L) / slot);
+    i = Math.max(0, Math.min(count - 1, i));
+    const xc = PAD_L + slot * i + slot / 2;
+    chLine.setAttribute('x1', xc.toFixed(1));
+    chLine.setAttribute('x2', xc.toFixed(1));
+    chLine.setAttribute('opacity', '0.6');
+
+    const up = c[i] >= o[i];
+    const changePct = i > 0 ? ((c[i] - c[i - 1]) / c[i - 1]) * 100 : 0;
+    tooltip.innerHTML = `
+      <div class="ch-date">${esc(t[i] || '')}</div>
+      <div class="ch-row"><span>O</span><b>${niceFmt(o[i])}</b></div>
+      <div class="ch-row"><span>H</span><b>${niceFmt(h[i])}</b></div>
+      <div class="ch-row"><span>L</span><b>${niceFmt(l[i])}</b></div>
+      <div class="ch-row"><span>C</span><b class="${up ? 'ch-up' : 'ch-down'}">${niceFmt(c[i])}</b></div>
+      ${v[i] ? `<div class="ch-row"><span>Vol</span><b>${v[i] >= 1e6 ? (v[i] / 1e6).toFixed(1) + 'M' : (v[i] / 1e3).toFixed(0) + 'K'}</b></div>` : ''}
+      <div class="ch-row"><span>Var</span><b class="${changePct >= 0 ? 'ch-up' : 'ch-down'}">${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%</b></div>`;
+    tooltip.style.display = 'block';
+    const leftPct = (xc / W) * 100;
+    tooltip.style.left = leftPct > 65 ? 'auto' : `calc(${leftPct}% + 10px)`;
+    tooltip.style.right = leftPct > 65 ? `calc(${100 - leftPct}% + 10px)` : 'auto';
+    tooltip.style.top = '8px';
+  };
+  const onLeave = () => {
+    chLine.setAttribute('opacity', '0');
+    tooltip.style.display = 'none';
+  };
+  svg.addEventListener('mousemove', onMove);
+  svg.addEventListener('mouseleave', onLeave);
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
 
 /** Radar/spider chart SVG puro: compara los sub-scores del activo (0-100
  *  por eje) contra el promedio real de sus pares del mismo sector. Ejes con
