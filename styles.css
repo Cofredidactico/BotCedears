@@ -345,6 +345,7 @@ select.port-input { cursor: pointer; }
   background: var(--gradient-brand); -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .exec-trend { font-size: 14px; padding: 4px 12px; border-radius: 20px; font-weight: 600; }
+.exec-price-secondary { font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: var(--text-mute); }
 .exec-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 22px; border-top: 1px solid var(--border-soft); padding-top: 20px; }
 .exec-stat-label { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-mute); margin-bottom: 6px; }
 .exec-stat-value { font-size: 16px; font-weight: 500; }
@@ -577,6 +578,31 @@ select.port-input { cursor: pointer; }
 .cal-item-ticker { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 13.5px; color: var(--accent-text); }
 .cal-item-name { font-size: 12.5px; color: var(--text-mute); }
 .cal-item-meta { font-size: 11.5px; color: var(--text-faint); white-space: nowrap; }
+
+/* ---------- Screener ---------- */
+.screener-filters-card { padding: 18px 20px; margin-bottom: 20px; }
+.screener-filters { display: flex; flex-wrap: wrap; gap: 16px 22px; }
+.screener-filter { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--text-mute); }
+.screener-row { cursor: pointer; transition: background 0.15s; }
+.screener-row:hover td { background: var(--bg-input); }
+.scr-left { text-align: left !important; }
+
+/* ---------- Comparador ---------- */
+.cmp-input { min-width: 180px; }
+
+/* ---------- Configuración ---------- */
+.settings-card { padding: 22px 26px; margin-bottom: 20px; max-width: 720px; }
+.settings-row-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.settings-row-desc { font-size: 12.5px; color: var(--text-mute); line-height: 1.6; margin-bottom: 16px; }
+.settings-options { display: flex; flex-direction: column; gap: 10px; }
+.settings-option {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px;
+  border: 1px solid var(--border); cursor: pointer; font-size: 13px; transition: border-color 0.15s, background 0.15s;
+}
+.settings-option:hover { border-color: var(--accent); }
+.settings-option.active { border-color: var(--accent); background: var(--bg-input); }
+.settings-option input { accent-color: var(--accent); }
+.settings-option-sub { color: var(--text-mute); font-size: 12px; }
 
 @media (max-width: 860px) {
   .app-shell { flex-direction: column; }
