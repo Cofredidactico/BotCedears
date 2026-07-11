@@ -765,11 +765,19 @@ function renderReport() {
   triggerReportTransition();
 }
 
-/** Reinicia la animación de fade-in del panel principal en cada render
- *  (reemplazar innerHTML no reinicia una animación CSS ya asignada al
- *  contenedor — hace falta forzar un reflow) y anima el score del gauge
- *  con un conteo ascendente cuando hay un informe de ticker cargado. */
+/** Anima SOLO cuando cambió lo que se está mostrando (otra vista, u otro
+ *  ticker) — no en cada renderReport(), porque muchas actualizaciones son
+ *  refrescos silenciosos de fondo sobre la MISMA pantalla ya visible (el
+ *  batch del universo del Dashboard, polling de watchlist/portfolio/macro):
+ *  animarlas también hacía "titilar" toda la página cada vez que llegaba un
+ *  dato nuevo, aunque el usuario no hubiera tocado nada. */
+let lastRenderKey = null;
 function triggerReportTransition() {
+  if (state.loading) return; // el skeleton no necesita su propio fade
+  const key = state.asset && state.report ? `ticker:${state.asset.ticker}` : !state.asset ? `view:${state.view}` : null;
+  if (key === null || key === lastRenderKey) return;
+  lastRenderKey = key;
+
   els.report.classList.remove('report-fade');
   void els.report.offsetWidth;
   els.report.classList.add('report-fade');
@@ -2687,6 +2695,15 @@ document.getElementById('wordmark-home')?.addEventListener('click', () => {
   renderTopbar();
   renderReport();
 });
+// PWA: instalable como app. El service worker nunca cachea /api/* (los datos
+// de mercado siguen la frescura que ya maneja dataSource.js) — solo permite
+// que el shell de la app cargue offline/rápido como respaldo.
+if ('serviceWorker' in navigator && isLive()) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[pwa] no se pudo registrar el service worker', e.message));
+  });
+}
+
 setInterval(renderTopbar, 30 * 1000);
 setInterval(() => { if (state.asset) renderReport(); }, 30 * 1000); // refresca textos de frescura sin re-fetch
 // Ciclos espaciados a propósito: candles/fundamentales/noticias no cambian

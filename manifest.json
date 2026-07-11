@@ -1,0 +1,16 @@
+{
+  "name": "Investment Copilot AI — Mesa de Análisis Institucional",
+  "short_name": "Investment Copilot",
+  "description": "Análisis de acciones, CEDEARs, ETFs y cripto con datos reales: score compuesto, plan operativo, backtesting y más.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a0b12",
+  "theme_color": "#0a0b12",
+  "lang": "es-AR",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
