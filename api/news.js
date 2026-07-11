@@ -28,12 +28,26 @@ function fmtDate(d) {
 
 export default async function handler(req, res) {
   const symbol = String(req.query.symbol || '').toUpperCase();
-  if (!symbol) return res.status(400).json({ error: 'falta symbol' });
-
-  const to = new Date();
-  const from = new Date(to.getTime() - 14 * 24 * 3600 * 1000);
+  const general = req.query.general === '1';
+  if (!symbol && !general) return res.status(400).json({ error: 'falta symbol' });
 
   try {
+    if (general) {
+      // Noticias generales del mercado (no ligadas a un ticker) — para la
+      // página de Noticias & Macro. Finnhub no da sentimiento agregado para
+      // esta categoría, así que va sin sentimentScore.
+      const r = await fetch(`${FINNHUB}/news?category=general&token=${process.env.FINNHUB_KEY}`);
+      const raw = r.ok ? await r.json() : [];
+      const items = (Array.isArray(raw) ? raw : [])
+        .sort((a, b) => (b.datetime || 0) - (a.datetime || 0))
+        .slice(0, 14)
+        .map(n => ({ ...tagHeadline(n.headline), text: n.headline, source: n.source, url: n.url, datetime: n.datetime }));
+      res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=1200');
+      return res.status(200).json({ items, sentimentScore: null });
+    }
+
+    const to = new Date();
+    const from = new Date(to.getTime() - 14 * 24 * 3600 * 1000);
     const [newsRes, sentRes] = await Promise.all([
       fetch(`${FINNHUB}/company-news?symbol=${symbol}&from=${fmtDate(from)}&to=${fmtDate(to)}&token=${process.env.FINNHUB_KEY}`),
       fetch(`${FINNHUB}/news-sentiment?symbol=${symbol}&token=${process.env.FINNHUB_KEY}`),
