@@ -525,6 +525,69 @@ function reportSkeletonHTML() {
   `;
 }
 
+/* ───────────────────────── backtesting ─────────────────────────
+ * Recorre las velas diarias reales de un ticker, y en cada corte histórico
+ * calcula la MISMA señal técnica que ve un usuario hoy (computeTechnical +
+ * computeScore, sin fundamentales/macro/noticias históricas — no se
+ * inventan, se excluyen y el peso se redistribuye, igual que hace el score
+ * en vivo cuando faltan). Ningún dato de una vela futura entra en el corte
+ * (no hay look-ahead): technical y score en el índice i solo ven velas
+ * 0..i. Después mide el retorno real hacia adelante desde ese punto, para
+ * cada horizonte, y lo agrupa por la etiqueta que dio la señal en ese momento. */
+const BACKTEST_HORIZONS = [5, 10, 20, 40];
+const BACKTEST_WARMUP = 210; // barras necesarias para que EMA200/ADX/etc. dejen de ser NaN
+const BACKTEST_STEP = 3; // muestrea cada 3 velas: alcanza para una lectura estable sin miles de cálculos por click
+const BACKTEST_LABELS = ['Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'];
+
+async function runBacktest(ticker) {
+  const candles = await getCandles(ticker, '1day', 500);
+  if (!candles?.c?.length) throw new Error('sin velas disponibles para este ticker');
+  const n = candles.c.length;
+  const maxHorizon = Math.max(...BACKTEST_HORIZONS);
+  const needed = BACKTEST_WARMUP + maxHorizon + 20;
+  if (n < needed) {
+    return { ticker, isReal: candles.isReal, insufficientData: true, candleCount: n, needed };
+  }
+
+  const buckets = {};
+  let sampleCount = 0;
+  for (let i = BACKTEST_WARMUP; i <= n - maxHorizon - 1; i += BACKTEST_STEP) {
+    const slice = {
+      o: candles.o.slice(0, i + 1), h: candles.h.slice(0, i + 1), l: candles.l.slice(0, i + 1),
+      c: candles.c.slice(0, i + 1), v: candles.v.slice(0, i + 1), t: candles.t.slice(0, i + 1),
+    };
+    let technical;
+    try { technical = computeTechnical(slice); } catch (e) { continue; }
+    const scoreResult = computeScore({ technical, fundamentals: null, macro: null, newsSentiment: null, candles: slice, confluence: null, sector: null, earningsSoon: false });
+    const label = scoreResult.scoreLabel;
+    if (!buckets[label]) buckets[label] = {};
+    const priceNow = candles.c[i];
+    for (const h of BACKTEST_HORIZONS) {
+      const fwd = candles.c[i + h];
+      if (fwd == null) continue;
+      (buckets[label][h] ??= []).push((fwd - priceNow) / priceNow);
+    }
+    sampleCount++;
+  }
+
+  const rows = BACKTEST_LABELS.map(label => {
+    const byH = buckets[label] || {};
+    const horizons = BACKTEST_HORIZONS.map(h => {
+      const arr = byH[h] || [];
+      if (!arr.length) return { h, n: 0, avgPct: null, winRate: null };
+      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+      const wins = arr.filter(r => r > 0).length;
+      return { h, n: arr.length, avgPct: avg * 100, winRate: Math.round((wins / arr.length) * 100) };
+    });
+    return { label, horizons, occurrences: horizons.reduce((max, x) => Math.max(max, x.n), 0) };
+  });
+
+  return {
+    ticker, isReal: candles.isReal, insufficientData: false, candleCount: n, sampleCount,
+    from: candles.t[BACKTEST_WARMUP], to: candles.t[n - 1], rows,
+  };
+}
+
 /* ───────────────────────── render del reporte ───────────────────────── */
 const VIEW_PAGES = {
   dashboard: { html: dashboardHTML, wire: wireDashboardEvents, load: () => { if (!dashState.started) loadDashboardData(); loadPortfolioData(); } },
@@ -532,6 +595,8 @@ const VIEW_PAGES = {
   watchlist: { html: watchlistPageHTML, wire: wireWatchlistEvents, load: () => {} },
   macro: { html: macroNewsPageHTML, wire: wireMacroNewsEvents, load: loadMacroNewsData },
   alerts: { html: alertsPageHTML, wire: wireAlertsEvents, load: () => {} },
+  backtest: { html: backtestPageHTML, wire: wireBacktestEvents, load: () => {} },
+  calendar: { html: calendarPageHTML, wire: wireCalendarEvents, load: loadCalendarData },
 };
 
 function renderReport() {
@@ -1025,14 +1090,14 @@ const SIDEBAR_NAV = [
   { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
   { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
   { view: 'alerts', label: 'Alertas', icon: 'warning' },
+  { view: 'calendar', label: 'Calendario Económico', icon: 'calendar' },
+  { view: 'backtest', label: 'Backtesting', icon: 'trend' },
 ];
 // Se muestran deshabilitadas a propósito: son funcionalidad real todavía no
 // construida, no un placeholder con datos inventados — no queda ni un solo
 // número falso detrás del botón.
 const SIDEBAR_NAV_DISABLED = [
-  { label: 'Calendario Económico', icon: 'calendar' },
   { label: 'Comparador', icon: 'compare' },
-  { label: 'Backtesting', icon: 'chart' },
   { label: 'Configuración', icon: 'gear' },
 ];
 
@@ -1778,6 +1843,172 @@ function wireAlertsEvents() {
       delete watchState.data[ticker];
       renderReport();
     });
+  });
+}
+
+/** Página de Backtesting: el usuario elige un ticker y corre runBacktest()
+ *  sobre sus velas diarias reales — nada queda precalculado ni simulado. */
+const backtestState = { ticker: '', loading: false, result: null, error: null };
+
+function backtestPageHTML() {
+  const r = backtestState.result;
+  return `
+    ${sectionTitleHTML('Backtesting', 'trend')}
+    <div class="dash-intro">Probá cómo se comportó, históricamente, la misma señal que usa el análisis en vivo. Para cada corte de velas diarias reales se recalcula el score técnico (sin fundamentales, macro ni noticias históricas — no se inventan, se excluyen del cálculo) usando solo información disponible hasta ese día, y se mide el retorno real hacia adelante desde ese punto, agrupado por la señal vigente en ese momento.</div>
+    <div class="card port-form-card">
+      <div class="port-form">
+        <input list="bt-ticker-list" id="bt-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" autocomplete="off" style="text-transform:uppercase;" value="${esc(backtestState.ticker)}" />
+        <datalist id="bt-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
+        <button class="port-add-btn" id="bt-run" ${backtestState.loading ? 'disabled' : ''}>${backtestState.loading ? 'Calculando…' : 'Correr backtest'}</button>
+      </div>
+    </div>
+    ${backtestState.error ? `<div class="card watch-empty">${esc(backtestState.error)}</div>` : ''}
+    ${!r ? '' : r.insufficientData ? `
+      <div class="card watch-empty">Historial insuficiente para ${esc(r.ticker)}: hay ${r.candleCount} velas diarias disponibles y se necesitan al menos ${r.needed} (indicadores de largo plazo + horizonte de proyección) para un backtest confiable. Probá con un ticker con más historial cotizando.</div>
+    ` : `
+      <div class="card bt-meta-card">${esc(r.ticker)} — ${r.sampleCount} cortes históricos analizados, desde ${esc(r.from)} hasta ${esc(r.to)} (${r.candleCount} velas diarias reales)${r.isReal ? '' : ' · usando datos de caché (sin conexión en vivo al proveedor en este momento)'}</div>
+      <div class="card bt-table-card">
+        <div class="bt-table-wrap">
+          <table class="bt-table">
+            <thead><tr>
+              <th>Señal</th><th>Ocurrencias</th>
+              ${BACKTEST_HORIZONS.map(h => `<th>${h}d retorno prom.</th><th>${h}d win rate</th>`).join('')}
+            </tr></thead>
+            <tbody>
+              ${r.rows.map(row => `
+                <tr>
+                  <td class="bt-label-cell"><span class="bt-label-dot" style="background:${scoreLabelColor(row.label).color}"></span>${esc(row.label)}</td>
+                  <td>${row.occurrences}</td>
+                  ${row.horizons.map(x => x.n ? `
+                    <td class="${x.avgPct >= 0 ? 'bt-pos' : 'bt-neg'}">${x.avgPct >= 0 ? '+' : ''}${x.avgPct.toFixed(1)}%</td><td>${x.winRate}%</td>
+                  ` : `<td class="bt-nd">—</td><td class="bt-nd">—</td>`).join('')}
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="bt-disclaimer">Resultado histórico calculado sobre datos reales, sin look-ahead (cada corte solo usa velas hasta ese día — nunca información futura). No es garantía de resultados futuros: las condiciones de mercado cambian y el tamaño de muestra puede ser chico en señales poco frecuentes (columna "Ocurrencias").</div>
+    `}`;
+}
+
+function wireBacktestEvents() {
+  const input = document.getElementById('bt-ticker');
+  const runBtn = document.getElementById('bt-run');
+  if (input) input.addEventListener('input', () => { backtestState.ticker = input.value.toUpperCase(); });
+  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runBtn?.click(); });
+  if (runBtn) runBtn.addEventListener('click', async () => {
+    const ticker = (backtestState.ticker || input?.value || '').trim().toUpperCase();
+    if (!ticker) return;
+    backtestState.ticker = ticker;
+    backtestState.loading = true;
+    backtestState.error = null;
+    backtestState.result = null;
+    renderReport();
+    try {
+      const asset = await getAsset(ticker);
+      if (!asset) { backtestState.error = `"${ticker}" no está en el universo cargado.`; return; }
+      backtestState.result = await runBacktest(ticker);
+    } catch (e) {
+      backtestState.error = `No se pudo correr el backtest de ${ticker}: ${e.message}`;
+    } finally {
+      backtestState.loading = false;
+      if (!state.asset && state.view === 'backtest') renderReport();
+    }
+  });
+}
+
+/** Página de Calendario Económico: agrega la fecha de próximo balance (real,
+ *  misma fuente Finnhub que ya se usa en la ficha de cada activo) de todos
+ *  los tickers en Watchlist + Portfolio + universo curado del Dashboard, en
+ *  una sola vista cronológica de los próximos 45 días. */
+const CALENDAR_BATCH_SIZE = 10;
+const CALENDAR_BATCH_DELAY_MS = 500;
+const calendarState = { items: [], loading: false, loadedAt: 0, tickersDone: 0, tickersTotal: 0 };
+
+function calendarUniverseTickers() {
+  return Array.from(new Set([...getWatchlist(), ...getPortfolio().map(h => h.ticker), ...DASHBOARD_UNIVERSE]));
+}
+
+function earningsHourLabel(hour) {
+  if (hour === 'bmo') return 'antes de la apertura';
+  if (hour === 'amc') return 'después del cierre';
+  if (hour === 'dmh') return 'en horario de mercado';
+  return null;
+}
+
+async function loadCalendarData() {
+  if (calendarState.loading || Date.now() - calendarState.loadedAt < 5 * 60 * 1000) return;
+  calendarState.loading = true;
+  calendarState.items = [];
+  const tickers = calendarUniverseTickers();
+  calendarState.tickersTotal = tickers.length;
+  calendarState.tickersDone = 0;
+  try {
+    for (let i = 0; i < tickers.length; i += CALENDAR_BATCH_SIZE) {
+      const batch = tickers.slice(i, i + CALENDAR_BATCH_SIZE);
+      await Promise.all(batch.map(async (ticker) => {
+        try {
+          const [asset, earnings] = await Promise.all([getAsset(ticker), getEarnings(ticker)]);
+          if (earnings?.nextDate) {
+            const todayMidnight = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+            const days = Math.round((new Date(earnings.nextDate + 'T00:00:00Z') - todayMidnight) / 86400000);
+            if (days >= 0) calendarState.items.push({ ticker, name: asset?.name ?? ticker, sector: asset?.sector ?? null, date: earnings.nextDate, hour: earnings.hour ?? null, days });
+          }
+        } catch (e) {
+          console.warn('[calendario] earnings falló', ticker, e.message);
+        } finally {
+          calendarState.tickersDone++;
+        }
+      }));
+      if (!state.asset && state.view === 'calendar') renderReport();
+      if (i + CALENDAR_BATCH_SIZE < tickers.length) await new Promise(res => setTimeout(res, CALENDAR_BATCH_DELAY_MS));
+    }
+    calendarState.items.sort((a, b) => a.date.localeCompare(b.date) || a.ticker.localeCompare(b.ticker));
+    calendarState.loadedAt = Date.now();
+  } finally {
+    calendarState.loading = false;
+    if (!state.asset && state.view === 'calendar') renderReport();
+  }
+}
+
+function calFormatDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const txt = d.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+
+function calendarPageHTML() {
+  const items = calendarState.items;
+  const grouped = [];
+  for (const it of items) {
+    if (!grouped.length || grouped[grouped.length - 1].date !== it.date) grouped.push({ date: it.date, items: [] });
+    grouped[grouped.length - 1].items.push(it);
+  }
+  const loadingNote = calendarState.loading
+    ? `<div class="dash-loading-note">Buscando fechas de balance… (${calendarState.tickersDone}/${calendarState.tickersTotal} activos revisados)</div>` : '';
+  return `
+    ${sectionTitleHTML('Calendario Económico', 'calendar')}
+    <div class="dash-intro">Próximos reportes de balance (earnings) reales de los próximos 45 días para los activos en tu Watchlist, tu Portfolio y el universo curado del Dashboard — la misma fuente (Finnhub) que ya usa la fecha de earnings dentro de la ficha de cada activo, acá agregada en una sola vista cronológica.</div>
+    ${loadingNote}
+    ${!calendarState.loading && !items.length ? `<div class="card watch-empty">No hay reportes de balance confirmados en los próximos 45 días para los activos en seguimiento (Watchlist, Portfolio o universo del Dashboard).</div>` : ''}
+    <div class="cal-list">
+      ${grouped.map(g => `
+        <div class="cal-group">
+          <div class="cal-group-date">${esc(calFormatDate(g.date))} ${g.items[0].days === 0 ? '<span class="cal-today-badge">Hoy</span>' : g.items[0].days <= 5 ? `<span class="cal-soon-badge">en ${g.items[0].days} día${g.items[0].days === 1 ? '' : 's'}</span>` : ''}</div>
+          <div class="cal-group-items">
+            ${g.items.map(it => `
+              <div class="cal-item" data-ticker="${esc(it.ticker)}">
+                <div class="cal-item-main"><span class="cal-item-ticker">${esc(it.ticker)}</span><span class="cal-item-name">${esc(it.name)}</span></div>
+                <div class="cal-item-meta">${it.sector ? `${esc(it.sector)} · ` : ''}${earningsHourLabel(it.hour) ? esc(earningsHourLabel(it.hour)) : 'horario no confirmado'}</div>
+              </div>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function wireCalendarEvents() {
+  els.report.querySelectorAll('.cal-item').forEach(el => {
+    el.addEventListener('click', () => selectTicker(el.dataset.ticker));
   });
 }
 
