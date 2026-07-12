@@ -21,15 +21,15 @@ function write(list) {
 
 export function getPortfolio() { return read(); }
 
-export function addHolding(ticker, shares, avgCost, costCurrency = 'USD') {
+export function addHolding(ticker, shares, avgCost, costCurrency = 'USD', purchaseDate = null) {
   const list = read();
   const existing = list.find(h => h.ticker === ticker);
   if (existing) {
     existing.shares = shares;
-    if (avgCost != null) { existing.avgCost = avgCost; existing.costCurrency = costCurrency; }
+    if (avgCost != null) { existing.avgCost = avgCost; existing.costCurrency = costCurrency; existing.purchaseDate = purchaseDate ?? null; }
   } else {
     if (list.length >= MAX) return list; // límite silencioso
-    list.push({ ticker, shares, avgCost: avgCost ?? null, costCurrency });
+    list.push({ ticker, shares, avgCost: avgCost ?? null, costCurrency, purchaseDate: purchaseDate ?? null });
   }
   write(list);
   return list;

@@ -1,4 +1,4 @@
-import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings, isLive } from './dataSource.js';
+import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings, getInflacion, getDividends, getBonds, isLive } from './dataSource.js';
 import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
@@ -62,7 +62,8 @@ const dashState = { data: {}, loading: new Set(), started: false };
 const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
 
 /* ───────────────────────── portfolio advisor ───────────────────────── */
-const portState = { data: {}, loading: new Set(), sortBy: lsGetSafe('icp_port_sort', 'weight'), editing: null };
+const portState = { data: {}, loading: new Set(), sortBy: lsGetSafe('icp_port_sort', 'weight'), editing: null, macro: null, inflacion: null, ccl: null };
+const taxState = { cumplidor: lsGetSafe('icp_tax_cumplidor', '0') === '1' };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
 
 const watchState = {
@@ -449,11 +450,12 @@ async function loadReport(ticker) {
 
   try {
     const isCripto = asset.category === 'Cripto';
-    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, earnings] = await Promise.all([
+    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, earnings, dividends] = await Promise.all([
       getQuote(ticker), getCandles(ticker, '1day', 260), getFundamentals(ticker), getNews(ticker), getMacro(), getCCL(),
       isCripto ? Promise.resolve(null) : getCandles(ticker, '1week', 130),
       ticker === 'SPY' ? Promise.resolve(null) : getCandles('SPY', '1day', 220),
       getEarnings(ticker),
+      getDividends(ticker),
     ]);
 
     // Operar en la ventana de unos días antes de que la empresa reporte
@@ -495,7 +497,7 @@ async function loadReport(ticker) {
 
     state.report = {
       asset, quote, candles, fundamentals, news, macro, ccl,
-      technical, weeklyTechnical, confluence, marketCorrelation, earnings, daysToEarnings, earningsSoon, ...scoreResult, plan,
+      technical, weeklyTechnical, confluence, marketCorrelation, earnings, daysToEarnings, earningsSoon, dividends, ...scoreResult, plan,
       ts: { quote: now, candles: now, fundamentals: now, news: now },
     };
 
@@ -758,6 +760,7 @@ const VIEW_PAGES = {
   screener: { html: screenerPageHTML, wire: wireScreenerEvents, load: () => { if (!dashState.started) loadDashboardData(); } },
   compare: { html: comparePageHTML, wire: wireCompareEvents, load: () => {} },
   settings: { html: settingsPageHTML, wire: wireSettingsEvents, load: () => {} },
+  bonds: { html: bondsPageHTML, wire: wireBondsEvents, load: loadBondsData },
 };
 
 function renderReport() {
@@ -829,7 +832,7 @@ function renderReportImpl() {
   }
 
   const r = state.report;
-  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation, earnings, daysToEarnings, earningsSoon } = r;
+  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation, earnings, daysToEarnings, earningsSoon, dividends } = r;
 
   const trendUp = quote.changePct >= 0;
   const trendBg = trendUp ? 'oklch(0.30 0.09 152)' : 'oklch(0.30 0.10 23)';
@@ -1034,7 +1037,7 @@ function renderReportImpl() {
         </div>
         <div class="card panel-card">
           <div class="metrics-grid">
-            ${fundamentalMetricRows(f, earnings, daysToEarnings).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
+            ${fundamentalMetricRows(f, earnings, daysToEarnings, dividends).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
           </div>
           <div class="narrative">${esc(fundamentalNarrative(f, asset.sector))}</div>
         </div>
@@ -1256,7 +1259,14 @@ function technicalMetricRows(t, confluence, marketCorrelation) {
   ];
 }
 
-function fundamentalMetricRows(f, earnings, daysToEarnings) {
+function lastDividendLabel(dividends) {
+  const items = dividends?.items ?? [];
+  if (!items.length) return 'Sin pagos registrados (últimos 2 años)';
+  const last = items[0];
+  return `${fmtUsd(last.amount)} el ${last.date}`;
+}
+
+function fundamentalMetricRows(f, earnings, daysToEarnings, dividends) {
   if (!f?.hasData) return [{ label: 'Cobertura', value: 'Sin datos fundamentales para este ticker' }];
   const pct = (v) => v == null ? 'N/D' : fmtPct(v);
   const x = (v) => v == null ? 'N/D' : `${v.toFixed(1)}x`;
@@ -1276,7 +1286,8 @@ function fundamentalMetricRows(f, earnings, daysToEarnings) {
     { label: 'ROE / ROIC', value: `${pct(f.roe)} / ${pct(f.roi)}` },
     { label: 'Margen bruto / neto', value: `${pct(f.grossMargin)} / ${pct(f.netMargin)}` },
     { label: 'Debt/Equity', value: f.debtEquity != null ? f.debtEquity.toFixed(2) : 'N/D' },
-    { label: 'Dividend Yield', value: pct(f.dividendYield) },
+    { label: 'Dividend Yield (TTM)', value: pct(f.dividendYield) },
+    { label: 'Último dividendo pagado', value: lastDividendLabel(dividends) },
   ];
 }
 
@@ -1340,6 +1351,7 @@ const SIDEBAR_NAV = [
   { view: 'dashboard', label: 'Dashboard', icon: 'grid' },
   { view: 'portfolio', label: 'Portfolio Advisor', icon: 'briefcase' },
   { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
+  { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
   { view: 'screener', label: 'Screener', icon: 'filter' },
   { view: 'compare', label: 'Comparador', icon: 'compare' },
   { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
@@ -1859,6 +1871,179 @@ function wireSettingsEvents() {
   });
 }
 
+/** Factor de inflación acumulada (IPC Argentina, ArgentinaDatos) entre dos
+ *  fechas, componiendo las variaciones mensuales reales de ese rango — sin
+ *  prorratear dentro del mes de compra/hoy (granularidad mensual real, no
+ *  inventada). Devuelve null si no hay al menos un mes de datos en el rango. */
+function computeInflationFactor(items, fromDateStr, toDateStr) {
+  if (!items?.length || !fromDateStr || !toDateStr) return null;
+  const from = new Date(fromDateStr + 'T00:00:00Z');
+  const to = new Date(toDateStr + 'T00:00:00Z');
+  if (isNaN(from) || isNaN(to) || to <= from) return null;
+  const fromKey = from.toISOString().slice(0, 7);
+  const toKey = to.toISOString().slice(0, 7);
+  let factor = 1, monthsUsed = 0;
+  for (const it of items) {
+    const key = it.fecha.slice(0, 7);
+    if (key > fromKey && key <= toKey) { factor *= (1 + it.valorPct / 100); monthsUsed++; }
+  }
+  return monthsUsed ? { factor, monthsUsed } : null;
+}
+
+/** Extrae el punto medio de un rango de tasa tipo "4.25%–4.50%" (macro.json,
+ *  snapshot manual real, ya mostrado en la sección Macro) — se usa como
+ *  referencia de tasa libre de riesgo para el Sharpe. */
+function parseFedRateMid(label) {
+  if (!label) return null;
+  const nums = String(label).match(/[\d.]+/g);
+  if (!nums || !nums.length) return null;
+  const vals = nums.map(Number);
+  return (vals.reduce((a, b) => a + b, 0) / vals.length) / 100;
+}
+
+const TRADING_DAYS_YEAR = 252;
+
+/** Volatilidad, máximo drawdown y Sharpe ratio de la cartera — calculados
+ *  sobre la serie de cierres reales de cada holding (ya obtenida por
+ *  computeLightSignal, sin pedidos extra), combinados con el PESO ACTUAL de
+ *  cada posición (no el peso histórico real día a día, que no tenemos —
+ *  se aclara en la UI). Si una posición no tiene suficiente historial, se
+ *  excluye y se recalculan los pesos solo entre las que sí lo tienen —
+ *  nunca se inventa una serie de precios para completar. */
+function computePortfolioRiskMetrics(rows, macro) {
+  const MIN_DAYS = 60;
+  const withCloses = rows.filter(r => r.d?.closes?.length >= MIN_DAYS && r.weight != null && r.weight > 0);
+  const totalWithWeight = rows.filter(r => r.weight != null && r.weight > 0).length;
+  if (!withCloses.length) return null;
+
+  const minLen = Math.min(...withCloses.map(r => r.d.closes.length));
+  const totalW = withCloses.reduce((s, r) => s + r.weight, 0);
+  const series = withCloses.map(r => ({ weight: r.weight / totalW, closes: r.d.closes.slice(-minLen) }));
+
+  const portfolioReturns = [];
+  for (let i = 1; i < minLen; i++) {
+    let ret = 0;
+    for (const s of series) ret += s.weight * ((s.closes[i] - s.closes[i - 1]) / s.closes[i - 1]);
+    portfolioReturns.push(ret);
+  }
+  const mean = portfolioReturns.reduce((a, b) => a + b, 0) / portfolioReturns.length;
+  const variance = portfolioReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, portfolioReturns.length - 1);
+  const dailyStd = Math.sqrt(variance);
+  const annualizedReturn = Math.pow(1 + mean, TRADING_DAYS_YEAR) - 1;
+  const annualizedVol = dailyStd * Math.sqrt(TRADING_DAYS_YEAR);
+  const riskFree = parseFedRateMid(macro?.fedRateLabel) ?? 0;
+  const sharpe = annualizedVol > 0 ? (annualizedReturn - riskFree) / annualizedVol : null;
+
+  let equity = 1, peak = 1, maxDD = 0;
+  for (const r of portfolioReturns) {
+    equity *= (1 + r);
+    if (equity > peak) peak = equity;
+    maxDD = Math.max(maxDD, (peak - equity) / peak);
+  }
+
+  return {
+    coveredHoldings: withCloses.length, totalHoldings: totalWithWeight, days: minLen,
+    annualizedReturn, annualizedVol, sharpe, maxDrawdown: maxDD, riskFreeUsed: riskFree,
+  };
+}
+
+function riskMetricsCardHTML(risk, holdingsCount) {
+  if (!holdingsCount) return '';
+  if (!risk) {
+    return `
+      <div class="card port-notes-card">
+        <div class="dash-radar-title">Riesgo de la cartera</div>
+        <div class="dash-loading-note">Hace falta al menos ~60 ruedas de historial en alguna posición para calcular volatilidad, drawdown y Sharpe — probá de nuevo en un momento.</div>
+      </div>`;
+  }
+  const coverageNote = risk.coveredHoldings < risk.totalHoldings
+    ? `Calculado sobre ${risk.coveredHoldings}/${risk.totalHoldings} posiciones con historial suficiente (peso re-normalizado entre esas), con el peso ACTUAL de cada una — no reconstruye cómo varió tu cartera día a día en el pasado.`
+    : `Calculado sobre las ${risk.coveredHoldings} posiciones de tu cartera, con el peso ACTUAL de cada una — no reconstruye cómo varió tu cartera día a día en el pasado.`;
+  const sharpeTone = risk.sharpe == null ? '' : risk.sharpe >= 1 ? 'up' : risk.sharpe < 0 ? 'down' : '';
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Riesgo de la cartera <span class="risk-days-note">— últimas ${risk.days} ruedas</span></div>
+      <div class="risk-metrics-grid">
+        <div class="risk-metric">
+          <div class="risk-metric-label">Volatilidad anualizada</div>
+          <div class="risk-metric-value">${(risk.annualizedVol * 100).toFixed(1)}%</div>
+        </div>
+        <div class="risk-metric">
+          <div class="risk-metric-label">Máximo drawdown</div>
+          <div class="risk-metric-value down">-${(risk.maxDrawdown * 100).toFixed(1)}%</div>
+        </div>
+        <div class="risk-metric">
+          <div class="risk-metric-label">Retorno anualizado</div>
+          <div class="risk-metric-value ${risk.annualizedReturn >= 0 ? 'up' : 'down'}">${risk.annualizedReturn >= 0 ? '+' : ''}${(risk.annualizedReturn * 100).toFixed(1)}%</div>
+        </div>
+        <div class="risk-metric">
+          <div class="risk-metric-label">Sharpe ratio (aprox.)</div>
+          <div class="risk-metric-value ${sharpeTone}">${risk.sharpe == null ? 'N/D' : risk.sharpe.toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="port-note" style="margin-top:14px;">${esc(coverageNote)} El Sharpe usa ${(risk.riskFreeUsed * 100).toFixed(2)}% como tasa libre de riesgo de referencia (punto medio de la tasa de la FED, snapshot macro).</div>
+    </div>`;
+}
+
+/** Bienes Personales — escalas oficiales AFIP/ARCA, período fiscal 2025
+ *  (vencimiento 2026), verificadas contra la fuente oficial:
+ *  https://www.afip.gob.ar/gananciasYBienes/bienes-personales/conceptos-basicos/alicuotas.asp
+ *  Es una ESTIMACIÓN educativa sobre el valor de la cartera cargada, no
+ *  asesoramiento impositivo — no contempla el resto del patrimonio del
+ *  usuario (inmuebles, otras cuentas, etc.) ni la distinción entre bienes
+ *  del país y del exterior (los CEDEARs, al representar acciones extranjeras,
+ *  podrían tener un tratamiento distinto — se aclara en la UI). */
+const BP_MNI = 384728044.57;
+const BP_BRACKETS_GENERAL = [
+  { lower: 0, upper: 52664283.73, base: 0, rate: 0.005 },
+  { lower: 52664283.73, upper: 114105948.16, base: 263321.42, rate: 0.0075 },
+  { lower: 114105948.16, upper: Infinity, base: 724133.89, rate: 0.01 },
+];
+const BP_BRACKETS_CUMPLIDOR = [
+  { lower: 0, upper: 52664283.73, base: 0, rate: 0 },
+  { lower: 52664283.73, upper: 114105948.16, base: 0, rate: 0.0025 },
+  { lower: 114105948.16, upper: Infinity, base: 153604.17, rate: 0.005 },
+];
+function computeBienesPersonales(totalArs, cumplidor) {
+  const excess = totalArs - BP_MNI;
+  if (excess <= 0) return { taxable: false, tax: 0, excess: 0 };
+  const brackets = cumplidor ? BP_BRACKETS_CUMPLIDOR : BP_BRACKETS_GENERAL;
+  const b = brackets.find(x => excess <= x.upper);
+  const tax = b.base + b.rate * (excess - b.lower);
+  return { taxable: true, tax, excess, effectiveRate: totalArs > 0 ? tax / totalArs : 0 };
+}
+
+function taxImpactCardHTML(totalUsdValue, ccl) {
+  if (!totalUsdValue) return '';
+  const cclValue = ccl?.value ?? null;
+  const totalArs = cclValue ? totalUsdValue * cclValue : null;
+  const bp = totalArs != null ? computeBienesPersonales(totalArs, taxState.cumplidor) : null;
+
+  return `
+    <div class="card port-notes-card">
+      <div class="panel-header" style="margin-bottom:12px;">
+        <div class="dash-radar-title" style="margin-bottom:0;">Impacto fiscal estimado (Argentina)</div>
+        <label class="tax-cumplidor-toggle">
+          <input type="checkbox" id="tax-cumplidor" ${taxState.cumplidor ? 'checked' : ''} />
+          Soy contribuyente cumplidor
+        </label>
+      </div>
+      ${!totalArs ? `<div class="dash-loading-note">Esperando cotización del CCL para convertir tu cartera a pesos…</div>` : `
+      <div class="tax-bp-row">
+        <div>
+          <div class="risk-metric-label">Bienes Personales — estimado</div>
+          <div class="risk-metric-value ${bp.taxable ? 'down' : 'up'}">${bp.taxable ? fmtArs(bp.tax) : 'No alcanza el mínimo'}</div>
+          <div class="port-note" style="padding:4px 0 0;">Cartera valuada en ${fmtArs(totalArs)} (a CCL ${fmtArs(cclValue)}) contra un mínimo no imponible de ${fmtArs(BP_MNI)}${bp.taxable ? ` — tasa efectiva estimada ${(bp.effectiveRate * 100).toFixed(2)}%` : ''}.</div>
+        </div>
+      </div>
+      <div class="tax-ganancias-note">
+        <strong>Ganancias:</strong> la compraventa de CEDEARs está exenta de Impuesto a las Ganancias para personas humanas; los <strong>dividendos</strong> que paguen sí tributan (tratamiento cedular). No calculamos un monto acá porque depende de tu situación particular — consultá a tu contador.
+      </div>
+      `}
+      <div class="tax-disclaimer">Estimación educativa sobre el valor de esta cartera únicamente — no contempla el resto de tu patrimonio (inmuebles, otras cuentas) ni distingue bienes del país vs. del exterior (los CEDEARs, al representar acciones extranjeras, podrían tener otro tratamiento). Escalas: AFIP/ARCA, período fiscal 2025 (vencimiento 2026). No es asesoramiento impositivo — consultá a un contador para tu declaración real.</div>
+    </div>`;
+}
+
 /** Agrega los holdings con su señal ya resuelta en portState.data: valor
  *  total, score ponderado por peso en la cartera, concentración por activo
  *  y por sector, y qué posiciones tienen señal de Venta/Reducir. Todo a
@@ -1885,6 +2070,18 @@ function computePortfolioStats(holdings) {
         r.gainPct = (currentInCostCurrency - r.avgCost) / r.avgCost;
         r.gainAbs = (currentInCostCurrency - r.avgCost) * r.shares;
         r.gainCurrency = isArs ? 'ARS' : 'USD';
+        // Retorno REAL (ajustado por inflación): solo tiene sentido para el
+        // costo cargado en ARS, contra el IPC argentino — ajustar un costo en
+        // USD por inflación argentina daría un número sin significado real,
+        // así que esa combinación queda deliberadamente sin calcular.
+        if (isArs && r.purchaseDate && portState.inflacion?.items?.length) {
+          const infl = computeInflationFactor(portState.inflacion.items, r.purchaseDate, new Date().toISOString().slice(0, 10));
+          if (infl) {
+            r.inflationFactor = infl.factor;
+            r.inflationMonths = infl.monthsUsed;
+            r.realGainPct = (1 + r.gainPct) / infl.factor - 1;
+          }
+        }
       } else if (isArs) {
         r.gainUnavailableReason = 'Este activo no tiene CEDEAR (sin ratio ARS) — no se puede comparar el costo en pesos.';
       }
@@ -1918,7 +2115,14 @@ function computePortfolioStats(holdings) {
   const totalGainArs = arsRows.length ? sumGain(arsRows) : null;
   const totalCostArs = arsRows.length ? sumCost(arsRows) : null;
 
-  return { rows, totalValue, weightedScore, sectorRows, topHolding, concentrationRisk, sectorRisk, sellSignals, totalGainUsd, totalCostUsd, totalGainArs, totalCostArs };
+  // Retorno real agregado (ARS, ajustado por IPC) — solo entre las posiciones
+  // que tienen fecha de compra cargada; si ninguna la tiene, queda null (no
+  // se estima con una fecha inventada).
+  const arsRowsWithReal = arsRows.filter(r => r.realGainPct != null);
+  const totalRealGainArs = arsRowsWithReal.length ? arsRowsWithReal.reduce((s, r) => s + r.avgCost * r.shares * r.realGainPct, 0) : null;
+  const totalRealCostArs = arsRowsWithReal.length ? sumCost(arsRowsWithReal) : null;
+
+  return { rows, totalValue, weightedScore, sectorRows, topHolding, concentrationRisk, sectorRisk, sellSignals, totalGainUsd, totalCostUsd, totalGainArs, totalCostArs, totalRealGainArs, totalRealCostArs };
 }
 
 function portfolioRiskNotes(stats) {
@@ -2005,8 +2209,8 @@ function sortPortfolioRows(rows) {
 }
 
 function holdingsToCsv(holdings) {
-  const header = 'ticker,shares,avgCost,costCurrency';
-  const lines = holdings.map(h => `${h.ticker},${h.shares},${h.avgCost ?? ''},${h.costCurrency ?? 'USD'}`);
+  const header = 'ticker,shares,avgCost,costCurrency,purchaseDate';
+  const lines = holdings.map(h => `${h.ticker},${h.shares},${h.avgCost ?? ''},${h.costCurrency ?? 'USD'},${h.purchaseDate ?? ''}`);
   return [header, ...lines].join('\n');
 }
 
@@ -2014,12 +2218,13 @@ function parseHoldingsCsv(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const out = [];
   for (const line of lines) {
-    const [ticker, shares, avgCost, costCurrency] = line.split(',').map(x => x?.trim());
+    const [ticker, shares, avgCost, costCurrency, purchaseDate] = line.split(',').map(x => x?.trim());
     if (!ticker || ticker.toLowerCase() === 'ticker') continue; // salteo encabezado
     const sharesNum = parseFloat(shares);
     if (!sharesNum || sharesNum <= 0) continue;
     const costNum = avgCost ? parseFloat(avgCost) : null;
-    out.push({ ticker: ticker.toUpperCase(), shares: sharesNum, avgCost: costNum != null && !isNaN(costNum) ? costNum : null, costCurrency: costCurrency === 'ARS' ? 'ARS' : 'USD' });
+    const dateOk = purchaseDate && /^\d{4}-\d{2}-\d{2}$/.test(purchaseDate) ? purchaseDate : null;
+    out.push({ ticker: ticker.toUpperCase(), shares: sharesNum, avgCost: costNum != null && !isNaN(costNum) ? costNum : null, costCurrency: costCurrency === 'ARS' ? 'ARS' : 'USD', purchaseDate: dateOk });
   }
   return out;
 }
@@ -2027,13 +2232,14 @@ function parseHoldingsCsv(text) {
 function portfolioHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
+  const risk = stats ? computePortfolioRiskMetrics(stats.rows, portState.macro) : null;
   const notes = stats ? portfolioRiskNotes(stats) : [];
   const loadingCount = holdings.filter(h => !portState.data[h.ticker]).length;
   const editingHolding = portState.editing ? holdings.find(h => h.ticker === portState.editing) : null;
 
   return `
     ${sectionTitleHTML('Portfolio Advisor', 'briefcase')}
-    <div class="dash-intro">Cargá tus tenencias (ticker, cantidad y costo promedio opcional) para ver diversificación, concentración y señal de cada posición con datos reales. Si compraste CEDEARs en pesos, elegí "ARS (CEDEAR)" — el P&amp;L se compara contra el precio del CEDEAR en pesos (vía CCL), no contra el precio en dólares del subyacente. Se guarda solo en este navegador.</div>
+    <div class="dash-intro">Cargá tus tenencias (ticker, cantidad, costo promedio y fecha de compra, todo opcional salvo ticker y cantidad) para ver diversificación, concentración y señal de cada posición con datos reales. Si compraste CEDEARs en pesos, elegí "ARS (CEDEAR)" — el P&amp;L se compara contra el precio del CEDEAR en pesos (vía CCL), no contra el precio en dólares del subyacente. Cargar la fecha de compra habilita el retorno REAL, ajustado por inflación (IPC Argentina). Se guarda solo en este navegador.</div>
 
     <div class="card port-form-card">
       ${editingHolding ? `<div class="port-editing-banner">Editando ${esc(editingHolding.ticker)} — <a href="#" id="port-edit-cancel">cancelar</a></div>` : ''}
@@ -2046,6 +2252,7 @@ function portfolioHTML() {
           <option value="USD" ${!editingHolding || editingHolding.costCurrency !== 'ARS' ? 'selected' : ''}>USD (acción/activo subyacente)</option>
           <option value="ARS" ${editingHolding?.costCurrency === 'ARS' ? 'selected' : ''}>ARS (CEDEAR en pesos)</option>
         </select>
+        <input type="date" id="port-date" class="port-input" title="Fecha de compra (opcional) — habilita el retorno real ajustado por inflación" max="${new Date().toISOString().slice(0, 10)}" value="${editingHolding?.purchaseDate ?? ''}" />
         <button class="port-add-btn" id="port-add">${editingHolding ? 'Actualizar' : 'Agregar'}</button>
       </div>
     </div>
@@ -2063,6 +2270,7 @@ function portfolioHTML() {
         <div class="port-summary-value">${fmtUsd(stats.totalValue)}</div>
         ${stats.totalGainUsd != null ? `<div class="port-summary-sub ${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${fmtUsd(stats.totalGainUsd)} (${fmtPct(stats.totalCostUsd > 0 ? (stats.totalGainUsd / stats.totalCostUsd) * 100 : 0)}) en posiciones con costo en USD</div>` : ''}
         ${stats.totalGainArs != null ? `<div class="port-summary-sub ${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${fmtArs(stats.totalGainArs)} (${fmtPct(stats.totalCostArs > 0 ? (stats.totalGainArs / stats.totalCostArs) * 100 : 0)}) en posiciones con costo en ARS</div>` : ''}
+        ${stats.totalRealGainArs != null ? `<div class="port-summary-sub port-real-sub ${stats.totalRealGainArs >= 0 ? 'up' : 'down'}">retorno real: ${fmtPct(stats.totalRealCostArs > 0 ? (stats.totalRealGainArs / stats.totalRealCostArs) * 100 : 0)} ajustado por inflación (IPC)</div>` : ''}
       </div>
       <div class="card port-summary-card">
         <div class="dash-radar-title">Score ponderado</div>
@@ -2075,6 +2283,9 @@ function portfolioHTML() {
         <div class="port-summary-sub">${loadingCount > 0 ? `${loadingCount} cargando…` : 'todas actualizadas'}</div>
       </div>
     </div>
+
+    ${riskMetricsCardHTML(risk, holdings.length)}
+    ${taxImpactCardHTML(stats.totalValue, portState.ccl)}
 
     <div class="card port-notes-card">
       <div class="dash-radar-title">Recomendación por posición</div>
@@ -2132,7 +2343,10 @@ function portfolioRowHTML(r) {
   const fmtGain = r.gainCurrency === 'ARS' ? fmtArs : fmtUsd;
   let pnlCell = '—';
   if (r.gainPct != null) {
-    pnlCell = `${fmtPct(r.gainPct * 100)}<br><span class="port-pnl-abs">${r.gainAbs >= 0 ? '+' : ''}${fmtGain(r.gainAbs)}</span>`;
+    const realLine = r.realGainPct != null
+      ? `<br><span class="port-pnl-real ${r.realGainPct >= 0 ? 'up' : 'down'}" title="Ajustado por inflación (IPC Argentina) desde ${esc(r.purchaseDate)} — ${r.inflationMonths} mes(es) de datos reales">real: ${fmtPct(r.realGainPct * 100)}</span>`
+      : '';
+    pnlCell = `${fmtPct(r.gainPct * 100)}<br><span class="port-pnl-abs">${r.gainAbs >= 0 ? '+' : ''}${fmtGain(r.gainAbs)}</span>${realLine}`;
   } else if (r.gainUnavailableReason) {
     pnlCell = `<span title="${esc(r.gainUnavailableReason)}">N/D ⓘ</span>`;
   }
@@ -2164,6 +2378,12 @@ function downloadTextFile(filename, text, mime) {
 }
 
 function wirePortfolioEvents() {
+  const cumplidorEl = document.getElementById('tax-cumplidor');
+  if (cumplidorEl) cumplidorEl.addEventListener('change', () => {
+    taxState.cumplidor = cumplidorEl.checked;
+    lsSetSafe('icp_tax_cumplidor', taxState.cumplidor ? '1' : '0');
+    renderReport();
+  });
   els.report.querySelectorAll('[data-port-ticker]').forEach(el => {
     el.addEventListener('click', (e) => {
       if (e.target.closest('.port-remove') || e.target.closest('.port-edit')) return;
@@ -2200,15 +2420,17 @@ function wirePortfolioEvents() {
     const sharesEl = document.getElementById('port-shares');
     const costEl = document.getElementById('port-cost');
     const currencyEl = document.getElementById('port-currency');
+    const dateEl = document.getElementById('port-date');
     const ticker = tickerEl.value.trim().toUpperCase();
     const shares = parseFloat(sharesEl.value);
     const cost = costEl.value ? parseFloat(costEl.value) : null;
     const currency = currencyEl?.value === 'ARS' ? 'ARS' : 'USD';
+    const purchaseDate = dateEl?.value || null;
     if (!ticker || !shares || shares <= 0) return;
     const wasEditing = portState.editing != null;
-    addHolding(ticker, shares, cost, currency);
+    addHolding(ticker, shares, cost, currency, purchaseDate);
     portState.editing = null;
-    tickerEl.value = ''; sharesEl.value = ''; costEl.value = '';
+    tickerEl.value = ''; sharesEl.value = ''; costEl.value = ''; if (dateEl) dateEl.value = '';
     showToast(wasEditing ? `${ticker} actualizado en tu Portfolio` : `${ticker} agregado a tu Portfolio`, 'success');
     renderReport();
   });
@@ -2232,7 +2454,7 @@ function wirePortfolioEvents() {
       if (!file) return;
       const text = await file.text();
       const parsed = parseHoldingsCsv(text);
-      for (const h of parsed) addHolding(h.ticker, h.shares, h.avgCost, h.costCurrency);
+      for (const h of parsed) addHolding(h.ticker, h.shares, h.avgCost, h.costCurrency, h.purchaseDate);
       importFile.value = '';
       showToast(`${parsed.length} tenencia(s) importada(s) desde CSV`, 'success');
       renderReport();
@@ -2246,9 +2468,18 @@ function wirePortfolioEvents() {
 // llamar a renderReport(), que vuelve a llamar a esta función, en loop.
 async function loadPortfolioData() {
   const holdings = getPortfolio();
+  const macro = await getMacro();
+  portState.macro = macro; // referencia sincrónica para computePortfolioRiskMetrics (necesita la tasa de la FED)
+  if (!portState.inflacion && holdings.some(h => h.purchaseDate)) {
+    try { portState.inflacion = await getInflacion(); }
+    catch (e) { console.warn('[portfolio] no se pudo cargar inflación', e.message); }
+  }
+  if (!portState.ccl && holdings.length) {
+    try { portState.ccl = await getCCL(); }
+    catch (e) { console.warn('[portfolio] no se pudo cargar CCL', e.message); }
+  }
   const missing = holdings.filter(h => !portState.data[h.ticker] && !portState.loading.has(h.ticker));
   if (!missing.length) return;
-  const macro = await getMacro();
   await Promise.all(missing.map(async (h) => {
     portState.loading.add(h.ticker);
     try {
@@ -2586,6 +2817,81 @@ function wireCalendarEvents() {
   });
 }
 
+/** Bonos Argentinos: la otra gran clase de activo que sigue cualquier
+ *  inversor argentino, hasta ahora ausente de la plataforma. Precios reales
+ *  en vivo (data912.com, mismo proveedor que ya usamos para el precio real
+ *  de CEDEARs en BYMA) + paridad (que es directamente el precio, sin
+ *  necesitar ningún supuesto). A propósito NO se calcula TIR ni duration:
+ *  estos bonos tienen cupón escalonado y amortización parcial ya en curso
+ *  (no son bullet bonds simples), y modelar mal ese cronograma daría un
+ *  número que parece preciso pero podría estar mal — se prefiere no
+ *  mostrarlo a mostrar uno que podría inducir a una mala decisión. */
+const BONDS_INFO = {
+  AL29: { name: 'Bonar 2029', ley: 'Argentina', moneda: 'USD' },
+  AL30: { name: 'Bonar 2030', ley: 'Argentina', moneda: 'USD' },
+  AL35: { name: 'Bonar 2035', ley: 'Argentina', moneda: 'USD' },
+  AL41: { name: 'Bonar 2041', ley: 'Argentina', moneda: 'USD' },
+  AE38: { name: 'Bonar 2038', ley: 'Argentina', moneda: 'USD' },
+  GD29: { name: 'Global 2029', ley: 'Nueva York', moneda: 'USD' },
+  GD30: { name: 'Global 2030', ley: 'Nueva York', moneda: 'USD' },
+  GD35: { name: 'Global 2035', ley: 'Nueva York', moneda: 'USD' },
+  GD38: { name: 'Global 2038', ley: 'Nueva York', moneda: 'USD' },
+  GD41: { name: 'Global 2041', ley: 'Nueva York', moneda: 'USD' },
+  GD46: { name: 'Global 2046', ley: 'Nueva York', moneda: 'USD' },
+};
+const bondsState = { items: null, loading: false, loadedAt: 0, error: null };
+
+async function loadBondsData() {
+  if (bondsState.loading || Date.now() - bondsState.loadedAt < 2 * 60 * 1000) return;
+  bondsState.loading = true;
+  bondsState.error = null;
+  try {
+    const res = await getBonds();
+    const byTicker = {};
+    for (const it of res.items ?? []) if (BONDS_INFO[it.symbol]) byTicker[it.symbol] = it;
+    bondsState.items = Object.keys(BONDS_INFO).map(symbol => ({ symbol, ...BONDS_INFO[symbol], quote: byTicker[symbol] ?? null }));
+    bondsState.isReal = res.isReal;
+    bondsState.loadedAt = Date.now();
+  } catch (e) {
+    bondsState.error = 'No se pudo cargar la cotización de bonos en este momento.';
+    console.warn('[bonds] no se pudo cargar', e.message);
+  } finally {
+    bondsState.loading = false;
+    if (!state.asset && state.view === 'bonds') renderReport();
+  }
+}
+
+function bondsPageHTML() {
+  const items = bondsState.items;
+  return `
+    ${sectionTitleHTML('Bonos Argentinos', 'building')}
+    <div class="dash-intro">Precios reales en vivo de los principales bonos soberanos en dólares (BYMA, vía el mismo proveedor que ya usamos para el precio real de CEDEARs). La <strong>paridad</strong> es directamente el precio contra 100 (valor par) — no requiere ningún supuesto. A propósito no calculamos TIR ni duration: estos bonos tienen cupón escalonado y amortización parcial ya en curso, y un cálculo aproximado podría mostrar un número que parece preciso pero está mal. Para TIR/duration exactos, consultá a tu bróker o BYMA Data.</div>
+    ${bondsState.error ? `<div class="card watch-empty">${esc(bondsState.error)}</div>` : !items ? `<div class="card watch-empty">Cargando cotizaciones…</div>` : `
+    <div class="card bt-table-card">
+      <div class="bt-table-wrap">
+        <table class="bt-table screener-table">
+          <thead><tr><th class="scr-left">Ticker</th><th class="scr-left">Nombre</th><th class="scr-left">Ley</th><th class="scr-left">Moneda</th><th>Precio</th><th>Var %</th><th>Paridad</th></tr></thead>
+          <tbody>
+            ${items.map(b => `
+              <tr class="screener-row" data-bond="${esc(b.symbol)}">
+                <td class="scr-left" style="font-weight:700;">${esc(b.symbol)}</td>
+                <td class="scr-left" style="color:var(--text-mute);">${esc(b.name)}</td>
+                <td class="scr-left" style="color:var(--text-mute);">${esc(b.ley)}</td>
+                <td class="scr-left" style="color:var(--text-mute);">${esc(b.moneda)}</td>
+                <td>${b.quote ? `US$${b.quote.price.toFixed(2)}` : 'N/D'}</td>
+                <td class="${b.quote?.pctChange >= 0 ? 'bt-pos' : b.quote?.pctChange < 0 ? 'bt-neg' : ''}">${b.quote?.pctChange != null ? fmtPct(b.quote.pctChange) : 'N/D'}</td>
+                <td>${b.quote ? `${b.quote.price.toFixed(1)}%` : 'N/D'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="bt-disclaimer">${bondsState.isReal ? 'Precios en vivo' : 'Sin conexión al proveedor — mostrando la última cotización disponible'}, BYMA vía data912.com. No incluye bonos en pesos (CER, Lecaps/Boncaps), Bopreales ni provinciales — universo acotado a los soberanos en USD más seguidos.</div>
+    `}`;
+}
+
+function wireBondsEvents() { /* filas informativas — sin acción propia por ahora */ }
+
 /** Score liviano (quote + candles diarios, sin fundamentales/noticias/semanal
  *  para no multiplicar requests) — usado tanto por Seguimiento como por el
  *  Dashboard, que recorren listas de tickers en paralelo. */
@@ -2608,6 +2914,7 @@ async function computeLightSignal(ticker, macro) {
     alert: priceAlert,
     rsi: isNaN(technical.rsi) ? null : technical.rsi, // ya calculado acá — sin pedidos extra, para el Screener
     sparkline: candles.c.slice(-30), // últimos cierres reales, ya obtenidos acá — sin pedidos extra
+    closes: candles.c, // serie completa (~220 ruedas) — reusada para volatilidad/drawdown de la cartera, sin pedidos extra
     highlight: technicalHighlight(technical),
   };
 }
