@@ -40,8 +40,35 @@ function alpacaEnvDebug() {
   };
 }
 
+// Alpaca, si no se manda `start` explícito, asume por defecto "desde hoy" —
+// no "desde hace mucho hacia atrás" como parecería razonable para pedir las
+// últimas N barras. Sin esto devuelve 0 barras la gran mayoría de las veces
+// (arrancó devolviendo vacío para todo). Se calcula una fecha de inicio con
+// margen generoso (fines de semana/feriados) según el timeframe pedido.
+function alpacaStartDate(timeframe, limit) {
+  let daysBack;
+  if (timeframe.endsWith('Min')) {
+    const minutesPerBar = parseInt(timeframe, 10) || 1;
+    const barsPerTradingDay = Math.max(1, Math.floor(390 / minutesPerBar)); // ~390min de rueda regular
+    daysBack = Math.ceil(limit / barsPerTradingDay) * 2 + 5;
+  } else if (timeframe.endsWith('Hour')) {
+    const hoursPerBar = parseInt(timeframe, 10) || 1;
+    const barsPerTradingDay = Math.max(1, Math.ceil(6.5 / hoursPerBar));
+    daysBack = Math.ceil(limit / barsPerTradingDay) * 2 + 5;
+  } else if (timeframe === '1Week') {
+    daysBack = limit * 8 + 14;
+  } else if (timeframe === '1Month') {
+    daysBack = limit * 32 + 20;
+  } else { // '1Day'
+    daysBack = Math.ceil(limit * 1.6) + 15; // ~252 ruedas/año vs 365 días calendario
+  }
+  daysBack = Math.min(daysBack, 3650);
+  return new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10);
+}
+
 async function fetchAlpacaBars(symbol, timeframe, limit) {
-  const url = `${ALPACA_DATA}/stocks/${encodeURIComponent(symbol)}/bars?timeframe=${timeframe}&limit=${limit}&sort=desc&feed=iex&adjustment=raw`;
+  const start = alpacaStartDate(timeframe, limit);
+  const url = `${ALPACA_DATA}/stocks/${encodeURIComponent(symbol)}/bars?timeframe=${timeframe}&limit=${limit}&sort=desc&feed=iex&adjustment=raw&start=${start}`;
   const r = await fetch(url, {
     headers: {
       'APCA-API-KEY-ID': process.env.ALPACA_KEY_ID,
