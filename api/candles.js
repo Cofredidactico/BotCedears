@@ -28,6 +28,18 @@ function alpacaConfigured() {
   return Boolean(process.env.ALPACA_KEY_ID && process.env.ALPACA_SECRET_KEY);
 }
 
+// Solo largos/presencia, nunca el valor — para diagnosticar sin exponer nada
+// sensible si las variables no están llegando como se espera al runtime.
+function alpacaEnvDebug() {
+  const keyId = process.env.ALPACA_KEY_ID ?? null;
+  const secret = process.env.ALPACA_SECRET_KEY ?? null;
+  return {
+    ALPACA_KEY_ID: { present: keyId != null, length: keyId?.length ?? 0, preview: keyId ? keyId.slice(0, 2) + '…' : null },
+    ALPACA_SECRET_KEY: { present: secret != null, length: secret?.length ?? 0 },
+    allEnvKeysWithAlpaca: Object.keys(process.env).filter(k => k.toUpperCase().includes('ALPACA')),
+  };
+}
+
 async function fetchAlpacaBars(symbol, timeframe, limit) {
   const url = `${ALPACA_DATA}/stocks/${encodeURIComponent(symbol)}/bars?timeframe=${timeframe}&limit=${limit}&sort=desc&feed=iex&adjustment=raw`;
   const r = await fetch(url, {
@@ -94,12 +106,12 @@ export default async function handler(req, res) {
     // entre todos los visitantes del sitio dentro de la ventana de cache.
     // En modo debug no se cachea, para no ver una respuesta vieja al probar.
     if (!debug) res.setHeader('Cache-Control', isIntraday ? 's-maxage=300, stale-while-revalidate=600' : 's-maxage=1800, stale-while-revalidate=3600');
-    return res.status(200).json(debug ? { ...data, _debug: { alpacaConfigured: alpacaConfigured(), alpacaEligible, source, alpacaErrorDetail } } : data);
+    return res.status(200).json(debug ? { ...data, _debug: { alpacaConfigured: alpacaConfigured(), alpacaEligible, source, alpacaErrorDetail, env: alpacaEnvDebug() } } : data);
   } catch (e) {
     // Cachear también el error un rato corto: si el proveedor está sin
     // cupo/caído, repetir el mismo pedido fallido enseguida por cada
     // visitante solo empeora las cosas.
     if (!debug) res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
-    return res.status(502).json({ error: 'upstream', detail: String(e), ...(debug ? { _debug: { alpacaConfigured: alpacaConfigured(), alpacaEligible, alpacaErrorDetail } } : {}) });
+    return res.status(502).json({ error: 'upstream', detail: String(e), ...(debug ? { _debug: { alpacaConfigured: alpacaConfigured(), alpacaEligible, alpacaErrorDetail, env: alpacaEnvDebug() } } : {}) });
   }
 }
