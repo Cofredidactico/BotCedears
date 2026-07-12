@@ -36,7 +36,13 @@ async function fetchAlpacaBars(symbol, timeframe, limit) {
       'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY,
     },
   });
-  if (!r.ok) throw new Error('alpaca ' + r.status);
+  if (!r.ok) {
+    // Se incluye el cuerpo de la respuesta (Alpaca manda el motivo real acá,
+    // ej. credenciales inválidas o símbolo no soportado por el feed) — con
+    // solo el status code no alcanza para diagnosticar.
+    const bodyText = await r.text().catch(() => '');
+    throw new Error(`alpaca ${r.status}${bodyText ? ': ' + bodyText.slice(0, 300) : ''}`);
+  }
   const d = await r.json();
   const bars = Array.isArray(d.bars) ? d.bars : [];
   if (!bars.length) throw new Error('alpaca: sin barras para ' + symbol);
@@ -63,28 +69,37 @@ export default async function handler(req, res) {
   const outputsize = Math.min(parseInt(req.query.outputsize || '150', 10), 1000);
   const isIntraday = interval === '45min' || interval === '4h' || interval === '1h' || interval === '15min' || interval === '5min' || interval === '1min';
   const alpacaTf = ALPACA_TF[interval];
+  const debug = req.query.debug === '1';
+  const alpacaEligible = Boolean(alpacaTf && alpacaConfigured());
+  let alpacaErrorDetail = null;
+  let source = null;
 
   try {
     let data;
-    if (alpacaTf && alpacaConfigured()) {
+    if (alpacaEligible) {
       try {
         data = await fetchAlpacaBars(symbol, alpacaTf, outputsize);
+        source = 'alpaca';
       } catch (e) {
+        alpacaErrorDetail = e.message;
         console.warn('[candles] Alpaca falló, usando Twelve Data de respaldo:', e.message);
         data = await fetchTwelveDataBars(symbol, interval, outputsize);
+        source = 'twelvedata-fallback';
       }
     } else {
       data = await fetchTwelveDataBars(symbol, interval, outputsize);
+      source = 'twelvedata';
     }
     // Cache de borde de Vercel: absorbe pedidos repetidos del mismo símbolo
     // entre todos los visitantes del sitio dentro de la ventana de cache.
-    res.setHeader('Cache-Control', isIntraday ? 's-maxage=300, stale-while-revalidate=600' : 's-maxage=1800, stale-while-revalidate=3600');
-    return res.status(200).json(data);
+    // En modo debug no se cachea, para no ver una respuesta vieja al probar.
+    if (!debug) res.setHeader('Cache-Control', isIntraday ? 's-maxage=300, stale-while-revalidate=600' : 's-maxage=1800, stale-while-revalidate=3600');
+    return res.status(200).json(debug ? { ...data, _debug: { alpacaConfigured: alpacaConfigured(), alpacaEligible, source, alpacaErrorDetail } } : data);
   } catch (e) {
     // Cachear también el error un rato corto: si el proveedor está sin
     // cupo/caído, repetir el mismo pedido fallido enseguida por cada
     // visitante solo empeora las cosas.
-    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
-    return res.status(502).json({ error: 'upstream', detail: String(e) });
+    if (!debug) res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
+    return res.status(502).json({ error: 'upstream', detail: String(e), ...(debug ? { _debug: { alpacaConfigured: alpacaConfigured(), alpacaEligible, alpacaErrorDetail } } : {}) });
   }
 }

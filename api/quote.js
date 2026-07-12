@@ -45,6 +45,12 @@ export default async function handler(req, res) {
       fetch(`${FINNHUB}/quote?symbol=${symbol}&token=${process.env.FINNHUB_KEY}`).then(r => r.json()),
       asset.ratio != null ? getRealArsPriceMap() : Promise.resolve(null),
     ]);
+    // Finnhub a veces devuelve 200 con un cuerpo sin el campo `c` (precio) —
+    // bajo carga, símbolo sin cobertura, etc. Sin esta validación quedaba
+    // `usd: undefined`, que el cliente mostraba como "N/D" sin avisar que la
+    // fuente en vivo falló — mejor tratarlo como error explícito y dejar que
+    // el cliente caiga al respaldo (que sí se marca como "demo" en la UI).
+    if (typeof fq.c !== 'number' || !(fq.c > 0)) throw new Error('finnhub: respuesta sin precio válido para ' + symbol);
     const usd = fq.c, changePct = fq.dp ?? 0;
 
     let cedearArs = null, cedearSource = null;
