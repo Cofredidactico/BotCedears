@@ -1766,7 +1766,14 @@ function wireDashboardEvents() {
   els.report.querySelectorAll('[data-dash-ticker]').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.dashTicker));
   });
+  // Las tarjetas de "Oportunidades del Día"/"En Zona de Compra" (dashCardHTML)
+  // también tienen la clase .watch-card pero usan data-dash-ticker, no
+  // data-ticker — sin este filtro, el handler de abajo (pensado para las
+  // tarjetas de Watchlist Rápido) también se enganchaba a esas mismas
+  // tarjetas y disparaba selectTicker(undefined) justo después del click
+  // correcto, pisándolo.
   els.report.querySelectorAll('.watch-card').forEach(el => {
+    if (el.dataset.dashTicker) return;
     el.addEventListener('click', (e) => { if (e.target.closest('.watch-remove')) return; selectTicker(el.dataset.ticker); });
   });
   els.report.querySelectorAll('.watch-remove').forEach(btn => {
