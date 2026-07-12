@@ -41,9 +41,21 @@ Como el proyecto ya está conectado a Vercel, alcanza con:
    Variables*.
    - `FINNHUB_KEY` — cotizaciones, fundamentales y noticias. Cuenta gratis en
      [finnhub.io](https://finnhub.io/register).
-   - `TWELVEDATA_KEY` — velas OHLCV para los indicadores técnicos. Cuenta
-     gratis en [twelvedata.com](https://twelvedata.com/pricing) (el free tier
-     alcanza para uso personal, con límite de requests/minuto).
+   - `ALPACA_KEY_ID` y `ALPACA_SECRET_KEY` — velas OHLCV para los indicadores
+     técnicos (fuente **primaria**, reemplaza a Twelve Data). Cuenta gratis en
+     [alpaca.markets](https://alpaca.markets/data): registrarse, crear una
+     cuenta de paper trading (no hace falta fondearla ni una cuenta real para
+     esto) y generar las API keys desde el dashboard (botón "API Keys" en la
+     barra lateral). El plan Basic (gratis, feed IEX) da **200 requests/min**
+     compartidos entre todo el sitio — muy por encima del límite anterior de
+     Twelve Data (8 req/min), que era lo que impedía tener más de un puñado
+     de activos en vivo a la vez en el Dashboard. Al ser feed IEX (no la
+     cinta consolidada), el precio puede diferir levemente de otras fuentes
+     — es una diferencia esperada, no un error.
+   - `TWELVEDATA_KEY` — velas OHLCV, ahora como **respaldo automático** si
+     `ALPACA_KEY_ID`/`ALPACA_SECRET_KEY` no están configuradas todavía (así
+     no se rompe nada mientras se da de alta la cuenta de Alpaca). Cuenta
+     gratis en [twelvedata.com](https://twelvedata.com/pricing).
    - Marcalas para **Production** (y Preview si querés probar en cada PR).
 2. Hacer **Redeploy** después de cargar las keys (Vercel no las inyecta en
    builds ya corridos).
