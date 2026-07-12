@@ -17,7 +17,31 @@ const els = {
   sidebarNav: document.getElementById('sidebar-nav'),
   sidebarMarket: document.getElementById('sidebar-market'),
   toastContainer: document.getElementById('toast-container'),
+  sidebar: document.getElementById('app-sidebar'),
+  sidebarScrim: document.getElementById('sidebar-scrim'),
+  mobileNavToggle: document.getElementById('mobile-nav-toggle'),
+  helpBtn: document.getElementById('help-btn'),
+  onboardingOverlay: document.getElementById('onboarding-overlay'),
 };
+
+/* ───────────────────────── sidebar móvil (cajón) ───────────────────────── */
+function closeMobileSidebar() {
+  els.sidebar?.classList.remove('open');
+  els.sidebarScrim?.classList.remove('show');
+  els.mobileNavToggle?.setAttribute('aria-expanded', 'false');
+}
+function openMobileSidebar() {
+  els.sidebar?.classList.add('open');
+  els.sidebarScrim?.classList.add('show');
+  els.mobileNavToggle?.setAttribute('aria-expanded', 'true');
+}
+if (els.mobileNavToggle) {
+  els.mobileNavToggle.addEventListener('click', () => {
+    els.sidebar?.classList.contains('open') ? closeMobileSidebar() : openMobileSidebar();
+  });
+}
+els.sidebarScrim?.addEventListener('click', closeMobileSidebar);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMobileSidebar(); });
 
 /* ───────────────────────── toasts (feedback de acciones) ───────────────────────── */
 const TOAST_ICON = { success: '✓', info: 'ℹ', error: '✕' };
@@ -61,10 +85,108 @@ const dashState = { data: {}, loading: new Set(), started: false };
 // sidebar — reusa dashState.data, no dispara requests propios.
 const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
 
+/* ───────────────────────── dashboard personalizable ───────────────────────── */
+const DASH_WIDGETS = [
+  { key: 'opportunities', label: 'Oportunidades del Día' },
+  { key: 'buyzone', label: 'En Zona de Compra Ahora' },
+  { key: 'radar', label: 'Radar del Mercado' },
+  { key: 'watchlist', label: 'Watchlist Rápido' },
+  { key: 'portfolio', label: 'Mi Portfolio' },
+];
+const DASH_WIDGET_KEYS = DASH_WIDGETS.map(w => w.key);
+function loadDashWidgetOrder() {
+  const saved = lsGetSafe('icp_dash_order', '').split(',').filter(k => DASH_WIDGET_KEYS.includes(k));
+  const missing = DASH_WIDGET_KEYS.filter(k => !saved.includes(k));
+  return [...saved, ...missing];
+}
+function loadDashWidgetHidden() {
+  return new Set(lsGetSafe('icp_dash_hidden', '').split(',').filter(k => DASH_WIDGET_KEYS.includes(k)));
+}
+const dashWidgetState = { order: loadDashWidgetOrder(), hidden: loadDashWidgetHidden(), customizeOpen: false };
+function saveDashWidgetState() {
+  lsSetSafe('icp_dash_order', dashWidgetState.order.join(','));
+  lsSetSafe('icp_dash_hidden', [...dashWidgetState.hidden].join(','));
+}
+
 /* ───────────────────────── portfolio advisor ───────────────────────── */
 const portState = { data: {}, loading: new Set(), sortBy: lsGetSafe('icp_port_sort', 'weight'), editing: null, macro: null, inflacion: null, ccl: null };
 const taxState = { cumplidor: lsGetSafe('icp_tax_cumplidor', '0') === '1' };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
+
+/* ───────────────────────── onboarding guiado ───────────────────────── */
+const ONBOARDING_STEPS = [
+  {
+    title: 'Bienvenido a Investment Copilot AI',
+    body: 'Una mesa de análisis con datos de mercado reales (Finnhub, Twelve Data, dolarapi, CoinGecko, BYMA) para acciones, CEDEARs, ETFs y cripto. No es un asesor con IA que "opina": cada número que ves sale de un cálculo trazable sobre datos reales.',
+  },
+  {
+    title: 'Score compuesto (0–100)',
+    body: 'Combina técnico (medias, RSI, MACD, volumen), fundamental (valuación relativa al sector) y contexto macro (riesgo país, Fear & Greed) en un solo número. Arriba de 60 tiende a favorable, abajo de 40 tiende a desfavorable — nunca es una garantía.',
+  },
+  {
+    title: 'Plan operativo',
+    body: 'Para cada activo armamos zonas de entrada, stop-loss y objetivo basadas en soportes/resistencias reales del gráfico, no en un número inventado. Es información para decidir vos, no una orden de compra/venta.',
+  },
+  {
+    title: 'Señales técnicas y divergencias',
+    body: 'RSI, MACD, cruces de medias, confirmación por volumen (OBV) y divergencias precio/indicador quedan marcadas directamente sobre el gráfico y en las tarjetas de indicadores.',
+  },
+  {
+    title: 'Portfolio Advisor',
+    body: 'Cargá tus tenencias reales (en ARS o USD, con fecha de compra) y obtené P&L, retorno ajustado por inflación, riesgo de la cartera (volatilidad, drawdown, Sharpe), impacto fiscal estimado y recomendaciones puntuales por holding.',
+  },
+  {
+    title: 'Datos reales, sin inventar',
+    body: 'Cuando una fuente en vivo falla o está degradada, la plataforma lo dice explícitamente en vez de mostrar un número simulado como si fuera real. Si ves un aviso de "datos de respaldo", es justamente por eso.',
+  },
+];
+const onboardingState = { step: 0 };
+function closeOnboarding(markSeen = true) {
+  if (!els.onboardingOverlay) return;
+  els.onboardingOverlay.style.display = 'none';
+  els.onboardingOverlay.innerHTML = '';
+  if (markSeen) lsSetSafe('icp_onboarding_seen', '1');
+}
+function renderOnboarding() {
+  if (!els.onboardingOverlay) return;
+  const step = ONBOARDING_STEPS[onboardingState.step];
+  const isLast = onboardingState.step === ONBOARDING_STEPS.length - 1;
+  const isFirst = onboardingState.step === 0;
+  els.onboardingOverlay.innerHTML = `
+    <div class="onboarding-card">
+      <button class="onboarding-close" id="onboarding-close" aria-label="Cerrar guía">✕</button>
+      <div class="onboarding-dots">
+        ${ONBOARDING_STEPS.map((_, i) => `<span class="onboarding-dot ${i === onboardingState.step ? 'active' : ''}"></span>`).join('')}
+      </div>
+      <h2 class="onboarding-title" id="onboarding-title">${esc(step.title)}</h2>
+      <p class="onboarding-body">${esc(step.body)}</p>
+      <div class="onboarding-actions">
+        <button class="onboarding-btn onboarding-btn-ghost" id="onboarding-skip">${isLast ? 'Cerrar' : 'Saltar'}</button>
+        <div class="onboarding-actions-right">
+          ${!isFirst ? `<button class="onboarding-btn onboarding-btn-ghost" id="onboarding-back">Atrás</button>` : ''}
+          <button class="onboarding-btn onboarding-btn-primary" id="onboarding-next">${isLast ? 'Empezar' : 'Siguiente'}</button>
+        </div>
+      </div>
+    </div>`;
+  els.onboardingOverlay.style.display = 'flex';
+  document.getElementById('onboarding-close')?.addEventListener('click', () => closeOnboarding(true));
+  document.getElementById('onboarding-skip')?.addEventListener('click', () => closeOnboarding(true));
+  document.getElementById('onboarding-back')?.addEventListener('click', () => { onboardingState.step = Math.max(0, onboardingState.step - 1); renderOnboarding(); });
+  document.getElementById('onboarding-next')?.addEventListener('click', () => {
+    if (isLast) { closeOnboarding(true); return; }
+    onboardingState.step = Math.min(ONBOARDING_STEPS.length - 1, onboardingState.step + 1);
+    renderOnboarding();
+  });
+}
+function showOnboarding() {
+  onboardingState.step = 0;
+  renderOnboarding();
+}
+els.helpBtn?.addEventListener('click', () => showOnboarding());
+els.onboardingOverlay?.addEventListener('click', (e) => { if (e.target === els.onboardingOverlay) closeOnboarding(true); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && els.onboardingOverlay?.style.display === 'flex') closeOnboarding(true);
+});
 
 const watchState = {
   data: {}, loading: new Set(),
@@ -406,7 +528,7 @@ function renderDropdown() {
       </div>
       <div class="dropdown-right">
         <span class="dropdown-cat">${esc(a.category)}</span>
-        <button class="star-btn" data-star="${esc(a.ticker)}" title="Agregar a seguimiento">${isWatched(a.ticker) ? '★' : '☆'}</button>
+        <button class="star-btn" data-star="${esc(a.ticker)}" title="${isWatched(a.ticker) ? 'Quitar de seguimiento' : 'Agregar a seguimiento'}" aria-label="${isWatched(a.ticker) ? 'Quitar ' + esc(a.ticker) + ' de seguimiento' : 'Agregar ' + esc(a.ticker) + ' a seguimiento'}" aria-pressed="${isWatched(a.ticker)}">${isWatched(a.ticker) ? '★' : '☆'}</button>
       </div>
     </div>`).join('');
   els.dropdown.style.display = 'block';
@@ -902,7 +1024,7 @@ function renderReportImpl() {
         <div class="exec-name-row">
           <div class="exec-name">${esc(asset.name)}</div>
           <div class="exec-tickersector">${esc(asset.ticker)} · ${esc(asset.sector)}</div>
-          <button class="star-btn star-btn-lg" id="exec-star" title="Agregar a seguimiento">${isWatched(asset.ticker) ? '★' : '☆'}</button>
+          <button class="star-btn star-btn-lg" id="exec-star" title="${isWatched(asset.ticker) ? 'Quitar de seguimiento' : 'Agregar a seguimiento'}" aria-label="${isWatched(asset.ticker) ? 'Quitar ' + esc(asset.ticker) + ' de seguimiento' : 'Agregar ' + esc(asset.ticker) + ' a seguimiento'}" aria-pressed="${isWatched(asset.ticker)}">${isWatched(asset.ticker) ? '★' : '☆'}</button>
         </div>
         <div class="exec-price-row">
           <div class="exec-price">${execPricePrimary}</div>
@@ -987,9 +1109,9 @@ function renderReportImpl() {
 
     ${sectionTitleHTML('Gráfico de Precio', 'chart')}
     <div class="card chart-card">
-      <div class="chart-mode-tabs">
-        <button class="chart-mode-tab ${chartState.mode === 'institucional' ? 'active' : ''}" data-mode="institucional">Análisis Institucional</button>
-        <button class="chart-mode-tab ${chartState.mode === 'libre' ? 'active' : ''}" data-mode="libre">Análisis Libre (TradingView)</button>
+      <div class="chart-mode-tabs" role="tablist">
+        <button class="chart-mode-tab ${chartState.mode === 'institucional' ? 'active' : ''}" data-mode="institucional" role="tab" aria-selected="${chartState.mode === 'institucional'}">Análisis Institucional</button>
+        <button class="chart-mode-tab ${chartState.mode === 'libre' ? 'active' : ''}" data-mode="libre" role="tab" aria-selected="${chartState.mode === 'libre'}">Análisis Libre (TradingView)</button>
       </div>
       ${chartState.mode === 'libre' ? `
       <div class="tv-note">Widget gratuito de TradingView con sus propios datos e indicadores, siempre en vivo — usalo para tu propio análisis técnico libre. El símbolo puede no coincidir 1:1 con el precio de CEDEAR en pesos que calculamos arriba (esa parte del análisis siempre es sobre ${esc(asset.name)} en USD).</div>
@@ -1372,7 +1494,7 @@ function renderSidebar() {
   els.sidebarNav.innerHTML = `
     <div class="sidebar-nav-group">
       ${SIDEBAR_NAV.map(item => `
-        <button class="sidebar-nav-btn ${activeView === item.view ? 'active' : ''}" data-view="${item.view}">
+        <button class="sidebar-nav-btn ${activeView === item.view ? 'active' : ''}" data-view="${item.view}" ${activeView === item.view ? 'aria-current="page"' : ''}>
           ${ICONS[item.icon]}<span>${esc(item.label)}</span>
         </button>`).join('')}
     </div>
@@ -1392,6 +1514,7 @@ function renderSidebar() {
       els.tickerchip.textContent = '—';
       renderTopbar();
       renderReport();
+      closeMobileSidebar();
     });
   });
 
@@ -1505,38 +1628,83 @@ function dashboardHTML() {
     ${sectionTitleHTML('Dashboard', 'grid')}
     <div class="dash-intro">Oportunidades del día y radar del mercado sobre un universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos (acciones US, CEDEARs argentinos, ETFs y cripto) — no es todo el universo buscable, para no exceder el límite de requests del proveedor de datos gratuito. Elegí cualquiera para ver el informe completo, o buscá otro activo arriba.</div>
 
-    ${sectionTitleHTML('Oportunidades del Día', 'trend', 'margin-top:28px;')}
-    ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
-    ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}
+    ${dashCustomizeButtonHTML()}
+    ${dashWidgetState.customizeOpen ? dashCustomizePanelHTML() : ''}
 
-    ${sectionTitleHTML('En Zona de Compra Ahora', 'target')}
-    <div class="dash-intro" style="margin-bottom:14px;">Activos del universo curado cuyo precio está, ahora mismo, en zona de compra o recién rompió el soporte según el análisis técnico (mismo criterio que las alertas de Seguimiento) — no es una recomendación, es dónde está el precio respecto al plan operativo de cada uno.</div>
-    ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : !buyZone.length ? `<div class="card watch-empty">Ningún activo del universo curado está en zona de compra en este momento.</div>` : `<div class="watch-grid">${buyZone.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
-
-    ${sectionTitleHTML('Radar del Mercado', 'radar')}
-    <div class="dash-radar-grid">
-      <div class="card dash-radar-card">
-        <div class="dash-radar-title">Señales</div>
-        ${['Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'].map(label => {
-          const sig = scoreLabelColor(label);
-          return `<div class="dash-radar-row"><span class="dash-radar-dot" style="background:${sig.color};"></span><span class="dash-radar-label">${label}</span><span class="dash-radar-count">${bySignal[label] || 0}</span></div>`;
-        }).join('')}
-      </div>
-      <div class="card dash-radar-card">
-        <div class="dash-radar-title">Score promedio por sector</div>
-        ${sectorRows.length ? sectorRows.map(s => radarRow(esc(s.sector), s.avg)).join('') : '<div class="dash-loading-note">Cargando…</div>'}
-      </div>
-      <div class="card dash-radar-card">
-        <div class="dash-radar-title">Mayores subas</div>
-        ${gainers.length ? gainers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count up">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
-      </div>
-      <div class="card dash-radar-card">
-        <div class="dash-radar-title">Mayores bajas</div>
-        ${losers.length ? losers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count down">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
-      </div>
-    </div>
+    ${(() => {
+      const widgetHtml = {
+        opportunities: `
+          ${sectionTitleHTML('Oportunidades del Día', 'trend', 'margin-top:28px;')}
+          ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
+          ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}
+        `,
+        buyzone: `
+          ${sectionTitleHTML('En Zona de Compra Ahora', 'target')}
+          <div class="dash-intro" style="margin-bottom:14px;">Activos del universo curado cuyo precio está, ahora mismo, en zona de compra o recién rompió el soporte según el análisis técnico (mismo criterio que las alertas de Seguimiento) — no es una recomendación, es dónde está el precio respecto al plan operativo de cada uno.</div>
+          ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : !buyZone.length ? `<div class="card watch-empty">Ningún activo del universo curado está en zona de compra en este momento.</div>` : `<div class="watch-grid">${buyZone.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
+        `,
+        radar: `
+          ${sectionTitleHTML('Radar del Mercado', 'radar')}
+          <div class="dash-radar-grid">
+            <div class="card dash-radar-card">
+              <div class="dash-radar-title">Señales</div>
+              ${['Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'].map(label => {
+                const sig = scoreLabelColor(label);
+                return `<div class="dash-radar-row"><span class="dash-radar-dot" style="background:${sig.color};"></span><span class="dash-radar-label">${label}</span><span class="dash-radar-count">${bySignal[label] || 0}</span></div>`;
+              }).join('')}
+            </div>
+            <div class="card dash-radar-card">
+              <div class="dash-radar-title">Score promedio por sector</div>
+              ${sectorRows.length ? sectorRows.map(s => radarRow(esc(s.sector), s.avg)).join('') : '<div class="dash-loading-note">Cargando…</div>'}
+            </div>
+            <div class="card dash-radar-card">
+              <div class="dash-radar-title">Mayores subas</div>
+              ${gainers.length ? gainers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count up">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
+            </div>
+            <div class="card dash-radar-card">
+              <div class="dash-radar-title">Mayores bajas</div>
+              ${losers.length ? losers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count down">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
+            </div>
+          </div>
+        `,
+      };
+      return dashWidgetState.order
+        .filter(k => widgetHtml[k] && !dashWidgetState.hidden.has(k))
+        .map(k => widgetHtml[k]).join('');
+    })()}
 
     ${dashBottomWidgetsHTML()}`;
+}
+
+function dashCustomizeButtonHTML() {
+  return `<button class="dash-customize-btn" id="dash-customize-toggle" aria-expanded="${dashWidgetState.customizeOpen}">
+    ${ICONS.gear}<span>Personalizar Dashboard</span>
+  </button>`;
+}
+
+function dashCustomizePanelHTML() {
+  return `
+  <div class="dash-customize-panel" role="region" aria-label="Personalizar widgets del dashboard">
+    <div class="dash-customize-hint">Mostrá, ocultá o reordená las secciones del Dashboard. La preferencia se guarda solo en este navegador.</div>
+    <div class="dash-customize-list">
+      ${dashWidgetState.order.map((key, i) => {
+        const w = DASH_WIDGETS.find(x => x.key === key);
+        if (!w) return '';
+        const hidden = dashWidgetState.hidden.has(key);
+        return `<div class="dash-customize-row ${hidden ? 'is-hidden' : ''}">
+          <label class="dash-customize-check">
+            <input type="checkbox" data-widget-toggle="${key}" ${hidden ? '' : 'checked'} />
+            <span>${esc(w.label)}</span>
+          </label>
+          <div class="dash-customize-move">
+            <button data-widget-up="${key}" ${i === 0 ? 'disabled' : ''} aria-label="Subir ${esc(w.label)}" title="Subir">↑</button>
+            <button data-widget-down="${key}" ${i === dashWidgetState.order.length - 1 ? 'disabled' : ''} aria-label="Bajar ${esc(w.label)}" title="Bajar">↓</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <button class="dash-customize-reset" id="dash-customize-reset">Restablecer orden y visibilidad</button>
+  </div>`;
 }
 
 function dashBottomWidgetsHTML() {
@@ -1544,8 +1712,8 @@ function dashBottomWidgetsHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
 
-  return `
-    <div class="grid2">
+  const blocks = {
+    watchlist: `
       <div>
         <div class="panel-header">
           ${sectionTitleHTML('Watchlist Rápido', 'bookmark', 'margin-bottom:0;')}
@@ -1553,7 +1721,8 @@ function dashBottomWidgetsHTML() {
         </div>
         ${!watchTickers.length ? emptyStateHTML('bookmark', 'Todavía no agregaste activos a tu Watchlist.') : `
         <div class="watch-grid watch-grid-compact">${watchTickers.map(watchCardHTML).join('')}</div>`}
-      </div>
+      </div>`,
+    portfolio: `
       <div>
         <div class="panel-header">
           ${sectionTitleHTML('Mi Portfolio', 'briefcase', 'margin-bottom:0;')}
@@ -1576,8 +1745,12 @@ function dashBottomWidgetsHTML() {
             <span class="port-mini-value">${holdings.length}</span>
           </div>
         </div>`}
-      </div>
-    </div>`;
+      </div>`,
+  };
+
+  const visible = dashWidgetState.order.filter(k => blocks[k] && !dashWidgetState.hidden.has(k));
+  if (!visible.length) return '';
+  return `<div class="grid2 ${visible.length === 1 ? 'grid2-single' : ''}">${visible.map(k => blocks[k]).join('')}</div>`;
 }
 
 function wireDashboardEvents() {
@@ -1597,6 +1770,49 @@ function wireDashboardEvents() {
   });
   els.report.querySelectorAll('[data-goto-view]').forEach(el => {
     el.addEventListener('click', () => { state.view = el.dataset.gotoView; renderReport(); });
+  });
+
+  const customizeBtn = document.getElementById('dash-customize-toggle');
+  if (customizeBtn) customizeBtn.addEventListener('click', () => {
+    dashWidgetState.customizeOpen = !dashWidgetState.customizeOpen;
+    renderReport();
+  });
+  els.report.querySelectorAll('[data-widget-toggle]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const key = cb.dataset.widgetToggle;
+      if (cb.checked) dashWidgetState.hidden.delete(key); else dashWidgetState.hidden.add(key);
+      saveDashWidgetState();
+      renderReport();
+    });
+  });
+  els.report.querySelectorAll('[data-widget-up]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.widgetUp;
+      const idx = dashWidgetState.order.indexOf(key);
+      if (idx > 0) {
+        [dashWidgetState.order[idx - 1], dashWidgetState.order[idx]] = [dashWidgetState.order[idx], dashWidgetState.order[idx - 1]];
+        saveDashWidgetState();
+        renderReport();
+      }
+    });
+  });
+  els.report.querySelectorAll('[data-widget-down]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.widgetDown;
+      const idx = dashWidgetState.order.indexOf(key);
+      if (idx < dashWidgetState.order.length - 1) {
+        [dashWidgetState.order[idx + 1], dashWidgetState.order[idx]] = [dashWidgetState.order[idx], dashWidgetState.order[idx + 1]];
+        saveDashWidgetState();
+        renderReport();
+      }
+    });
+  });
+  const resetBtn = document.getElementById('dash-customize-reset');
+  if (resetBtn) resetBtn.addEventListener('click', () => {
+    dashWidgetState.order = DASH_WIDGET_KEYS.slice();
+    dashWidgetState.hidden = new Set();
+    saveDashWidgetState();
+    renderReport();
   });
 }
 
@@ -1756,7 +1972,7 @@ function comparePageHTML() {
     <div class="card port-form-card">
       <div class="port-form">
         ${slots.map((v, i) => `
-          <input list="cmp-ticker-list" data-cmp-slot="${i}" class="port-input cmp-input" placeholder="Ticker ${i + 1}${i < 2 ? '' : ' (opcional)'}" autocomplete="off" style="text-transform:uppercase;" value="${esc(v)}" />`).join('')}
+          <input list="cmp-ticker-list" data-cmp-slot="${i}" class="port-input cmp-input" placeholder="Ticker ${i + 1}${i < 2 ? '' : ' (opcional)'}" aria-label="Ticker ${i + 1} a comparar${i < 2 ? '' : ' (opcional)'}" autocomplete="off" style="text-transform:uppercase;" value="${esc(v)}" />`).join('')}
         <datalist id="cmp-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
         <button class="port-add-btn" id="cmp-run" ${compareState.loading ? 'disabled' : ''}>${compareState.loading ? 'Comparando…' : 'Comparar'}</button>
       </div>
@@ -2244,15 +2460,15 @@ function portfolioHTML() {
     <div class="card port-form-card">
       ${editingHolding ? `<div class="port-editing-banner">Editando ${esc(editingHolding.ticker)} — <a href="#" id="port-edit-cancel">cancelar</a></div>` : ''}
       <div class="port-form">
-        <input list="port-ticker-list" id="port-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" autocomplete="off" style="text-transform:uppercase;" value="${editingHolding ? esc(editingHolding.ticker) : ''}" ${editingHolding ? 'readonly' : ''} />
+        <input list="port-ticker-list" id="port-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" aria-label="Ticker del activo" autocomplete="off" style="text-transform:uppercase;" value="${editingHolding ? esc(editingHolding.ticker) : ''}" ${editingHolding ? 'readonly' : ''} />
         <datalist id="port-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
-        <input type="number" id="port-shares" class="port-input" placeholder="Cantidad" min="0" step="any" value="${editingHolding ? editingHolding.shares : ''}" />
-        <input type="number" id="port-cost" class="port-input" placeholder="Costo promedio (opcional)" min="0" step="any" value="${editingHolding?.avgCost ?? ''}" />
-        <select id="port-currency" class="port-input">
+        <input type="number" id="port-shares" class="port-input" placeholder="Cantidad" aria-label="Cantidad de unidades" min="0" step="any" value="${editingHolding ? editingHolding.shares : ''}" />
+        <input type="number" id="port-cost" class="port-input" placeholder="Costo promedio (opcional)" aria-label="Costo promedio de compra (opcional)" min="0" step="any" value="${editingHolding?.avgCost ?? ''}" />
+        <select id="port-currency" class="port-input" aria-label="Moneda del costo">
           <option value="USD" ${!editingHolding || editingHolding.costCurrency !== 'ARS' ? 'selected' : ''}>USD (acción/activo subyacente)</option>
           <option value="ARS" ${editingHolding?.costCurrency === 'ARS' ? 'selected' : ''}>ARS (CEDEAR en pesos)</option>
         </select>
-        <input type="date" id="port-date" class="port-input" title="Fecha de compra (opcional) — habilita el retorno real ajustado por inflación" max="${new Date().toISOString().slice(0, 10)}" value="${editingHolding?.purchaseDate ?? ''}" />
+        <input type="date" id="port-date" class="port-input" aria-label="Fecha de compra (opcional)" title="Fecha de compra (opcional) — habilita el retorno real ajustado por inflación" max="${new Date().toISOString().slice(0, 10)}" value="${editingHolding?.purchaseDate ?? ''}" />
         <button class="port-add-btn" id="port-add">${editingHolding ? 'Actualizar' : 'Agregar'}</button>
       </div>
     </div>
@@ -2260,7 +2476,7 @@ function portfolioHTML() {
     <div class="port-table-controls">
       <button class="port-csv-btn" id="port-export">Exportar CSV</button>
       <button class="port-csv-btn" id="port-import">Importar CSV</button>
-      <input type="file" id="port-import-file" accept=".csv,text/csv" style="display:none;" />
+      <input type="file" id="port-import-file" accept=".csv,text/csv" style="display:none;" aria-label="Seleccionar archivo CSV de tenencias" />
     </div>
 
     ${!holdings.length ? emptyStateHTML('briefcase', `Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}). Podés empezar cargando una a la vez arriba, o importar un CSV (columnas: ticker,shares,avgCost,costCurrency).`) : `
@@ -2319,7 +2535,7 @@ function portfolioHTML() {
     </div>` : ''}
 
     <div class="port-table-controls">
-      <select class="watch-select" id="port-sort">
+      <select class="watch-select" id="port-sort" aria-label="Ordenar tenencias por">
         ${PORT_SORT_OPTIONS.map(o => `<option value="${o.key}" ${portState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select>
     </div>
@@ -2337,7 +2553,7 @@ function portfolioHTML() {
 
 function portfolioRowHTML(r) {
   if (!r.d) {
-    return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td>${r.shares}</td><td colspan="5"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}">×</button></td></tr>`;
+    return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td>${r.shares}</td><td colspan="5"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button></td></tr>`;
   }
   const sig = scoreLabelColor(r.d.scoreLabel);
   const fmtGain = r.gainCurrency === 'ARS' ? fmtArs : fmtUsd;
@@ -2362,8 +2578,8 @@ function portfolioRowHTML(r) {
     <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>
     <td>${reco ? `<span class="watch-signal" style="background:${recoTone.bg}; color:${recoTone.color};" title="${esc(reco.detail)}">${esc(reco.label)}</span>` : 'N/D'}</td>
     <td>
-      <button class="port-edit" data-port-edit="${esc(r.ticker)}" title="Editar">✎</button>
-      <button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar">×</button>
+      <button class="port-edit" data-port-edit="${esc(r.ticker)}" title="Editar" aria-label="Editar tenencia de ${esc(r.ticker)}">✎</button>
+      <button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button>
     </td>
   </tr>`;
 }
@@ -2498,7 +2714,7 @@ function watchCardHTML(ticker) {
   if (!d) {
     if (watchState.loading.has(ticker)) {
       return `<div class="watch-card" data-ticker="${esc(ticker)}">
-        <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
+        <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar" aria-label="Quitar ${esc(ticker)} de la watchlist">×</button>
         <div class="skel skel-line" style="width:50%; height:14px;"></div>
         <div class="skel skel-line" style="width:70%; height:10px;"></div>
         <div class="skel skel-line" style="width:60%; height:16px;"></div>
@@ -2507,7 +2723,7 @@ function watchCardHTML(ticker) {
       </div>`;
     }
     return `<div class="watch-card" data-ticker="${esc(ticker)}">
-      <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
+      <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar" aria-label="Quitar ${esc(ticker)} de la watchlist">×</button>
       <div class="watch-ticker">${esc(ticker)}</div>
       <div class="watch-loading">Sin datos</div>
     </div>`;
@@ -2516,7 +2732,7 @@ function watchCardHTML(ticker) {
   const sig = scoreLabelColor(d.scoreLabel);
   const am = d.alert ? ALERT_META[d.alert.type] : null;
   return `<div class="watch-card ${am ? 'has-alert' : ''}" data-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
-    <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar">×</button>
+    <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar" aria-label="Quitar ${esc(ticker)} de la watchlist">×</button>
     <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
     <div class="watch-name">${esc(d.name ?? '')}</div>
     <div class="watch-price">${fmtUsd(d.price)}</div>
@@ -2538,13 +2754,13 @@ function watchlistPageHTML() {
     <div class="panel-header">
       ${sectionTitleHTML('Watchlist', 'bookmark', 'margin-bottom:0;')}
       <div class="watch-controls">
-        <button class="watch-alerts-btn ${alertsEnabled ? 'on' : ''}" id="watch-alerts-toggle" title="Avisar cuando un activo entra en zona de compra/venta o toca el stop">
+        <button class="watch-alerts-btn ${alertsEnabled ? 'on' : ''}" id="watch-alerts-toggle" title="Avisar cuando un activo entra en zona de compra/venta o toca el stop" aria-pressed="${alertsEnabled}">
           ${alertsEnabled ? '🔔 Alertas activas' : '🔕 Activar alertas'}
         </button>
-        <select class="watch-select" id="watch-sort">
+        <select class="watch-select" id="watch-sort" aria-label="Ordenar watchlist por">
           ${SORT_OPTIONS.map(o => `<option value="${o.key}" ${watchState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
         </select>
-        <select class="watch-select" id="watch-filter">
+        <select class="watch-select" id="watch-filter" aria-label="Filtrar watchlist por señal">
           ${SIGNAL_FILTERS.map(s => `<option value="${esc(s)}" ${watchState.filterSignal === s ? 'selected' : ''}>${s === 'all' ? 'Todas las señales' : esc(s)}</option>`).join('')}
         </select>
       </div>
@@ -2660,7 +2876,7 @@ function backtestPageHTML() {
     <div class="dash-intro">Probá cómo se comportó, históricamente, la misma señal que usa el análisis en vivo. Para cada corte de velas diarias reales se recalcula el score técnico (sin fundamentales, macro ni noticias históricas — no se inventan, se excluyen del cálculo) usando solo información disponible hasta ese día, y se mide el retorno real hacia adelante desde ese punto, agrupado por la señal vigente en ese momento.</div>
     <div class="card port-form-card">
       <div class="port-form">
-        <input list="bt-ticker-list" id="bt-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" autocomplete="off" style="text-transform:uppercase;" value="${esc(backtestState.ticker)}" />
+        <input list="bt-ticker-list" id="bt-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" aria-label="Ticker a backtestear" autocomplete="off" style="text-transform:uppercase;" value="${esc(backtestState.ticker)}" />
         <datalist id="bt-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
         <button class="port-add-btn" id="bt-run" ${backtestState.loading ? 'disabled' : ''}>${backtestState.loading ? 'Calculando…' : 'Correr backtest'}</button>
       </div>
@@ -3001,6 +3217,7 @@ document.getElementById('wordmark-home')?.addEventListener('click', () => {
   els.tickerchip.textContent = '—';
   renderTopbar();
   renderReport();
+  closeMobileSidebar();
 });
 // PWA: instalable como app. El service worker nunca cachea /api/* (los datos
 // de mercado siguen la frescura que ya maneja dataSource.js) — solo permite
@@ -3009,6 +3226,11 @@ if ('serviceWorker' in navigator && isLive()) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[pwa] no se pudo registrar el service worker', e.message));
   });
+}
+
+// Primera visita: tour guiado automático (una sola vez, reabrible desde el botón de ayuda del topbar).
+if (lsGetSafe('icp_onboarding_seen', '') !== '1') {
+  setTimeout(() => showOnboarding(), 600);
 }
 
 setInterval(renderTopbar, 30 * 1000);

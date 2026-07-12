@@ -10,9 +10,14 @@
  */
 const TD = 'https://api.twelvedata.com';
 
+// Algunos sitios (ej. Ámbito) filtran requests sin un User-Agent de navegador
+// — desde IPs de datacenter (como las de Vercel) responden distinto que desde
+// un browser normal. Se manda uno genérico para no quedar bloqueados.
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
 async function safeJson(url, opts) {
   try {
-    const r = await fetch(url, opts);
+    const r = await fetch(url, { ...opts, headers: { 'User-Agent': BROWSER_UA, ...(opts?.headers ?? {}) } });
     if (!r.ok) return null;
     return await r.json();
   } catch { return null; }
