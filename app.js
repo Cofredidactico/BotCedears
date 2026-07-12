@@ -66,18 +66,27 @@ const state = { query: '', asset: null, report: null, loading: false, error: nul
 function lsGetSafe(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } }
 
 /* ───────────────────────── dashboard / radar ───────────────────────── */
-// Universo curado (no todo universe.json): rankear ~230 tickers en vivo
-// pegaría contra el límite de Twelve Data (free tier, ~8 req/min) en cada
-// visita. Se eligió un subconjunto líquido y representativo de categorías
-// (tech US, bancos/energía AR, ETFs, cripto) — ampliar cuando haya más
-// margen de API (key paga o un snapshot server-side con cron). Se carga en
-// lotes (ver loadDashboardData) para no disparar más pedidos concurrentes
-// de los que el free tier de Twelve Data tolera de golpe.
+// Universo curado (no todo universe.json): rankear los ~238 tickers del
+// universo completo en vivo en cada visita sigue sin tener sentido aunque
+// el proveedor de velas (Alpaca, ver api/candles.js) tenga mucho más margen
+// que el anterior — se eligió un subconjunto amplio, líquido y
+// representativo de categorías (tech US, bancos/energía/salud/consumo US,
+// ADRs argentinos, ETFs, cripto). Se carga en lotes (ver loadDashboardData)
+// para repartir la carga entre visitantes concurrentes, no por un límite
+// de 8 req/min como antes.
 const DASHBOARD_UNIVERSE = [
-  'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META', 'AMZN', 'AMD', 'TSM',
-  'JPM', 'V', 'MA', 'XOM', 'KO', 'NFLX', 'CAT',
+  'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META', 'AMZN', 'ORCL', 'CRM', 'ADBE', 'CSCO', 'SHOP',
+  'AMD', 'TSM', 'INTC', 'QCOM', 'AVGO', 'MU',
+  'JPM', 'V', 'MA', 'BAC', 'GS', 'WFC', 'PYPL', 'COIN',
+  'XOM', 'CVX', 'COP', 'SLB', 'VIST',
+  'JNJ', 'PFE', 'UNH', 'LLY', 'ABBV',
+  'CAT', 'BA', 'GE', 'DE',
+  'KO', 'WMT', 'NKE', 'SBUX', 'PG', 'MCD',
+  'NFLX', 'DIS', 'T', 'VZ',
+  'TSLA', 'F',
+  'GOLD', 'VALE',
   'MELI', 'GGAL', 'BMA', 'YPF', 'PAM', 'CEPU', 'TGS', 'SUPV', 'IRS', 'CRESY', 'LOMA', 'EDN',
-  'SPY', 'QQQ', 'GLD',
+  'SPY', 'QQQ', 'GLD', 'DIA',
   'BTC', 'ETH',
 ];
 const dashState = { data: {}, loading: new Set(), started: false };
@@ -3176,13 +3185,14 @@ async function loadWatchlistData() {
   }));
 }
 
-// Lotes de 8 (no todo el universo junto): el free tier de Twelve Data
-// comparte ~8 req/min entre todo el sitio, así que tirar 30 pedidos de
-// golpe en un cache frío hace que varios caigan a demo por rate limit —
-// justo lo que se quiere evitar. Entre lote y lote se espera un toque para
-// repartir la carga en la ventana del minuto.
-const DASHBOARD_BATCH_SIZE = 8;
-const DASHBOARD_BATCH_DELAY_MS = 4000;
+// Lotes (no todo el universo junto): las velas ahora salen de Alpaca (free
+// tier, ~200 req/min compartidos entre todo el sitio) en vez de Twelve Data
+// (que solo daba ~8 req/min y era el techo real de cuántos activos podían
+// verse en vivo a la vez). Con ese margen se puede pedir un lote bastante
+// más grande de golpe sin arriesgar caer a demo por rate limit — se sigue
+// espaciando un poco para dejar margen a otros visitantes concurrentes.
+const DASHBOARD_BATCH_SIZE = 20;
+const DASHBOARD_BATCH_DELAY_MS = 1500;
 
 async function loadDashboardData() {
   dashState.started = true;
