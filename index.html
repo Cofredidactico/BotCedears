@@ -19,9 +19,12 @@
 </head>
 <body>
 
+  <a href="#main-content" class="skip-link">Saltar al contenido principal</a>
+
   <div class="app-shell">
 
-    <aside class="sidebar">
+    <div class="sidebar-scrim" id="sidebar-scrim"></div>
+    <aside class="sidebar" id="app-sidebar">
       <div class="sidebar-brand" id="wordmark-home" title="Volver al Dashboard">
         <div class="sidebar-brand-row">
           <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
@@ -41,28 +44,34 @@
           </div>
         </div>
       </div>
-      <nav class="sidebar-nav" id="sidebar-nav"></nav>
+      <nav class="sidebar-nav" id="sidebar-nav" aria-label="Navegación principal"></nav>
       <div class="sidebar-market" id="sidebar-market"></div>
     </aside>
 
     <div class="main-area">
 
       <div class="topbar">
+        <button class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Abrir menú de navegación" aria-expanded="false" aria-controls="app-sidebar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+        </button>
         <div class="searchwrap">
           <div class="searchbox">
-            <span class="searchicon">⌕</span>
-            <input type="text" id="searchinput" class="searchinput" placeholder="Buscar activo por ticker o nombre (ej. NVDA, GGAL, oro, BTC)..." autocomplete="off" />
+            <span class="searchicon" aria-hidden="true">⌕</span>
+            <input type="text" id="searchinput" class="searchinput" placeholder="Buscar activo por ticker o nombre (ej. NVDA, GGAL, oro, BTC)..." aria-label="Buscar activo por ticker o nombre" autocomplete="off" />
             <span class="tickerchip" id="tickerchip">—</span>
           </div>
-          <div class="dropdown" id="dropdown" style="display:none;"></div>
+          <div class="dropdown" id="dropdown" style="display:none;" role="listbox" aria-label="Resultados de búsqueda"></div>
         </div>
         <div class="topbar-right">
+          <button class="help-btn" id="help-btn" aria-label="Ver guía rápida de la plataforma" title="Guía rápida">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.2 9.3a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 1.8-2.6 3.6"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></svg>
+          </button>
           <div class="datebadge" id="datebadge"></div>
           <div class="connbanner" id="connbanner"></div>
         </div>
       </div>
 
-      <div class="container">
+      <div class="container" id="main-content" tabindex="-1">
         <div class="searchhint">Universo: acciones y CEDEARs de todo el panel, ETFs y cripto (BTC, ETH). Fundamentales completos solo disponibles para acciones/CEDEARs con cobertura en el proveedor de datos.</div>
 
         <div id="report"></div>
@@ -75,7 +84,8 @@
     </div>
   </div>
 
-  <div class="toast-container" id="toast-container"></div>
+  <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <div class="onboarding-overlay" id="onboarding-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="onboarding-title"></div>
 
 <script type="module" src="./app.js"></script>
 </body>
