@@ -123,6 +123,12 @@ const Mock = {
   async getNews() { return { items: [], sentimentScore: null, isReal: false }; },
   async getGeneralNews() { return { items: [], sentimentScore: null, isReal: false }; },
   async getEarnings() { return { nextDate: null, isReal: false }; },
+  // Sin dato real de inflación disponible en modo mock — se devuelve vacío
+  // en vez de inventar meses de IPC (el retorno real necesita el número
+  // verdadero, no uno simulado que no representaría nada).
+  async getInflacion() { return { items: [], isReal: false }; },
+  async getDividends() { return { items: [], isReal: false }; },
+  async getBonds() { return { items: [], isReal: false }; },
 };
 
 /* ═════════════════════════════ LIVE ═══════════════════════════════════ */
@@ -179,6 +185,27 @@ const Live = {
     return cached('e:' + ticker, 6 * 60 * 60 * 1000, async () => {
       const r = await fetch(`${API_BASE}/earnings?symbol=${encodeURIComponent(ticker)}`);
       if (!r.ok) throw new Error('earnings ' + r.status);
+      const d = await r.json(); return { ...d, isReal: true };
+    });
+  },
+  async getInflacion() {
+    return cached('inflacion', 12 * 60 * 60 * 1000, async () => {
+      const r = await fetch(`${API_BASE}/inflacion`);
+      if (!r.ok) throw new Error('inflacion ' + r.status);
+      const d = await r.json(); return { ...d, isReal: true };
+    });
+  },
+  async getDividends(ticker) {
+    return cached('div:' + ticker, 6 * 60 * 60 * 1000, async () => {
+      const r = await fetch(`${API_BASE}/dividends?symbol=${encodeURIComponent(ticker)}`);
+      if (!r.ok) throw new Error('dividends ' + r.status);
+      const d = await r.json(); return { ...d, isReal: true };
+    });
+  },
+  async getBonds() {
+    return cached('bonds', 2 * 60 * 1000, async () => {
+      const r = await fetch(`${API_BASE}/bonds`);
+      if (!r.ok) throw new Error('bonds ' + r.status);
       const d = await r.json(); return { ...d, isReal: true };
     });
   },
@@ -255,6 +282,20 @@ export async function getEarnings(ticker) {
   const asset = await getAsset(ticker);
   if (asset?.category === 'Cripto' || asset?.category === 'ETF') return { nextDate: null, isReal: true }; // no aplica
   return withFallback('getEarnings', [ticker], Mock.getEarnings.bind(Mock));
+}
+
+export async function getInflacion() {
+  return withFallback('getInflacion', [], Mock.getInflacion.bind(Mock));
+}
+
+export async function getDividends(ticker) {
+  const asset = await getAsset(ticker);
+  if (asset?.category === 'Cripto') return { items: [], isReal: true }; // no aplica
+  return withFallback('getDividends', [ticker], Mock.getDividends.bind(Mock));
+}
+
+export async function getBonds() {
+  return withFallback('getBonds', [], Mock.getBonds.bind(Mock));
 }
 
 /** Combina el snapshot manual (macro.json) con la fuente en vivo (/api/macro:

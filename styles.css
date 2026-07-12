@@ -201,6 +201,13 @@ a { color: inherit; }
 .port-note { font-size: 13px; line-height: 1.6; padding: 6px 0; color: var(--text-dim); }
 .port-note.risk { color: var(--amber-text); }
 .port-note.ok { color: var(--up-text); }
+.risk-days-note { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-faint); }
+.risk-metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+.risk-metric-label { font-size: 11px; color: var(--text-mute); margin-bottom: 6px; }
+.risk-metric-value { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 600; color: var(--text); }
+.risk-metric-value.up { color: var(--up-text); }
+.risk-metric-value.down { color: var(--down-text); }
+@media (max-width: 860px) { .risk-metrics-grid { grid-template-columns: repeat(2, 1fr); } }
 .port-table-wrap { overflow-x: auto; margin-bottom: 40px; border: 1px solid var(--border); border-radius: 14px; }
 .port-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .port-table th {
@@ -214,6 +221,16 @@ a { color: inherit; }
 .port-table td.up { color: var(--up-text); }
 .port-table td.down { color: var(--down-text); }
 .port-pnl-abs { font-size: 11px; color: var(--text-mute); font-family: 'IBM Plex Mono', monospace; }
+.port-pnl-real { font-size: 10.5px; font-family: 'IBM Plex Mono', monospace; opacity: 0.85; }
+.port-pnl-real.up { color: var(--up-text); }
+.port-pnl-real.down { color: var(--down-text); }
+.port-real-sub { font-style: italic; }
+.tax-cumplidor-toggle { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-mute); cursor: pointer; }
+.tax-cumplidor-toggle input { accent-color: var(--accent); }
+.tax-bp-row { margin-bottom: 14px; }
+.tax-ganancias-note { font-size: 12.5px; line-height: 1.6; color: var(--text-dim); padding: 12px 14px; background: var(--bg-input); border-radius: 10px; margin-bottom: 12px; }
+.tax-ganancias-note strong { color: var(--accent-text); }
+.tax-disclaimer { font-size: 11px; line-height: 1.6; color: var(--text-faint); }
 select.port-input { cursor: pointer; }
 .port-remove { background: transparent; border: none; color: var(--text-mute); font-size: 15px; cursor: pointer; }
 .port-remove:hover { color: var(--down-text); }
