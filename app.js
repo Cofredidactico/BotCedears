@@ -273,14 +273,14 @@ async function toggleAlerts() {
 // servidor (Redis, ver alertsStore.js) quedan indexadas por ese chat_id.
 const telegramState = {
   chatId: lsGetSafe('icp_telegram_chat_id', ''),
-  botUsername: null, configured: null, // null = todavía no se consultó /api/telegram-config
+  botUsername: null, configured: null, // null = todavía no se consultó /api/alerts?action=config
   linking: false, code: null, pollTimer: null, pollDeadline: 0,
   subscriptions: [], subsLoaded: false, subsLoading: false,
 };
 
 async function loadTelegramConfig() {
   try {
-    const d = await (await fetch('/api/telegram-config')).json();
+    const d = await (await fetch('/api/alerts?action=config')).json();
     telegramState.configured = Boolean(d.configured);
     telegramState.botUsername = d.botUsername;
   } catch (_) {
@@ -293,7 +293,7 @@ async function loadTelegramSubscriptions() {
   if (!telegramState.chatId) return;
   telegramState.subsLoading = true;
   try {
-    const d = await (await fetch(`/api/alerts-subscriptions?chatId=${encodeURIComponent(telegramState.chatId)}`)).json();
+    const d = await (await fetch(`/api/alerts?action=subscriptions&chatId=${encodeURIComponent(telegramState.chatId)}`)).json();
     telegramState.subscriptions = Array.isArray(d.tickers) ? d.tickers : [];
     telegramState.subsLoaded = true;
   } catch (e) {
@@ -318,7 +318,7 @@ function startTelegramLink() {
   telegramState.pollTimer = setInterval(async () => {
     if (Date.now() > telegramState.pollDeadline) { stopTelegramPolling(); telegramState.linking = false; renderReport(); return; }
     try {
-      const d = await (await fetch(`/api/telegram-link-status?code=${code}`)).json();
+      const d = await (await fetch(`/api/alerts?action=link-status&code=${code}`)).json();
       if (d.chatId) {
         stopTelegramPolling();
         telegramState.chatId = d.chatId;
@@ -358,7 +358,7 @@ async function toggleTelegramSubscription(ticker) {
   telegramState.subscriptions = isSubbed ? telegramState.subscriptions.filter(t => t !== ticker) : [...telegramState.subscriptions, ticker];
   renderReport();
   try {
-    const r = await fetch('/api/alerts-subscribe', {
+    const r = await fetch('/api/alerts?action=subscribe', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chatId: telegramState.chatId, ticker, action }),
     });

@@ -85,9 +85,9 @@ Como el proyecto ya está conectado a Vercel, alcanza con:
    - `TELEGRAM_WEBHOOK_SECRET` (opcional pero recomendado) — string
      cualquiera inventado por vos, evita que cualquiera pueda pegarle al
      endpoint del webhook haciéndose pasar por Telegram.
-   - `CRON_SECRET` — string inventado por vos, protege `/api/check-alerts`
-     (el endpoint que dispara las alertas) para que solo lo pueda llamar el
-     cron externo que lo conoce.
+   - `CRON_SECRET` — string inventado por vos, protege la acción `check` de
+     `/api/alerts` (la que dispara las alertas) para que solo lo pueda
+     llamar el cron externo que lo conoce.
    - Marcalas para **Production** (y Preview si querés probar en cada PR).
 2. Hacer **Redeploy** después de cargar las keys (Vercel no las inyecta en
    builds ya corridos).
@@ -110,17 +110,23 @@ repetirlas en cada deploy):
    mensajes que le escriban al bot. Reemplazando `<TOKEN>`, `<TU-DOMINIO>` y
    (si la cargaste) `<WEBHOOK_SECRET>`:
    ```
-   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<TU-DOMINIO>/api/telegram-webhook&secret_token=<WEBHOOK_SECRET>
+   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<TU-DOMINIO>/api/alerts?action=webhook&secret_token=<WEBHOOK_SECRET>
    ```
    Pegar esa URL en el navegador una vez alcanza — Telegram confirma con
    `{"ok":true,"result":true}`.
 2. **Dar de alta el cron externo** que revisa las alertas — en
    [cron-job.org](https://cron-job.org) (gratis, sin tarjeta): crear una
    cuenta, nuevo cronjob apuntando a
-   `https://<TU-DOMINIO>/api/check-alerts?secret=<CRON_SECRET>`, cada 5-15
-   minutos. Cada corrida solo pega a `/api/quote` y `/api/candles` por los
-   tickers que alguien haya suscripto (no todo el universo), así que no
+   `https://<TU-DOMINIO>/api/alerts?action=check&secret=<CRON_SECRET>`, cada
+   5-15 minutos. Cada corrida solo pega a `/api/quote` y `/api/candles` por
+   los tickers que alguien haya suscripto (no todo el universo), así que no
    consume la cuota del proveedor de datos de la nada.
+   
+   Nota: todos los endpoints de Alertas por Telegram (webhook, vinculación,
+   suscripciones y el chequeo del cron) viven en un solo archivo,
+   `/api/alerts.js`, enrutado por `?action=` — el plan Hobby de Vercel
+   limita los deployments a 12 funciones serverless, así que se agruparon
+   en vez de tener un archivo por endpoint.
 
 ### Probar en local sin keys
 
