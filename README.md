@@ -56,6 +56,38 @@ Como el proyecto ya está conectado a Vercel, alcanza con:
      `ALPACA_KEY_ID`/`ALPACA_SECRET_KEY` no están configuradas todavía (así
      no se rompe nada mientras se da de alta la cuenta de Alpaca). Cuenta
      gratis en [twelvedata.com](https://twelvedata.com/pricing).
+   - `ANTHROPIC_API_KEY` — habilita el **Asistente IA** (botón flotante de
+     chat, abajo a la derecha). Cuenta en
+     [console.anthropic.com](https://console.anthropic.com/) → *API Keys*.
+     Es un servicio pago por uso (no tiene tier gratuito) — se cobra por
+     token de entrada/salida según el modelo usado. Sin esta key, el botón
+     del asistente sigue visible pero responde con un aviso de "no
+     configurado" en vez de romper el resto del sitio.
+   - `ANTHROPIC_MODEL` (opcional) — modelo a usar, default `claude-opus-4-8`
+     (el más capaz, también el más caro). Para bajar costo sin tocar código,
+     se puede poner `claude-sonnet-5` (más barato, buena calidad) o
+     `claude-haiku-4-5` (el más económico) — ver precios por token en
+     [anthropic.com/pricing](https://www.anthropic.com/pricing).
+   - `KV_REST_API_URL` y `KV_REST_API_TOKEN` — base de datos Redis (Upstash,
+     tier gratis) donde se guardan las suscripciones de **Alertas por
+     Telegram** (qué chat_id sigue qué ticker). Es lo único con estado que
+     necesita sobrevivir entre corridas del cron, ya que todo lo demás del
+     sitio vive en `localStorage` del navegador. Se crea desde Vercel:
+     *Storage → Create Database → Upstash for Redis* (o directo en
+     [upstash.com](https://upstash.com), plan gratis) — al conectarlo desde
+     la pestaña Storage del proyecto, Vercel carga estas dos env vars solo.
+   - `TELEGRAM_BOT_TOKEN` y `TELEGRAM_BOT_USERNAME` — bot de Telegram para
+     mandar las alertas. Gratis: hablale a
+     [@BotFather](https://t.me/BotFather) en Telegram, `/newbot`, elegí un
+     nombre y un @username (terminado en `bot`) — te da el token. Cargar el
+     token en `TELEGRAM_BOT_TOKEN` y el @username (sin arroba) en
+     `TELEGRAM_BOT_USERNAME`.
+   - `TELEGRAM_WEBHOOK_SECRET` (opcional pero recomendado) — string
+     cualquiera inventado por vos, evita que cualquiera pueda pegarle al
+     endpoint del webhook haciéndose pasar por Telegram.
+   - `CRON_SECRET` — string inventado por vos, protege `/api/check-alerts`
+     (el endpoint que dispara las alertas) para que solo lo pueda llamar el
+     cron externo que lo conoce.
    - Marcalas para **Production** (y Preview si querés probar en cada PR).
 2. Hacer **Redeploy** después de cargar las keys (Vercel no las inyecta en
    builds ya corridos).
@@ -63,7 +95,32 @@ Como el proyecto ya está conectado a Vercel, alcanza con:
 
 Sin las keys configuradas, la app sigue funcionando pero cae a datos de
 demostración (`isReal:false`) y el banner de conexión muestra "Sin conexión
-al proveedor de datos".
+al proveedor de datos". Lo mismo para el Asistente IA y las Alertas por
+Telegram: si faltan sus keys, esas funciones muestran un aviso de "no
+configurado" en vez de romper el resto del sitio.
+
+### Terminar de activar las Alertas por Telegram (dos pasos únicos, no por deploy)
+
+Con `KV_REST_API_URL`/`KV_REST_API_TOKEN`/`TELEGRAM_BOT_TOKEN`/
+`TELEGRAM_BOT_USERNAME` ya cargadas y deployadas, faltan dos configuraciones
+que se hacen una sola vez (no dependen del código, así que no hace falta
+repetirlas en cada deploy):
+
+1. **Registrar el webhook del bot** — le dice a Telegram a qué URL mandar los
+   mensajes que le escriban al bot. Reemplazando `<TOKEN>`, `<TU-DOMINIO>` y
+   (si la cargaste) `<WEBHOOK_SECRET>`:
+   ```
+   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<TU-DOMINIO>/api/telegram-webhook&secret_token=<WEBHOOK_SECRET>
+   ```
+   Pegar esa URL en el navegador una vez alcanza — Telegram confirma con
+   `{"ok":true,"result":true}`.
+2. **Dar de alta el cron externo** que revisa las alertas — en
+   [cron-job.org](https://cron-job.org) (gratis, sin tarjeta): crear una
+   cuenta, nuevo cronjob apuntando a
+   `https://<TU-DOMINIO>/api/check-alerts?secret=<CRON_SECRET>`, cada 5-15
+   minutos. Cada corrida solo pega a `/api/quote` y `/api/candles` por los
+   tickers que alguien haya suscripto (no todo el universo), así que no
+   consume la cuota del proveedor de datos de la nada.
 
 ### Probar en local sin keys
 
@@ -97,6 +154,14 @@ gratuita/accesible. Lo que **no** está cubierto todavía:
   como una función simple del score. No es un backtest ni una probabilidad
   estadísticamente validada — es una heurística, tratada como tal en todo el
   copy de la UI.
+
+- **Asistente IA**: responde solo con datos ya calculados por la plataforma
+  (score, plan operativo, técnico, fundamentales, macro) que se le pasan
+  como contexto en cada pregunta — no tiene memoria de conversaciones
+  anteriores (cada pregunta es un request nuevo) ni acceso a nada fuera de
+  ese contexto. Si preguntás algo que la plataforma no calculó, debería
+  decir que no tiene ese dato en vez de inventarlo; si eso llegara a fallar,
+  reportarlo.
 
 Nada de esto es asesoramiento financiero. Ver el disclaimer en el footer de
 la app.

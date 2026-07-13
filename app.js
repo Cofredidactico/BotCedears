@@ -22,6 +22,8 @@ const els = {
   mobileNavToggle: document.getElementById('mobile-nav-toggle'),
   helpBtn: document.getElementById('help-btn'),
   onboardingOverlay: document.getElementById('onboarding-overlay'),
+  assistantFab: document.getElementById('assistant-fab'),
+  assistantPanel: document.getElementById('assistant-panel'),
 };
 
 /* ───────────────────────── sidebar móvil (cajón) ───────────────────────── */
@@ -265,6 +267,110 @@ async function toggleAlerts() {
   refreshIfWatchlistVisible();
 }
 
+/* ───────────────────────── alertas por Telegram (fuera del navegador) ───────────────────────── */
+// El chat_id vinculado hace las veces de "cuenta" (esta plataforma no tiene
+// login) — se guarda en localStorage y todas las suscripciones del lado del
+// servidor (Redis, ver alertsStore.js) quedan indexadas por ese chat_id.
+const telegramState = {
+  chatId: lsGetSafe('icp_telegram_chat_id', ''),
+  botUsername: null, configured: null, // null = todavía no se consultó /api/telegram-config
+  linking: false, code: null, pollTimer: null, pollDeadline: 0,
+  subscriptions: [], subsLoaded: false, subsLoading: false,
+};
+
+async function loadTelegramConfig() {
+  try {
+    const d = await (await fetch('/api/telegram-config')).json();
+    telegramState.configured = Boolean(d.configured);
+    telegramState.botUsername = d.botUsername;
+  } catch (_) {
+    telegramState.configured = false;
+  }
+  if (state.view === 'alerts' && !state.asset) renderReport();
+}
+
+async function loadTelegramSubscriptions() {
+  if (!telegramState.chatId) return;
+  telegramState.subsLoading = true;
+  try {
+    const d = await (await fetch(`/api/alerts-subscriptions?chatId=${encodeURIComponent(telegramState.chatId)}`)).json();
+    telegramState.subscriptions = Array.isArray(d.tickers) ? d.tickers : [];
+    telegramState.subsLoaded = true;
+  } catch (e) {
+    console.warn('[telegram] no se pudieron cargar las suscripciones', e.message);
+  } finally {
+    telegramState.subsLoading = false;
+    if (state.view === 'alerts' && !state.asset) renderReport();
+  }
+}
+
+function stopTelegramPolling() {
+  if (telegramState.pollTimer) clearInterval(telegramState.pollTimer);
+  telegramState.pollTimer = null;
+}
+
+function startTelegramLink() {
+  const code = Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
+  telegramState.code = code;
+  telegramState.linking = true;
+  telegramState.pollDeadline = Date.now() + 5 * 60 * 1000; // 5 min: tiempo razonable para abrir Telegram y tocar Start
+  stopTelegramPolling();
+  telegramState.pollTimer = setInterval(async () => {
+    if (Date.now() > telegramState.pollDeadline) { stopTelegramPolling(); telegramState.linking = false; renderReport(); return; }
+    try {
+      const d = await (await fetch(`/api/telegram-link-status?code=${code}`)).json();
+      if (d.chatId) {
+        stopTelegramPolling();
+        telegramState.chatId = d.chatId;
+        telegramState.linking = false;
+        lsSetSafe('icp_telegram_chat_id', d.chatId);
+        showToast('Telegram vinculado correctamente', 'success');
+        loadTelegramSubscriptions();
+        renderReport();
+      }
+    } catch (_) { /* red intermitente: se reintenta en el próximo tick */ }
+  }, 3000);
+  renderReport();
+}
+
+function cancelTelegramLink() {
+  stopTelegramPolling();
+  telegramState.linking = false;
+  telegramState.code = null;
+  renderReport();
+}
+
+function unlinkTelegram() {
+  telegramState.chatId = '';
+  telegramState.subscriptions = [];
+  telegramState.subsLoaded = false;
+  lsSetSafe('icp_telegram_chat_id', '');
+  showToast('Telegram desvinculado', 'info');
+  renderReport();
+}
+
+async function toggleTelegramSubscription(ticker) {
+  if (!telegramState.chatId) return;
+  const isSubbed = telegramState.subscriptions.includes(ticker);
+  const action = isSubbed ? 'remove' : 'add';
+  // Optimista: refleja el cambio ya, y revierte si el servidor lo rechaza —
+  // se ve instantáneo en la UI en vez de esperar el round-trip.
+  telegramState.subscriptions = isSubbed ? telegramState.subscriptions.filter(t => t !== ticker) : [...telegramState.subscriptions, ticker];
+  renderReport();
+  try {
+    const r = await fetch('/api/alerts-subscribe', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chatId: telegramState.chatId, ticker, action }),
+    });
+    if (!r.ok) throw new Error('rechazado por el servidor');
+    showToast(isSubbed ? `Avisos por Telegram desactivados para ${ticker}` : `Te vamos a avisar por Telegram cuando ${ticker} cambie de zona`, 'info');
+  } catch (e) {
+    telegramState.subscriptions = isSubbed ? [...telegramState.subscriptions, ticker] : telegramState.subscriptions.filter(t => t !== ticker);
+    showToast('No se pudo actualizar la alerta, probá de nuevo', 'error');
+    renderReport();
+  }
+}
+
 const CHART_TABS = [
   { key: '45min', label: '45m' },
   { key: '4h', label: '4H' },
@@ -456,6 +562,7 @@ const ICONS = {
   compare: `<svg ${ICON_ATTR}><path d="M7 4v14"/><path d="M3 8h4l-2 4Z"/><path d="M17 4v14"/><path d="M21 12h-4l2 4Z"/></svg>`,
   gear: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M17.8 6.2l-1.6 1.6M7.8 16.2l-1.6 1.6M17.8 17.8l-1.6-1.6M7.8 7.8 6.2 6.2"/></svg>`,
   filter: `<svg ${ICON_ATTR}><path d="M3.5 4.5h17l-6.2 8v6.5l-4.6 2v-8.5Z"/></svg>`,
+  shuffle: `<svg ${ICON_ATTR}><path d="M3 6h3.5c2.5 0 3.8 1.6 5 3.5"/><path d="M11.5 14.5c1.2 1.9 2.5 3.5 5 3.5H21"/><polyline points="17.5,4.5 21,6 17.5,7.5"/><polyline points="17.5,15 21,16.5 17.5,18"/><path d="M3 18h3.5c2.5 0 3.8-1.6 5-3.5"/><path d="M11.5 9.5C12.7 7.6 14 6 16.5 6"/></svg>`,
 };
 function sectionTitleHTML(text, iconKey, style = '') {
   return `<div class="sectiontitle" ${style ? `style="${style}"` : ''}>${ICONS[iconKey] ?? ''}<span>${esc(text)}</span></div>`;
@@ -646,6 +753,145 @@ async function loadReport(ticker) {
   renderTopbar();
   renderReport();
 }
+
+/* ───────────────────────── asistente IA: contexto grounded ───────────────────────── */
+// Extrae un subconjunto compacto de lo YA calculado por la plataforma (nunca
+// las velas OHLCV crudas, que inflarían el costo del request sin aportar
+// nada que el modelo pueda razonar mejor que el motor de score/plan ya
+// hecho) — el mismo principio de "nunca inventar" del resto del sitio
+// aplicado al payload que ve el modelo: si no está acá, el asistente debe
+// decir que no lo tiene, no adivinarlo.
+function round2(n) { return typeof n === 'number' && !isNaN(n) ? Math.round(n * 100) / 100 : null; }
+function buildAssistantContext() {
+  const ctx = { fecha: new Date().toISOString().slice(0, 10) };
+  if (state.asset && state.report) {
+    const r = state.report;
+    ctx.activo = { ticker: r.asset.ticker, nombre: r.asset.name, sector: r.asset.sector, categoria: r.asset.category };
+    if (r.quote) ctx.cotizacion = { usd: round2(r.quote.usd), variacionPct: round2(r.quote.changePct), cedearArs: round2(r.quote.cedearArs), fuenteCedear: r.quote.cedearSource };
+    if (r.score != null) {
+      ctx.score = {
+        valor: r.score, etiqueta: r.scoreLabel, confianza: r.confidence,
+        desglose: (r.scoreBreakdown || []).filter(b => b.available).map(b => ({ categoria: b.label, puntosSobre100: b.pct })),
+      };
+    }
+    if (r.plan) {
+      ctx.planOperativo = {
+        zonaCompra: r.plan.compra, zonaVenta: r.plan.venta, stopLoss: r.plan.stopLoss,
+        objetivo1: r.plan.tp1, objetivo2: r.plan.tp2, objetivo3: r.plan.tp3,
+        riesgoBeneficio: r.plan.riskReward, probabilidad: r.plan.probability, drawdownEsperado: r.plan.drawdown,
+      };
+    }
+    if (r.technical) {
+      ctx.tecnico = {
+        precio: round2(r.technical.price), rsi: round2(r.technical.rsi), adx: round2(r.technical.adx),
+        posicionVsEma200: r.technical.price > r.technical.ema200 ? 'sobre EMA200' : 'bajo EMA200',
+        posicionBandasBollinger: r.technical.bbPos, tendenciaVolumenOBV: r.technical.obvTrend,
+        soporte: round2(r.technical.support), resistencia: round2(r.technical.resistance),
+        divergenciaPrecioRsi: r.technical.divergence?.type ?? null,
+      };
+    }
+    if (r.confluence) ctx.confluenciaSemanal = { deAcuerdoConTendenciaDiaria: r.confluence.agree };
+    if (r.fundamentals?.hasData) {
+      ctx.fundamentales = {
+        crecimientoIngresosPct: r.fundamentals.revenueGrowth, crecimientoEpsPct: r.fundamentals.epsGrowth,
+        peTTM: r.fundamentals.peTTM, peg: r.fundamentals.peg, roePct: r.fundamentals.roe,
+        margenNetoPct: r.fundamentals.netMargin, dividendYieldPct: r.fundamentals.dividendYield,
+      };
+    }
+    if (r.macro) {
+      ctx.macro = {
+        riesgoPaisArgentina: r.macro.riesgoPaisArg, vix: r.macro.vix,
+        fearGreedCripto: r.macro.fearGreed?.value ?? null, dolarCCL: r.macro.dolares?.ccl ?? null,
+      };
+    }
+    ctx.earnings = { diasParaProximoReporte: r.daysToEarnings, reporteInminente: r.earningsSoon };
+    if (r.dividends?.items?.length) ctx.ultimoDividendoPagado = r.dividends.items[0];
+    if (r.news?.items?.length) ctx.noticiasRecientes = r.news.items.slice(0, 4).map(n => ({ titular: n.text, tonoHeuristico: n.tag }));
+  } else {
+    ctx.vistaActual = state.view; // sin ticker puntual: dashboard, portfolio, watchlist, etc.
+    const holdings = getPortfolio();
+    if (holdings.length) ctx.carteraDelUsuario = holdings.map(h => ({ ticker: h.ticker, cantidad: h.shares, costoPromedio: h.avgCost, moneda: h.costCurrency }));
+  }
+  return ctx;
+}
+
+const assistantState = { open: false, messages: [], loading: false, error: null };
+
+function assistantContextLabel() {
+  return state.asset ? `sobre ${state.asset.ticker}` : 'sobre tu cartera / la plataforma';
+}
+
+function renderAssistantPanel() {
+  if (!els.assistantPanel) return;
+  if (!assistantState.open) { els.assistantPanel.style.display = 'none'; els.assistantPanel.innerHTML = ''; return; }
+
+  els.assistantPanel.innerHTML = `
+    <div class="assistant-card">
+      <div class="assistant-header">
+        <div>
+          <div class="assistant-title">Asistente IA</div>
+          <div class="assistant-subtitle">Pregúntale ${esc(assistantContextLabel())} — solo responde con datos ya calculados por la plataforma.</div>
+        </div>
+        <button class="assistant-close" id="assistant-close" aria-label="Cerrar asistente">✕</button>
+      </div>
+      <div class="assistant-messages" id="assistant-messages">
+        ${assistantState.messages.length === 0 ? `<div class="assistant-empty">Preguntá algo como "¿por qué el score es ${state.report ? esc(String(state.report.score)) : 'este'}?" o "¿cuál es el plan operativo?".</div>` : ''}
+        ${assistantState.messages.map(m => `
+          <div class="assistant-msg assistant-msg-${m.role}">
+            <div class="assistant-msg-bubble">${esc(m.text)}</div>
+          </div>`).join('')}
+        ${assistantState.loading ? `<div class="assistant-msg assistant-msg-assistant"><div class="assistant-msg-bubble assistant-typing">Pensando…</div></div>` : ''}
+        ${assistantState.error ? `<div class="assistant-error">${esc(assistantState.error)}</div>` : ''}
+      </div>
+      <form class="assistant-inputrow" id="assistant-form">
+        <input type="text" id="assistant-input" class="assistant-input" placeholder="Escribí tu pregunta…" autocomplete="off" maxlength="600" />
+        <button type="submit" class="assistant-send" id="assistant-send" ${assistantState.loading ? 'disabled' : ''}>Enviar</button>
+      </form>
+    </div>`;
+  els.assistantPanel.style.display = 'flex';
+
+  document.getElementById('assistant-close')?.addEventListener('click', () => { assistantState.open = false; renderAssistantPanel(); });
+  document.getElementById('assistant-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('assistant-input');
+    const question = input.value.trim();
+    if (!question || assistantState.loading) return;
+    input.value = '';
+    sendAssistantQuestion(question);
+  });
+  const msgsEl = document.getElementById('assistant-messages');
+  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+  document.getElementById('assistant-input')?.focus();
+}
+
+async function sendAssistantQuestion(question) {
+  assistantState.messages.push({ role: 'user', text: question });
+  assistantState.loading = true;
+  assistantState.error = null;
+  renderAssistantPanel();
+  try {
+    const context = buildAssistantContext();
+    const r = await fetch('/api/assistant', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question, context }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.detail || d?.error || 'no se pudo obtener respuesta');
+    assistantState.messages.push({ role: 'assistant', text: d.answer });
+  } catch (e) {
+    console.error('[assistant] error', e);
+    assistantState.error = 'No se pudo conectar con el asistente. Probá de nuevo en un momento.';
+  } finally {
+    assistantState.loading = false;
+    renderAssistantPanel();
+  }
+}
+
+els.assistantFab?.addEventListener('click', () => {
+  assistantState.open = !assistantState.open;
+  renderAssistantPanel();
+});
 
 /* ───────────────────────── radar de fortalezas vs sector ───────────────────────── */
 // Promedio real de hasta 3 pares del mismo sector (universe.json), cacheado
@@ -883,9 +1129,10 @@ async function runBacktest(ticker) {
 const VIEW_PAGES = {
   dashboard: { html: dashboardHTML, wire: wireDashboardEvents, load: () => { if (!dashState.started) loadDashboardData(); loadPortfolioData(); } },
   portfolio: { html: portfolioHTML, wire: wirePortfolioEvents, load: loadPortfolioData },
+  simulator: { html: simulatorHTML, wire: wireSimulatorEvents, load: loadSimulatorData },
   watchlist: { html: watchlistPageHTML, wire: wireWatchlistEvents, load: () => {} },
   macro: { html: macroNewsPageHTML, wire: wireMacroNewsEvents, load: loadMacroNewsData },
-  alerts: { html: alertsPageHTML, wire: wireAlertsEvents, load: () => {} },
+  alerts: { html: alertsPageHTML, wire: wireAlertsEvents, load: () => { if (telegramState.chatId && !telegramState.subsLoaded && !telegramState.subsLoading) loadTelegramSubscriptions(); } },
   backtest: { html: backtestPageHTML, wire: wireBacktestEvents, load: () => {} },
   calendar: { html: calendarPageHTML, wire: wireCalendarEvents, load: loadCalendarData },
   screener: { html: screenerPageHTML, wire: wireScreenerEvents, load: () => { if (!dashState.started) loadDashboardData(); } },
@@ -1481,6 +1728,7 @@ function sortAndFilterTickers(tickers) {
 const SIDEBAR_NAV = [
   { view: 'dashboard', label: 'Dashboard', icon: 'grid' },
   { view: 'portfolio', label: 'Portfolio Advisor', icon: 'briefcase' },
+  { view: 'simulator', label: 'Simulador "¿Y si...?"', icon: 'shuffle' },
   { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
   { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
   { view: 'screener', label: 'Screener', icon: 'filter' },
@@ -1766,7 +2014,14 @@ function wireDashboardEvents() {
   els.report.querySelectorAll('[data-dash-ticker]').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.dashTicker));
   });
+  // Las tarjetas de "Oportunidades del Día"/"En Zona de Compra" (dashCardHTML)
+  // también tienen la clase .watch-card pero usan data-dash-ticker, no
+  // data-ticker — sin este filtro, el handler de abajo (pensado para las
+  // tarjetas de Watchlist Rápido) también se enganchaba a esas mismas
+  // tarjetas y disparaba selectTicker(undefined) justo después del click
+  // correcto, pisándolo.
   els.report.querySelectorAll('.watch-card').forEach(el => {
+    if (el.dataset.dashTicker) return;
     el.addEventListener('click', (e) => { if (e.target.closest('.watch-remove')) return; selectTicker(el.dataset.ticker); });
   });
   els.report.querySelectorAll('.watch-remove').forEach(btn => {
@@ -2713,9 +2968,258 @@ async function loadPortfolioData() {
       console.warn('[portfolio] no se pudo cargar', h.ticker, e.message);
     } finally {
       portState.loading.delete(h.ticker);
-      if (!state.asset && (state.view === 'portfolio' || state.view === 'dashboard')) renderReport();
+      if (!state.asset && (state.view === 'portfolio' || state.view === 'dashboard' || state.view === 'simulator')) renderReport();
     }
   }));
+}
+
+/* ───────────────────────── simulador "¿y si...?" + rebalanceo sugerido ───────────────────────── */
+// Cartera hipotética editable en memoria (nunca toca portfolio.js/localStorage
+// de la cartera real) — mismo motor de cálculo que Portfolio Advisor
+// (computePortfolioStats), reusando el mismo caché de señales (portState.data)
+// para no duplicar pedidos a los proveedores de datos.
+const simState = { holdings: null, addTicker: '', addShares: '', suggestion: null };
+
+function ensureSimHoldings() {
+  if (simState.holdings == null) simState.holdings = getPortfolio().map(h => ({ ...h }));
+}
+function resetSimHoldings() {
+  simState.holdings = getPortfolio().map(h => ({ ...h }));
+  simState.suggestion = null;
+  showToast('Simulación reiniciada con tu cartera real', 'info');
+  renderReport();
+}
+
+async function loadSimulatorData() {
+  ensureSimHoldings();
+  if (!portState.macro) {
+    try { portState.macro = await getMacro(); } catch (e) { console.warn('[simulator] no se pudo cargar macro', e.message); }
+  }
+  const macro = portState.macro;
+  const missing = simState.holdings.filter(h => !portState.data[h.ticker] && !portState.loading.has(h.ticker));
+  if (!missing.length) return;
+  await Promise.all(missing.map(async (h) => {
+    portState.loading.add(h.ticker);
+    try {
+      portState.data[h.ticker] = await computeLightSignal(h.ticker, macro);
+    } catch (e) {
+      console.warn('[simulator] no se pudo cargar', h.ticker, e.message);
+    } finally {
+      portState.loading.delete(h.ticker);
+      if (!state.asset && state.view === 'simulator') renderReport();
+    }
+  }));
+}
+
+/** Rebalanceo determinístico a partir de datos YA calculados (score, peso
+ *  real, precio) — nunca una recomendación de un modelo de lenguaje ni un
+ *  número inventado. Reglas, todas explicables:
+ *   - Señal "Venta" en una tenencia -> salir del todo (peso objetivo 0).
+ *   - Señal "Reducir" -> cortar el peso actual a la mitad (con tope del perfil).
+ *   - Posición por encima del tope de tu perfil de riesgo -> recortar al tope.
+ *   - Lo liberado por esos tres casos se redistribuye, proporcional al margen
+ *     disponible hasta el tope, entre las tenencias con señal de Compra
+ *     (Fuerte o Moderada) que todavía tengan margen. Si no hay ninguna,
+ *     queda como "liberado sin asignar" — nunca se inventa un destino. */
+function computeRebalanceSuggestion(stats) {
+  const profile = RISK_PROFILES[settingsState.riskProfile] ?? RISK_PROFILES.moderado;
+  const cap = profile.maxPositionPct / 100;
+  const rows = stats.rows.filter(r => r.weight != null && r.d?.scoreLabel && r.d?.price != null);
+  if (!rows.length) return null;
+
+  const actions = rows.map(r => ({
+    ticker: r.ticker, price: r.d.price, currentShares: r.shares, currentWeight: r.weight, scoreLabel: r.d.scoreLabel, targetWeight: r.weight,
+  }));
+
+  let freed = 0;
+  for (const a of actions) {
+    if (a.scoreLabel === 'Venta') a.targetWeight = 0;
+    else if (a.scoreLabel === 'Reducir') a.targetWeight = Math.min(a.currentWeight, cap) * 0.5;
+    else if (a.currentWeight > cap) a.targetWeight = cap;
+    freed += Math.max(0, a.currentWeight - a.targetWeight);
+  }
+
+  const buyCandidates = actions.filter(a => (a.scoreLabel === 'Compra Fuerte' || a.scoreLabel === 'Compra Moderada') && a.targetWeight < cap);
+  const totalCapacity = buyCandidates.reduce((s, a) => s + (cap - a.targetWeight), 0);
+  let unassigned = freed;
+  if (freed > 0.0005 && totalCapacity > 0) {
+    for (const a of buyCandidates) {
+      const capacity = cap - a.targetWeight;
+      const add = Math.min(capacity, freed * (capacity / totalCapacity));
+      a.targetWeight += add;
+      unassigned -= add;
+    }
+  }
+
+  for (const a of actions) {
+    a.targetShares = a.price > 0 ? (a.targetWeight * stats.totalValue) / a.price : a.currentShares;
+    a.deltaShares = a.targetShares - a.currentShares;
+    a.action = a.deltaShares > 0.0001 ? 'sumar' : a.deltaShares < -0.0001 ? (a.targetWeight <= 0.0001 ? 'vender_todo' : 'reducir') : 'mantener';
+  }
+
+  return { profileLabel: profile.label, capPct: profile.maxPositionPct, actions, freedPct: freed, unassignedPct: Math.max(0, unassigned), hasChanges: actions.some(a => a.action !== 'mantener') };
+}
+
+function applySuggestionToSimulation() {
+  if (!simState.suggestion) return;
+  const realHoldings = getPortfolio();
+  const byTicker = Object.fromEntries(realHoldings.map(h => [h.ticker, h]));
+  simState.holdings = simState.suggestion.actions
+    .filter(a => a.action !== 'vender_todo')
+    .map(a => {
+      const base = byTicker[a.ticker] ?? { ticker: a.ticker, avgCost: null, costCurrency: 'USD', purchaseDate: null };
+      return { ...base, shares: Math.max(0, Math.round(a.targetShares * 1000) / 1000) };
+    });
+  showToast('Simulación actualizada con el rebalanceo sugerido', 'success');
+  renderReport();
+}
+
+const SIM_ACTION_META = {
+  sumar: { label: 'Sumar', bg: 'oklch(0.32 0.11 152)', color: 'oklch(0.90 0.16 152)' },
+  reducir: { label: 'Reducir', bg: 'oklch(0.30 0.10 45)', color: 'oklch(0.85 0.14 45)' },
+  vender_todo: { label: 'Vender todo', bg: 'oklch(0.30 0.12 23)', color: 'oklch(0.88 0.16 23)' },
+  mantener: { label: 'Mantener', bg: 'oklch(0.30 0.09 70)', color: 'oklch(0.85 0.13 70)' },
+};
+
+function simComparisonRowHTML(label, realVal, simVal, fmt = (v) => v) {
+  const changed = realVal !== simVal;
+  return `<div class="sim-compare-row">
+    <div class="sim-compare-label">${esc(label)}</div>
+    <div class="sim-compare-real">${fmt(realVal)}</div>
+    <div class="sim-compare-arrow">${changed ? '→' : ''}</div>
+    <div class="sim-compare-sim ${changed ? 'changed' : ''}">${fmt(simVal)}</div>
+  </div>`;
+}
+
+function simulatorHTML() {
+  ensureSimHoldings();
+  const realHoldings = getPortfolio();
+  if (!realHoldings.length) {
+    return `
+      ${sectionTitleHTML('Simulador "¿Y si...?"', 'shuffle')}
+      ${emptyStateHTML('shuffle', 'Cargá al menos un holding en Portfolio Advisor para poder simular cambios sobre tu cartera real.')}`;
+  }
+  const realStats = computePortfolioStats(realHoldings);
+  const simStats = computePortfolioStats(simState.holdings);
+  const loadingCount = [...new Set([...realHoldings, ...simState.holdings].map(h => h.ticker))].filter(t => !portState.data[t]).length;
+  const pct = (v) => v == null ? 'N/D' : `${Math.round(v * 100)}%`;
+  const usd = (v) => v == null ? 'N/D' : fmtUsd(v);
+
+  return `
+    ${sectionTitleHTML('Simulador "¿Y si...?"', 'shuffle')}
+    <div class="dash-intro">Probá cambios en tu cartera antes de operar de verdad: agregá, quitá o cambiá cantidades y mirá el impacto en el score ponderado, la diversificación y el riesgo — todo calculado con el mismo motor que Portfolio Advisor, sin tocar tu cartera real.</div>
+    ${loadingCount ? `<div class="dash-loading-note">Cargando señales de ${loadingCount} activo(s)…</div>` : ''}
+
+    <div class="card sim-compare-card">
+      <div class="sim-compare-header">
+        <div></div><div class="sim-compare-h">Cartera actual</div><div></div><div class="sim-compare-h">Simulación</div>
+      </div>
+      ${simComparisonRowHTML('Valor total', realStats.totalValue, simStats.totalValue, usd)}
+      ${simComparisonRowHTML('Score ponderado', realStats.weightedScore, simStats.weightedScore, (v) => v == null ? 'N/D' : String(v))}
+      ${simComparisonRowHTML('Mayor posición', realStats.topHolding?.weight ?? null, simStats.topHolding?.weight ?? null, pct)}
+      ${simComparisonRowHTML('Mayor sector', realStats.sectorRows[0]?.pct ?? null, simStats.sectorRows[0]?.pct ?? null, pct)}
+      ${simComparisonRowHTML('Señales de Venta/Reducir', realStats.sellSignals.length, simStats.sellSignals.length, String)}
+    </div>
+
+    <div class="panel-header" style="margin-top:22px;">
+      ${sectionTitleHTML('Cartera simulada', 'briefcase', 'margin-bottom:0;')}
+      <div class="watch-controls">
+        <button class="port-add-btn" id="sim-suggest-btn">Sugerir rebalanceo</button>
+        <button class="link-btn" id="sim-reset-btn">Reiniciar simulación</button>
+      </div>
+    </div>
+    <div class="card sim-holdings-card">
+      ${!simState.holdings.length ? `<div class="watch-empty">Sin posiciones en la simulación.</div>` : `
+      <table class="sim-table">
+        <thead><tr><th>Ticker</th><th>Señal</th><th>Peso</th><th>Cantidad</th><th></th></tr></thead>
+        <tbody>
+          ${simState.holdings.map((h, i) => {
+            const d = portState.data[h.ticker];
+            const row = simStats.rows.find(r => r.ticker === h.ticker);
+            const sig = d?.scoreLabel ? scoreLabelColor(d.scoreLabel) : null;
+            return `<tr data-sim-row="${i}">
+              <td class="sim-ticker-cell">${esc(h.ticker)}</td>
+              <td>${sig ? `<span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</span>` : '<span class="bt-nd">—</span>'}</td>
+              <td>${row?.weight != null ? pct(row.weight) : 'N/D'}</td>
+              <td><input type="number" min="0" step="any" class="sim-shares-input" data-sim-shares="${i}" value="${h.shares}" aria-label="Cantidad de ${esc(h.ticker)}" /></td>
+              <td><button class="watch-remove sim-remove-btn" data-sim-remove="${i}" title="Quitar de la simulación" aria-label="Quitar ${esc(h.ticker)} de la simulación">×</button></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`}
+      <div class="port-form sim-add-form">
+        <input list="sim-ticker-list" id="sim-add-ticker" class="port-input" placeholder="Ticker (ej. NVDA)" autocomplete="off" style="text-transform:uppercase;" value="${esc(simState.addTicker)}" />
+        <datalist id="sim-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
+        <input type="number" min="0" step="any" id="sim-add-shares" class="port-input" placeholder="Cantidad" value="${esc(simState.addShares)}" style="max-width:120px;" />
+        <button class="port-add-btn" id="sim-add-btn">Agregar a la simulación</button>
+      </div>
+    </div>
+
+    ${simState.suggestion ? `
+    <div class="card sim-suggestion-card">
+      <div class="sim-suggestion-title">Rebalanceo sugerido — perfil ${esc(simState.suggestion.profileLabel)} (tope ${simState.suggestion.capPct}% por posición)</div>
+      ${!simState.suggestion.hasChanges ? `<div class="sim-suggestion-empty">Tu cartera actual ya respeta el tope de tu perfil y no tiene señales de Venta/Reducir — no hay cambios que sugerir.</div>` : `
+      <table class="sim-table">
+        <thead><tr><th>Ticker</th><th>Acción</th><th>Peso actual → objetivo</th><th>Cantidad actual → objetivo</th></tr></thead>
+        <tbody>
+          ${simState.suggestion.actions.filter(a => a.action !== 'mantener').map(a => {
+            const meta = SIM_ACTION_META[a.action];
+            return `<tr>
+              <td class="sim-ticker-cell">${esc(a.ticker)}</td>
+              <td><span class="watch-signal" style="background:${meta.bg}; color:${meta.color};">${meta.label}</span></td>
+              <td>${pct(a.currentWeight)} → ${pct(a.targetWeight)}</td>
+              <td>${a.currentShares.toLocaleString('en-US', { maximumFractionDigits: 3 })} → ${a.targetShares.toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      ${simState.suggestion.unassignedPct > 0.0005 ? `<div class="sim-suggestion-note">${pct(simState.suggestion.unassignedPct)} de la cartera queda liberado sin una posición de Compra con margen para recibirlo — quedaría como efectivo/a definir.</div>` : ''}
+      <button class="port-add-btn" id="sim-apply-btn">Aplicar a la simulación</button>
+      `}
+    </div>` : ''}
+    <div class="sim-disclaimer">El rebalanceo sugerido es una regla determinística sobre datos ya calculados (señal técnica/fundamental, peso real, tope de tu perfil de riesgo en Configuración) — no es asesoramiento financiero ni tiene en cuenta impacto impositivo o costos de transacción.</div>`;
+}
+
+function wireSimulatorEvents() {
+  document.getElementById('sim-reset-btn')?.addEventListener('click', resetSimHoldings);
+  document.getElementById('sim-apply-btn')?.addEventListener('click', applySuggestionToSimulation);
+  document.getElementById('sim-suggest-btn')?.addEventListener('click', () => {
+    const realStats = computePortfolioStats(getPortfolio());
+    simState.suggestion = computeRebalanceSuggestion(realStats);
+    if (!simState.suggestion) showToast('Todavía no cargaron las señales de tu cartera — probá de nuevo en un momento', 'info');
+    renderReport();
+  });
+  els.report.querySelectorAll('.sim-shares-input').forEach(input => {
+    input.addEventListener('change', () => {
+      const i = +input.dataset.simShares;
+      const v = parseFloat(input.value);
+      if (simState.holdings[i]) simState.holdings[i].shares = isNaN(v) || v < 0 ? 0 : v;
+      renderReport();
+    });
+  });
+  els.report.querySelectorAll('.sim-remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = +btn.dataset.simRemove;
+      simState.holdings.splice(i, 1);
+      renderReport();
+    });
+  });
+  const addTickerInput = document.getElementById('sim-add-ticker');
+  const addSharesInput = document.getElementById('sim-add-shares');
+  addTickerInput?.addEventListener('input', () => { simState.addTicker = addTickerInput.value.toUpperCase(); });
+  addSharesInput?.addEventListener('input', () => { simState.addShares = addSharesInput.value; });
+  document.getElementById('sim-add-btn')?.addEventListener('click', () => {
+    const ticker = simState.addTicker.trim().toUpperCase();
+    const shares = parseFloat(simState.addShares);
+    if (!ticker || !universe.some(a => a.ticker === ticker)) { showToast('Ticker inválido', 'error'); return; }
+    if (isNaN(shares) || shares <= 0) { showToast('Ingresá una cantidad válida', 'error'); return; }
+    const existing = simState.holdings.find(h => h.ticker === ticker);
+    if (existing) existing.shares = shares;
+    else simState.holdings.push({ ticker, shares, avgCost: null, costCurrency: 'USD', purchaseDate: null });
+    simState.addTicker = ''; simState.addShares = '';
+    loadSimulatorData();
+    renderReport();
+  });
 }
 
 function watchCardHTML(ticker) {
@@ -2848,6 +3352,49 @@ async function loadMacroNewsData() {
   }
 }
 
+/** Tarjeta de vinculación/gestión de alertas por Telegram: avisa aunque el
+ *  navegador esté cerrado (a diferencia de las notificaciones del navegador
+ *  de más abajo, que solo funcionan con la pestaña abierta). */
+function telegramCardHTML() {
+  if (telegramState.configured === null) return `<div class="card watch-empty">Cargando configuración de Telegram…</div>`;
+  if (telegramState.configured === false) {
+    return `<div class="card telegram-card">
+      <div class="telegram-card-title">📲 Alertas por Telegram</div>
+      <div class="telegram-card-body">Esta función todavía no está configurada en el servidor (falta dar de alta el bot de Telegram). Mientras tanto, seguís teniendo las notificaciones del navegador de abajo.</div>
+    </div>`;
+  }
+  if (!telegramState.chatId) {
+    if (telegramState.linking) {
+      const deepLink = `https://t.me/${telegramState.botUsername}?start=${telegramState.code}`;
+      return `<div class="card telegram-card">
+        <div class="telegram-card-title">📲 Alertas por Telegram</div>
+        <div class="telegram-card-body">1. Tocá el botón para abrir el chat con el bot.<br>2. Mandale <b>Start</b> (o el mensaje ya viene precargado).<br>3. Volvé acá — se vincula solo.</div>
+        <a class="port-add-btn telegram-link-btn" id="telegram-open-link" href="${esc(deepLink)}" target="_blank" rel="noopener">Abrir Telegram y vincular</a>
+        <div class="telegram-waiting">Esperando confirmación… <button class="link-btn" id="telegram-cancel-link">Cancelar</button></div>
+      </div>`;
+    }
+    return `<div class="card telegram-card">
+      <div class="telegram-card-title">📲 Alertas por Telegram</div>
+      <div class="telegram-card-body">Recibí un mensaje apenas un activo entre en zona de compra/venta o toque el stop — <b>aunque tengas el navegador cerrado</b>.</div>
+      <button class="port-add-btn" id="telegram-start-link">Vincular Telegram</button>
+    </div>`;
+  }
+  const watchTickers = getWatchlist();
+  return `<div class="card telegram-card">
+    <div class="telegram-card-title">📲 Alertas por Telegram <span class="telegram-linked-badge">✓ Vinculado</span></div>
+    <div class="telegram-card-body">Elegí qué activos de tu Watchlist te avisan por Telegram cuando cambian de zona:</div>
+    ${!watchTickers.length ? `<div class="telegram-empty-watch">Agregá activos a tu Watchlist para poder elegir cuáles avisan por Telegram.</div>` : `
+    <div class="telegram-ticker-list">
+      ${watchTickers.map(t => `
+        <label class="telegram-ticker-row">
+          <input type="checkbox" class="telegram-ticker-check" data-ticker="${esc(t)}" ${telegramState.subscriptions.includes(t) ? 'checked' : ''} ${telegramState.subsLoaded ? '' : 'disabled'} />
+          <span>${esc(t)}</span>
+        </label>`).join('')}
+    </div>`}
+    <button class="link-btn telegram-unlink-btn" id="telegram-unlink">Desvincular Telegram</button>
+  </div>`;
+}
+
 /** Página de Alertas: activos en seguimiento cuya señal de precio está
  *  activa ahora mismo (zona de compra/venta o stop) — deriva 100% de
  *  watchState.data, ya calculado por Seguimiento, sin pedidos propios. */
@@ -2855,7 +3402,8 @@ function alertsPageHTML() {
   const tickers = getWatchlist().filter(t => watchState.data[t]?.alert);
   return `
     ${sectionTitleHTML('Alertas', 'warning')}
-    <div class="dash-intro">Activos en tu Watchlist que están, ahora mismo, en zona de compra, zona de venta o tocaron el stop loss según el análisis técnico. Activá las notificaciones del navegador desde Watchlist para recibir un aviso apenas cambie una señal.</div>
+    ${telegramCardHTML()}
+    <div class="dash-intro" style="margin-top:22px;">Activos en tu Watchlist que están, ahora mismo, en zona de compra, zona de venta o tocaron el stop loss según el análisis técnico. Activá las notificaciones del navegador desde Watchlist para recibir un aviso apenas cambie una señal (solo con la pestaña abierta).</div>
     ${!tickers.length ? `<div class="card watch-empty">Ningún activo en seguimiento tiene una alerta activa en este momento.</div>` : `
     <div class="watch-grid">${tickers.map(watchCardHTML).join('')}</div>`}`;
 }
@@ -2871,6 +3419,12 @@ function wireAlertsEvents() {
       delete watchState.data[ticker];
       renderReport();
     });
+  });
+  document.getElementById('telegram-start-link')?.addEventListener('click', startTelegramLink);
+  document.getElementById('telegram-cancel-link')?.addEventListener('click', cancelTelegramLink);
+  document.getElementById('telegram-unlink')?.addEventListener('click', unlinkTelegram);
+  els.report.querySelectorAll('.telegram-ticker-check').forEach(el => {
+    el.addEventListener('change', () => toggleTelegramSubscription(el.dataset.ticker));
   });
 }
 
@@ -3221,6 +3775,8 @@ renderTopbar();
 renderReport();
 initSearch();
 loadWatchlistData();
+loadTelegramConfig();
+if (telegramState.chatId) loadTelegramSubscriptions();
 document.getElementById('wordmark-home')?.addEventListener('click', () => {
   state.asset = null; state.report = null; state.error = null; state.loading = false;
   state.view = 'dashboard';
