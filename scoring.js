@@ -56,6 +56,11 @@ function scoreMomentum(t) {
   // penaliza el momentum en la dirección donde el mercado suele fallar.
   if (t.divergence?.type === 'bearish') s -= 0.15;
   if (t.divergence?.type === 'bullish') s += 0.10;
+  // Patrón de vela japonesa en la última rueda: señal de reversión de muy
+  // corto plazo — ajuste chico (nunca más que la divergencia, que se
+  // confirma sobre varias ruedas en vez de una sola).
+  if (t.candlePattern?.bias === 'bullish') s += 0.05;
+  if (t.candlePattern?.bias === 'bearish') s -= 0.05;
   return clamp(s);
 }
 

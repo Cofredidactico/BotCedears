@@ -175,6 +175,33 @@ datos reales ya obtenidos (sin pedidos extra al proveedor):
   que esta plataforma no tiene) — es evidencia real y específica para juzgar
   cada factor, no un número inventado.
 
+Segunda tanda de mejoras, mismo criterio (datos reales, nunca inventados):
+
+- **Patrones de velas japonesas** (`indicators.js:detectCandlePattern`) —
+  envolvente alcista/bajista, martillo, hombre colgado, estrella fugaz,
+  martillo invertido, doji sobre la última vela — reglas determinísticas,
+  no un clasificador de imágenes. Nudge chico en el sub-score de Momentum.
+- **Estacionalidad mensual** (`indicators.js:monthlySeasonality`) — retorno
+  promedio histórico por mes calendario, sobre historial extendido pedido
+  aparte (no bloquea el render inicial). Se omite si hay menos de 2 años de
+  datos — con un año no hay "estacionalidad", es un dato puntual.
+- **Índice de Fuerza de Tendencia** (`indicators.js:trendStrengthIndex`) —
+  combina ADX normalizado + pendiente de EMA200 en un único 0-100, más
+  fácil de leer que mirar ADX suelto.
+- **Squeeze de volatilidad** (`indicators.js:keltnerChannels` +
+  `detectSqueeze`) — Bollinger dentro de Keltner (técnica TTM Squeeze):
+  compresión de volatilidad que históricamente antecede a movimientos
+  fuertes; se marca cuando está activo y cuando recién se libera.
+- **Matriz de correlación de Watchlist** (página Watchlist) — correlación
+  de retornos diarios entre pares de activos en seguimiento, reusando las
+  series de cierre ya cacheadas (sin pedidos nuevos) — detecta
+  diversificación falsa.
+- **Heatmap sectorial** (Dashboard) — performance promedio del día por
+  sector sobre el universo curado, reusando los datos ya cargados del
+  Dashboard.
+- **Historial de Alertas** (página Alertas) — log local (localStorage) de
+  las últimas 50 alertas de navegador disparadas con la pestaña abierta.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente
