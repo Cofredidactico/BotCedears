@@ -1,5 +1,5 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings, getInflacion, getDividends, getBonds, isLive } from './dataSource.js';
-import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength } from './indicators.js';
+import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
@@ -100,6 +100,7 @@ const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
 const DASH_WIDGETS = [
   { key: 'opportunities', label: 'Oportunidades del Día' },
   { key: 'buyzone', label: 'En Zona de Compra Ahora' },
+  { key: 'heatmap', label: 'Heatmap Sectorial' },
   { key: 'radar', label: 'Radar del Mercado' },
   { key: 'watchlist', label: 'Watchlist Rápido' },
   { key: 'portfolio', label: 'Mi Portfolio' },
@@ -245,11 +246,32 @@ const settingsState = {
   riskProfile: lsGetSafe('icp_risk_profile', 'moderado'), // afecta el tope de posición sugerido en Portfolio Advisor
 };
 
+// Historial de alertas disparadas: solo lo que este navegador observó con
+// la pestaña abierta (mismo alcance que las notificaciones del navegador —
+// no reemplaza el historial de mensajes de Telegram, que ya vive en el
+// propio chat del usuario).
+const ALERT_HISTORY_KEY = 'icp_alert_history';
+const ALERT_HISTORY_MAX = 50;
+function getAlertHistory() {
+  try { return JSON.parse(localStorage.getItem(ALERT_HISTORY_KEY) || '[]'); } catch { return []; }
+}
+function logAlertHistory(ticker, type) {
+  const list = getAlertHistory();
+  list.unshift({ ticker, type, ts: Date.now() });
+  lsSetSafe(ALERT_HISTORY_KEY, JSON.stringify(list.slice(0, ALERT_HISTORY_MAX)));
+}
+function clearAlertHistory() {
+  lsSetSafe(ALERT_HISTORY_KEY, '[]');
+  showToast('Historial de alertas borrado', 'info');
+  renderReport();
+}
+
 function notifyIfNewAlert(ticker, priceAlert) {
   const prev = lastAlertByTicker[ticker] ?? null;
   const curr = priceAlert?.type ?? null;
   lastAlertByTicker[ticker] = curr;
   if (!alertsEnabled || !curr || curr === prev) return;
+  logAlertHistory(ticker, curr);
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   const meta = ALERT_META[curr];
   new Notification(`${ticker}: ${meta.label}`, { body: 'Investment Copilot AI — seguimiento de precio', tag: `icp-${ticker}` });
@@ -750,6 +772,7 @@ async function loadReport(ticker) {
     if (weeklyCandles) chartState.cache['1week'] = { candles: weeklyCandles, isReal: isCripto ? candles.isReal : (weeklyNative?.isReal ?? false) };
     state.loading = false;
     if (asset.sector) loadPeerRadar(asset.sector, macro); // no bloquea el render del reporte
+    loadSeasonality(asset.ticker); // ídem: pide historial extendido aparte, no bloquea el render inicial
   } catch (e) {
     console.error('[app] error cargando reporte', e);
     state.loading = false;
@@ -795,6 +818,9 @@ function buildAssistantContext() {
         soporte: round2(r.technical.support), resistencia: round2(r.technical.resistance),
         puntoControlVolumenPOC: r.technical.volumeProfile?.hasData ? round2(r.technical.volumeProfile.poc) : null,
         divergenciaPrecioRsi: r.technical.divergence?.type ?? null,
+        patronDeVela: r.technical.candlePattern?.label ?? null,
+        squeezeVolatilidad: r.technical.squeeze?.active ? (r.technical.squeeze.justFired ? 'recién liberado' : 'activo') : 'sin compresión',
+        indiceFuerzaTendencia: r.technical.trendStrength ? `${r.technical.trendStrength.value}/100 (${r.technical.trendStrength.label})` : null,
       };
     }
     if (r.confluence) {
@@ -807,6 +833,17 @@ function buildAssistantContext() {
       ctx.fuerzaRelativaVsSPY = {
         liderandoAlMercado: r.relativeStrength.trend === 'up',
         enMaximoDeFuerzaRelativa: r.relativeStrength.isNewHigh,
+      };
+    }
+    const seasonalityEntry = seasonalityState.byTicker[r.asset.ticker]?.seasonality;
+    if (seasonalityEntry) {
+      const withData = seasonalityEntry.rows.filter(row => row.avgReturnPct != null);
+      const best = withData.slice().sort((a, b) => b.avgReturnPct - a.avgReturnPct)[0];
+      const worst = withData.slice().sort((a, b) => a.avgReturnPct - b.avgReturnPct)[0];
+      ctx.estacionalidad = {
+        añosDeHistorial: seasonalityEntry.totalYears,
+        mejorMesHistorico: best ? `${best.label} (+${best.avgReturnPct.toFixed(1)}%)` : null,
+        peorMesHistorico: worst ? `${worst.label} (${worst.avgReturnPct.toFixed(1)}%)` : null,
       };
     }
     if (r.fundamentals?.hasData) {
@@ -966,6 +1003,29 @@ async function loadPeerRadar(sector, macro) {
   } finally {
     peerRadarState.loadingSector = null;
     if (state.asset?.sector === sector) renderReport();
+  }
+}
+
+/* ───────────────────────── estacionalidad mensual ───────────────────────── */
+// Pedido aparte (historial extendido, ~3 años) porque el reporte principal
+// solo trae ~1 año de velas — no bloquea el render inicial de la ficha,
+// aparece cuando termina de calcularse (igual que el radar de sector).
+const seasonalityState = { byTicker: {}, loadingTicker: null };
+async function loadSeasonality(ticker) {
+  const cached = seasonalityState.byTicker[ticker];
+  if (cached && Date.now() - cached.at < 60 * 60 * 1000) { if (state.asset?.ticker === ticker) renderReport(); return; }
+  if (seasonalityState.loadingTicker === ticker) return;
+  seasonalityState.loadingTicker = ticker;
+  try {
+    const candles = await getCandles(ticker, '1day', 750);
+    const seasonality = monthlySeasonality(candles);
+    seasonalityState.byTicker[ticker] = { at: Date.now(), seasonality };
+  } catch (e) {
+    console.warn('[seasonality] no se pudo cargar', ticker, e.message);
+    seasonalityState.byTicker[ticker] = { at: Date.now(), seasonality: null };
+  } finally {
+    seasonalityState.loadingTicker = null;
+    if (state.asset?.ticker === ticker) renderReport();
   }
 }
 
@@ -1514,6 +1574,8 @@ function renderReportImpl() {
 
     ${radarHTML(asset, scoreBreakdown)}
 
+    ${seasonalityHTML(asset.ticker)}
+
     <div class="panel-header">
       ${sectionTitleHTML('Plan Operativo', 'target', 'margin-bottom:0;')}
       <div class="freshness" style="color:${freshPlan.color};"><span class="dot" style="background:${freshPlan.color};"></span>${esc(freshPlan.text)}</div>
@@ -1666,6 +1728,38 @@ function radarHTML(asset, scoreBreakdown) {
     </div>`;
 }
 
+function seasonalityHTML(ticker) {
+  const entry = seasonalityState.byTicker[ticker];
+  if (!entry) {
+    return `${sectionTitleHTML('Estacionalidad Mensual', 'calendar')}
+      <div class="card dash-loading-note" style="margin-bottom:36px;">Calculando estacionalidad sobre historial extendido…</div>`;
+  }
+  const s = entry.seasonality;
+  if (!s) {
+    return `${sectionTitleHTML('Estacionalidad Mensual', 'calendar')}
+      <div class="card watch-empty" style="margin-bottom:36px;">No hay suficiente historial (se necesitan al menos 2 años) para calcular estacionalidad real de ${esc(ticker)} — se omite antes que mostrar un patrón inventado.</div>`;
+  }
+  const maxAbs = Math.max(...s.rows.map(r => Math.abs(r.avgReturnPct ?? 0)), 1);
+  return `
+    ${sectionTitleHTML('Estacionalidad Mensual', 'calendar')}
+    <div class="dash-intro" style="margin-bottom:14px;">Retorno promedio histórico por mes calendario, sobre ${s.totalYears} año(s) de datos reales disponibles — no es una predicción, es lo que pasó en el pasado (y el pasado no garantiza el futuro).</div>
+    <div class="card seasonality-card" style="margin-bottom:36px;">
+      <div class="seasonality-grid">
+        ${s.rows.map(r => {
+          const heightPct = r.avgReturnPct == null ? 0 : Math.max(6, Math.round((Math.abs(r.avgReturnPct) / maxAbs) * 100));
+          const up = (r.avgReturnPct ?? 0) >= 0;
+          return `<div class="seasonality-col">
+            <div class="seasonality-bar-track">
+              <div class="seasonality-bar ${up ? 'up' : 'down'}" style="height:${r.avgReturnPct == null ? 0 : heightPct}%;" title="${esc(r.label)}: ${r.avgReturnPct == null ? 'sin datos' : (r.avgReturnPct >= 0 ? '+' : '') + r.avgReturnPct.toFixed(1) + '%'}"></div>
+            </div>
+            <div class="seasonality-pct ${r.avgReturnPct == null ? '' : up ? 'up' : 'down'}">${r.avgReturnPct == null ? '—' : `${r.avgReturnPct >= 0 ? '+' : ''}${r.avgReturnPct.toFixed(1)}%`}</div>
+            <div class="seasonality-month">${esc(r.label)}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
 function technicalMetricRows(t, confluence, marketCorrelation, relativeStrength) {
   const nearestFib = Object.entries(t.fib.levels).sort((a, b) => Math.abs(a[1] - t.price) - Math.abs(b[1] - t.price))[0];
   const confluenceValue = !confluence ? 'N/D — historial semanal insuficiente'
@@ -1675,11 +1769,18 @@ function technicalMetricRows(t, confluence, marketCorrelation, relativeStrength)
   const rsValue = !relativeStrength ? 'N/D'
     : `${relativeStrength.trend === 'up' ? 'Liderando al mercado' : 'Rezagando vs. mercado'}${relativeStrength.isNewHigh ? ' — ★ máximo de fuerza relativa' : ''}`;
   const pocValue = t.volumeProfile?.hasData ? `$${t.volumeProfile.poc.toFixed(2)} (zona ${t.volumeProfile.vaLow.toFixed(2)}–${t.volumeProfile.vaHigh.toFixed(2)})` : 'N/D — sin volumen';
+  const squeezeValue = !t.squeeze ? 'N/D'
+    : t.squeeze.justFired ? `⚡ Liberado (tras ${t.squeeze.barsInSqueeze} ruedas comprimido)`
+    : t.squeeze.active ? `Activo (${t.squeeze.barsInSqueeze} ruedas comprimido)`
+    : 'Sin compresión';
   return [
     { label: 'Confirmación semanal (multi-TF)', value: confluenceValue },
     { label: 'Fuerza Relativa vs SPY', value: rsValue },
     { label: 'Correlación / Beta vs SPY', value: corrValue },
     { label: 'Punto de Control de Volumen (POC)', value: pocValue },
+    { label: 'Patrón de vela', value: t.candlePattern ? t.candlePattern.label : 'Sin patrón detectado' },
+    { label: 'Squeeze de volatilidad (Bollinger/Keltner)', value: squeezeValue },
+    { label: 'Índice de Fuerza de Tendencia', value: t.trendStrength ? `${t.trendStrength.value}/100 — ${t.trendStrength.label}` : 'N/D' },
     { label: 'EMA 20 / 50', value: `${fmtNum(t.ema20)} / ${fmtNum(t.ema50)}` },
     { label: 'EMA 100 / 200', value: `${fmtNum(t.ema100)} / ${fmtNum(t.ema200)}` },
     { label: 'RSI (14)', value: isNaN(t.rsi) ? 'N/D' : `${t.rsi.toFixed(0)} — ${t.rsi > 70 ? 'sobrecompra' : t.rsi < 30 ? 'sobreventa' : 'neutral'}` },
@@ -1919,6 +2020,20 @@ function dashboardHTML() {
     .map(([sector, s]) => ({ sector, avg: Math.round(s.sum / s.count) }))
     .sort((a, b) => b.avg - a.avg);
 
+  // Heatmap sectorial: performance PROMEDIO DEL DÍA (%change), no el score —
+  // es una vista de "rotación sectorial" (qué sectores lideran/rezagan hoy),
+  // complementaria al ranking de score promedio de arriba. Mismos datos ya
+  // cargados del universo curado, sin pedidos nuevos.
+  const bySectorChange = {};
+  for (const e of loaded) {
+    if (!e.d.sector) continue;
+    if (!bySectorChange[e.d.sector]) bySectorChange[e.d.sector] = { sum: 0, count: 0 };
+    bySectorChange[e.d.sector].sum += e.d.changePct; bySectorChange[e.d.sector].count++;
+  }
+  const heatmapRows = Object.entries(bySectorChange)
+    .map(([sector, s]) => ({ sector, avgChange: s.sum / s.count, count: s.count }))
+    .sort((a, b) => b.avgChange - a.avgChange);
+
   const byChange = loaded.slice().sort((a, b) => b.d.changePct - a.d.changePct);
   const gainers = byChange.slice(0, 3);
   const losers = byChange.slice(-3).reverse();
@@ -1959,6 +2074,24 @@ function dashboardHTML() {
           ${sectionTitleHTML('En Zona de Compra Ahora', 'target')}
           <div class="dash-intro" style="margin-bottom:14px;">Activos del universo curado cuyo precio está, ahora mismo, en zona de compra o recién rompió el soporte según el análisis técnico (mismo criterio que las alertas de Seguimiento) — no es una recomendación, es dónde está el precio respecto al plan operativo de cada uno.</div>
           ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : !buyZone.length ? `<div class="card watch-empty">Ningún activo del universo curado está en zona de compra en este momento.</div>` : `<div class="watch-grid">${buyZone.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
+        `,
+        heatmap: `
+          ${sectionTitleHTML('Heatmap Sectorial', 'grid')}
+          <div class="dash-intro" style="margin-bottom:14px;">Performance promedio del día por sector, sobre el mismo universo curado — panorama de rotación sectorial de un vistazo (qué sectores lideran/rezagan hoy, no el score).</div>
+          ${!heatmapRows.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `
+          <div class="heatmap-grid">
+            ${heatmapRows.map(s => {
+              const pct = clampNum(s.avgChange, -5, 5);
+              const intensity = Math.min(1, Math.abs(pct) / 5);
+              const bg = s.avgChange >= 0 ? `oklch(${0.30 + intensity * 0.12} ${0.05 + intensity * 0.10} 152)` : `oklch(${0.30 + intensity * 0.12} ${0.05 + intensity * 0.12} 23)`;
+              const fg = s.avgChange >= 0 ? `oklch(${0.80 + intensity * 0.08} ${0.10 + intensity * 0.08} 152)` : `oklch(${0.80 + intensity * 0.08} ${0.10 + intensity * 0.08} 23)`;
+              return `<div class="heatmap-cell" style="background:${bg}; color:${fg};">
+                <div class="heatmap-cell-sector">${esc(s.sector)}</div>
+                <div class="heatmap-cell-pct">${s.avgChange >= 0 ? '+' : ''}${s.avgChange.toFixed(1)}%</div>
+                <div class="heatmap-cell-count">${s.count} activo${s.count === 1 ? '' : 's'}</div>
+              </div>`;
+            }).join('')}
+          </div>`}
         `,
         radar: `
           ${sectionTitleHTML('Radar del Mercado', 'radar')}
@@ -3340,6 +3473,51 @@ function watchlistPageHTML() {
     </div>
     <div class="watch-grid">
       ${!tickers.length ? `<div class="watch-empty">Ningún activo en seguimiento tiene la señal filtrada ahora mismo.</div>` : tickers.map(watchCardHTML).join('')}
+    </div>
+    ${correlationMatrixHTML(allTickers, watchState.data)}`;
+}
+
+/** Matriz de correlación (retornos diarios, Pearson) entre pares de tickers
+ *  en seguimiento — reusa las series de cierre ya cacheadas en
+ *  watchState.data (computeLightSignal las trae para el gráfico chico de
+ *  cada tarjeta), sin pedidos nuevos. Sirve para detectar diversificación
+ *  falsa: activos que "parecen" distintos pero se mueven casi igual. */
+function correlationMatrixHTML(tickers, dataMap) {
+  const withCloses = tickers.filter(t => dataMap[t]?.closes?.length);
+  if (withCloses.length < 2) return '';
+  const corr = (a, b) => {
+    if (a === b) return 1;
+    const r = correlationAndBeta(dataMap[a].closes, dataMap[b].closes);
+    return r?.correlation ?? null;
+  };
+  const cellColor = (v) => {
+    if (v == null) return { bg: 'transparent', fg: 'var(--text-faint)' };
+    const abs = Math.abs(v);
+    if (v >= 0) return { bg: `oklch(${0.24 + abs * 0.08} ${0.04 + abs * 0.09} 152)`, fg: `oklch(${0.75 + abs * 0.1} ${0.08 + abs * 0.08} 152)` };
+    return { bg: `oklch(${0.24 + abs * 0.08} ${0.04 + abs * 0.10} 23)`, fg: `oklch(${0.75 + abs * 0.1} ${0.08 + abs * 0.09} 23)` };
+  };
+  return `
+    <div class="panel-header" style="margin-top:26px;">
+      ${sectionTitleHTML('Matriz de Correlación', 'grid', 'margin-bottom:0;')}
+    </div>
+    <div class="dash-intro" style="margin-bottom:14px;">Correlación de retornos diarios entre los activos en seguimiento — verde/alto significa que se mueven casi igual (diversificación real baja entre ese par), rojo significa que se mueven en direcciones opuestas.</div>
+    <div class="card corr-matrix-card">
+      <div class="corr-matrix-scroll">
+        <table class="corr-matrix-table">
+          <thead><tr><th></th>${withCloses.map(t => `<th>${esc(t)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${withCloses.map(rowT => `
+              <tr>
+                <th>${esc(rowT)}</th>
+                ${withCloses.map(colT => {
+                  const v = corr(rowT, colT);
+                  const { bg, fg } = cellColor(v);
+                  return `<td style="background:${bg}; color:${fg};">${v == null ? '—' : v.toFixed(2)}</td>`;
+                }).join('')}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
     </div>`;
 }
 
@@ -3458,6 +3636,28 @@ function telegramCardHTML() {
 /** Página de Alertas: activos en seguimiento cuya señal de precio está
  *  activa ahora mismo (zona de compra/venta o stop) — deriva 100% de
  *  watchState.data, ya calculado por Seguimiento, sin pedidos propios. */
+function alertHistoryCardHTML() {
+  const history = getAlertHistory();
+  return `
+    <div class="panel-header" style="margin-top:26px;">
+      ${sectionTitleHTML('Historial de Alertas', 'calendar', 'margin-bottom:0;')}
+      ${history.length ? `<button class="link-btn" id="alert-history-clear">Borrar historial</button>` : ''}
+    </div>
+    <div class="dash-intro" style="margin-bottom:14px;">Registro de cambios de zona (compra/venta/stop) que este navegador observó con la pestaña abierta y las notificaciones activas — no incluye lo que pasó mientras tenías el sitio cerrado (para eso están las Alertas por Telegram, arriba).</div>
+    ${!history.length ? `<div class="card watch-empty">Todavía no se registró ninguna alerta en este navegador.</div>` : `
+    <div class="card alert-history-card">
+      ${history.map(h => {
+        const meta = ALERT_META[h.type];
+        return `<div class="alert-history-row">
+          <span class="alert-history-dot" style="background:${meta?.color ?? 'var(--text-faint)'};"></span>
+          <span class="alert-history-ticker">${esc(h.ticker)}</span>
+          <span class="alert-history-label">${esc(meta?.label ?? h.type)}</span>
+          <span class="alert-history-time">${esc(relativeTime(h.ts))}</span>
+        </div>`;
+      }).join('')}
+    </div>`}`;
+}
+
 function alertsPageHTML() {
   const tickers = getWatchlist().filter(t => watchState.data[t]?.alert);
   return `
@@ -3465,12 +3665,14 @@ function alertsPageHTML() {
     ${telegramCardHTML()}
     <div class="dash-intro" style="margin-top:22px;">Activos en tu Watchlist que están, ahora mismo, en zona de compra, zona de venta o tocaron el stop loss según el análisis técnico. Activá las notificaciones del navegador desde Watchlist para recibir un aviso apenas cambie una señal (solo con la pestaña abierta).</div>
     ${!tickers.length ? `<div class="card watch-empty">Ningún activo en seguimiento tiene una alerta activa en este momento.</div>` : `
-    <div class="watch-grid">${tickers.map(watchCardHTML).join('')}</div>`}`;
+    <div class="watch-grid">${tickers.map(watchCardHTML).join('')}</div>`}
+    ${alertHistoryCardHTML()}`;
 }
 function wireAlertsEvents() {
   els.report.querySelectorAll('.watch-card').forEach(el => {
     el.addEventListener('click', (e) => { if (e.target.closest('.watch-remove')) return; selectTicker(el.dataset.ticker); });
   });
+  document.getElementById('alert-history-clear')?.addEventListener('click', clearAlertHistory);
   els.report.querySelectorAll('.watch-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3802,6 +4004,9 @@ async function computeLightSignal(ticker, macro) {
  *  completa (esa vive en la ficha del activo), solo el titular para tarjetas
  *  compactas del Dashboard. */
 function technicalHighlight(t) {
+  if (t.candlePattern) return t.candlePattern.label + ' en la última rueda.';
+  if (t.squeeze?.justFired) return `Squeeze de volatilidad liberado tras ${t.squeeze.barsInSqueeze} ruedas comprimido — posible movimiento fuerte en curso.`;
+  if (t.squeeze?.active) return `Squeeze de volatilidad activo (${t.squeeze.barsInSqueeze} ruedas) — compresión, posible ruptura próxima.`;
   if (t.divergence) return t.divergence.label;
   if (t.obvConfirms === false) return 'El volumen (OBV) no confirma el movimiento de precio.';
   if (!isNaN(t.rsi) && t.rsi > 70) return `RSI en ${t.rsi.toFixed(0)} — zona de sobrecompra.`;

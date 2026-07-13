@@ -112,6 +112,34 @@ export function bollinger(closes, period = 20, mult = 2) {
   return { upper, mid, lower };
 }
 
+/** Keltner Channels: banda basada en ATR alrededor de una EMA — a diferencia
+ *  de Bollinger (basada en desvío estándar), reacciona más suave a picos de
+ *  volatilidad puntuales. Se usa junto a Bollinger para detectar "squeeze"
+ *  (compresión de volatilidad), técnica popularizada por John Carter
+ *  (TTM Squeeze): cuando Bollinger queda ENTERAMENTE dentro de Keltner, el
+ *  mercado está comprimido — históricamente antecede a movimientos fuertes. */
+export function keltnerChannels(closes, atrSeries, period = 20, mult = 1.5) {
+  const mid = ema(closes, period);
+  const upper = mid.map((m, i) => m + mult * atrSeries[i]);
+  const lower = mid.map((m, i) => m - mult * atrSeries[i]);
+  return { upper, mid, lower };
+}
+
+/** Squeeze on/off + si se acaba de liberar en la última vela (señal de
+ *  breakout inminente — nunca se adivina la dirección, solo que la
+ *  compresión terminó). */
+export function detectSqueeze(bb, kc) {
+  const n = bb.upper.length;
+  const isSqueezed = (i) => !isNaN(bb.upper[i]) && !isNaN(kc.upper[i]) && bb.upper[i] < kc.upper[i] && bb.lower[i] > kc.lower[i];
+  const last = n - 1;
+  if (last < 1 || isNaN(bb.upper[last]) || isNaN(kc.upper[last])) return { active: false, justFired: false, barsInSqueeze: 0 };
+  const active = isSqueezed(last);
+  const wasActive = isSqueezed(last - 1);
+  let barsInSqueeze = 0;
+  if (active) for (let i = last; i >= 0 && isSqueezed(i); i--) barsInSqueeze++;
+  return { active, justFired: wasActive && !active, barsInSqueeze };
+}
+
 export function obv(closes, volumes) {
   const out = [0];
   for (let i = 1; i < closes.length; i++) {
@@ -221,6 +249,72 @@ export function relativeStrength(assetCloses, benchCloses, period = 50, lookback
   const prior = ratio[Math.max(0, last - 20)];
   const slopePct = prior ? ((ratio[last] - prior) / prior) * 100 : 0;
   return { trend, isNewHigh, slopePct, value: ratio[last] };
+}
+
+/** Patrones de velas japonesas clásicos sobre la última vela — reglas
+ *  determinísticas y documentadas (no un clasificador de imágenes). Devuelve
+ *  el patrón detectado en la vela más reciente, o null si ninguno aplica —
+ *  nunca se fuerza una clasificación cuando la forma no encaja con claridad. */
+export function detectCandlePattern(o, h, l, c) {
+  const n = c.length;
+  if (n < 6) return null;
+  const i = n - 1;
+  const body = Math.abs(c[i] - o[i]);
+  const range = h[i] - l[i];
+  if (!(range > 0)) return null;
+  const upperWick = h[i] - Math.max(c[i], o[i]);
+  const lowerWick = Math.min(c[i], o[i]) - l[i];
+  const isGreen = c[i] > o[i];
+  const priorSlope = c[i] - c[i - 5];
+
+  // Envolvente: el cuerpo de hoy cubre por completo el de ayer, en la
+  // dirección opuesta a la vela anterior — reversión de corto plazo.
+  const prevBody = Math.abs(c[i - 1] - o[i - 1]);
+  const prevGreen = c[i - 1] > o[i - 1];
+  if (!prevGreen && isGreen && c[i] > o[i - 1] && o[i] < c[i - 1] && body > prevBody) {
+    return { type: 'bullish_engulfing', label: 'Envolvente alcista', bias: 'bullish' };
+  }
+  if (prevGreen && !isGreen && o[i] > c[i - 1] && c[i] < o[i - 1] && body > prevBody) {
+    return { type: 'bearish_engulfing', label: 'Envolvente bajista', bias: 'bearish' };
+  }
+
+  // Doji: cuerpo minúsculo respecto al rango — indecisión, no direccional.
+  if (body <= range * 0.1) return { type: 'doji', label: 'Doji — indecisión', bias: 'neutral' };
+
+  // Martillo / Hombre colgado: mismo cuerpo (chico, arriba del rango, mecha
+  // inferior larga) — cuál de los dos es depende de si venía de una baja
+  // (martillo, reversión alcista) o de una suba (hombre colgado, bajista).
+  if (body <= range * 0.35 && lowerWick >= body * 2 && upperWick <= body * 0.5) {
+    if (priorSlope < 0) return { type: 'hammer', label: 'Martillo — posible reversión alcista', bias: 'bullish' };
+    if (priorSlope > 0) return { type: 'hanging_man', label: 'Hombre colgado — posible reversión bajista', bias: 'bearish' };
+  }
+
+  // Estrella fugaz / Martillo invertido: cuerpo chico abajo del rango, mecha
+  // superior larga — bajista si venía de una suba, alcista (más débil) si
+  // venía de una baja.
+  if (body <= range * 0.35 && upperWick >= body * 2 && lowerWick <= body * 0.5) {
+    if (priorSlope > 0) return { type: 'shooting_star', label: 'Estrella fugaz — posible reversión bajista', bias: 'bearish' };
+    if (priorSlope < 0) return { type: 'inverted_hammer', label: 'Martillo invertido — posible reversión alcista', bias: 'bullish' };
+  }
+
+  return null;
+}
+
+/** Índice de Fuerza de Tendencia (0-100): combina qué tan fuerte es la
+ *  tendencia (ADX) con qué tan rápido se mueve el promedio de largo plazo
+ *  (pendiente de EMA200) — un ADX alto con EMA200 plana es una tendencia
+ *  "vieja" perdiendo empuje, distinto de una con EMA200 en pendiente fuerte. */
+export function trendStrengthIndex(adxSeries, ema200Series) {
+  const last = adxSeries.length - 1;
+  const adxVal = adxSeries[last];
+  if (isNaN(adxVal)) return null;
+  const adxNorm = Math.max(0, Math.min(100, adxVal * 2)); // ADX rara vez pasa de 50-60 en la práctica
+  const priorEma = ema200Series[Math.max(0, last - 20)];
+  const slopePct = priorEma ? ((ema200Series[last] - priorEma) / priorEma) * 100 : 0;
+  const slopeNorm = Math.max(0, Math.min(100, 50 + slopePct * 10)); // ±5% en 20 ruedas satura la escala
+  const value = Math.round(adxNorm * 0.6 + slopeNorm * 0.4);
+  const label = value >= 75 ? 'Muy fuerte' : value >= 55 ? 'Fuerte' : value >= 35 ? 'Moderada' : value >= 15 ? 'Débil' : 'Ausente';
+  return { value, label };
 }
 
 export function findSwings(highs, lows, lookback = 90, leftRight = 3) {
@@ -389,6 +483,10 @@ export function computeTechnical(candles) {
   const trSeries = tr;
   const chandelierStop = chandelierExit(h, tr);
   const volProfile = volumeProfile(h, l, c, v);
+  const kc = keltnerChannels(c, tr, 20, 1.5);
+  const squeeze = detectSqueeze(bb, kc);
+  const candlePattern = detectCandlePattern(candles.o, h, l, c);
+  const trendStrength = trendStrengthIndex(a, ema200);
 
   const obvSlope = ov[last] - ov[Math.max(0, last - 10)];
   const hasVolume = v.some(x => x > 0);
@@ -420,7 +518,7 @@ export function computeTechnical(candles) {
     fib, structure,
     priceAction: priceActionLabel(c, trSeries),
     bullishAlign, bearishAlign,
-    chandelierStop, volumeProfile: volProfile,
+    chandelierStop, volumeProfile: volProfile, squeeze, candlePattern, trendStrength,
     primaryTrend: bullishAlign ? 'Alcista'
       : bearishAlign ? 'Bajista'
       : (price > ema200[last] ? 'Alcista de fondo, corrección de corto plazo' : 'Bajista de fondo, rebote de corto plazo'),
@@ -450,4 +548,37 @@ export function correlationAndBeta(assetCloses, benchCloses) {
   const corr = (varA > 0 && varB > 0) ? cov / Math.sqrt(varA * varB) : null;
   const beta = varB > 0 ? cov / varB : null;
   return { correlation: corr, beta };
+}
+
+const SEASONALITY_MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+/** Estacionalidad mensual: para cada mes calendario, el retorno promedio
+ *  histórico (cierre de fin de mes vs. cierre de inicio de mes), agregado
+ *  sobre todos los años que haya en el historial recibido. Simplificación
+ *  documentada: usa el primer/último cierre DISPONIBLE de cada mes en los
+ *  datos (no necesariamente el primer/último día hábil real si el fetch
+ *  arrancó a mitad de mes) — con años completos de por medio el efecto de
+ *  borde es despreciable. */
+export function monthlySeasonality(candles) {
+  const { c, t } = candles;
+  if (!t || t.length !== c.length || t.length < 40) return null;
+  const groups = new Map(); // 'YYYY-MM' -> { first, last }
+  for (let i = 0; i < t.length; i++) {
+    const key = String(t[i]).slice(0, 7);
+    if (!groups.has(key)) groups.set(key, { first: c[i], last: c[i] });
+    else groups.get(key).last = c[i];
+  }
+  const byMonth = Array.from({ length: 12 }, () => []);
+  for (const [key, g] of groups) {
+    const month = parseInt(key.slice(5, 7), 10) - 1;
+    if (month >= 0 && month < 12 && g.first > 0) byMonth[month].push((g.last - g.first) / g.first);
+  }
+  const rows = byMonth.map((arr, i) => ({
+    month: i + 1, label: SEASONALITY_MONTHS[i],
+    avgReturnPct: arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) * 100 : null,
+    years: arr.length,
+  }));
+  const totalYears = Math.max(...rows.map(r => r.years), 0);
+  if (totalYears < 2) return null; // con 1 solo año no hay "estacionalidad", es un dato puntual
+  return { rows, totalYears };
 }
