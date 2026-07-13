@@ -1,5 +1,5 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings, getInflacion, getDividends, getBonds, isLive } from './dataSource.js';
-import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta } from './indicators.js';
+import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
@@ -713,6 +713,11 @@ async function loadReport(ticker) {
     // Correlación/beta vs SPY: SPY se cachea 60s en dataSource, así que mirar
     // varios tickers seguidos no multiplica los requests al proveedor.
     const marketCorrelation = spyCandles ? correlationAndBeta(candles.c, spyCandles.c) : null;
+    // Fuerza relativa vs SPY (mismas velas ya pedidas arriba, sin requests
+    // extra) — no se calcula en las señales livianas del Dashboard/Watchlist
+    // (computeLightSignal) para no multiplicar pedidos por decenas de
+    // tickers a la vez, mismo criterio que ya se usa ahí con fundamentales.
+    const relativeStrength = spyCandles ? relStrength(candles.c, spyCandles.c) : null;
 
     // Confirmación con el timeframe semanal: nativo (Twelve Data) para
     // acciones/CEDEARs/ETFs, resampleado de las velas diarias para cripto
@@ -730,12 +735,12 @@ async function loadReport(ticker) {
       peg: fundamentals.peg,
     } : null;
     const macroForScore = { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null };
-    const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: news?.sentimentScore ?? null, candles, confluence, sector: asset.sector, earningsSoon });
+    const scoreResult = computeScore({ technical, fundamentals: fundForScore, macro: macroForScore, newsSentiment: news?.sentimentScore ?? null, candles, confluence, sector: asset.sector, earningsSoon, relativeStrength });
     const plan = computePlan(technical, scoreResult.score);
 
     state.report = {
       asset, quote, candles, fundamentals, news, macro, ccl,
-      technical, weeklyTechnical, confluence, marketCorrelation, earnings, daysToEarnings, earningsSoon, dividends, ...scoreResult, plan,
+      technical, weeklyTechnical, confluence, marketCorrelation, relativeStrength, earnings, daysToEarnings, earningsSoon, dividends, ...scoreResult, plan,
       ts: { quote: now, candles: now, fundamentals: now, news: now },
     };
 
@@ -777,6 +782,7 @@ function buildAssistantContext() {
     if (r.plan) {
       ctx.planOperativo = {
         zonaCompra: r.plan.compra, zonaVenta: r.plan.venta, stopLoss: r.plan.stopLoss,
+        stopDinamicoChandelier: r.plan.chandelierStop, // trailing stop, solo si ya es más favorable que el stop fijo
         objetivo1: r.plan.tp1, objetivo2: r.plan.tp2, objetivo3: r.plan.tp3,
         riesgoBeneficio: r.plan.riskReward, probabilidad: r.plan.probability, drawdownEsperado: r.plan.drawdown,
       };
@@ -787,10 +793,22 @@ function buildAssistantContext() {
         posicionVsEma200: r.technical.price > r.technical.ema200 ? 'sobre EMA200' : 'bajo EMA200',
         posicionBandasBollinger: r.technical.bbPos, tendenciaVolumenOBV: r.technical.obvTrend,
         soporte: round2(r.technical.support), resistencia: round2(r.technical.resistance),
+        puntoControlVolumenPOC: r.technical.volumeProfile?.hasData ? round2(r.technical.volumeProfile.poc) : null,
         divergenciaPrecioRsi: r.technical.divergence?.type ?? null,
       };
     }
-    if (r.confluence) ctx.confluenciaSemanal = { deAcuerdoConTendenciaDiaria: r.confluence.agree };
+    if (r.confluence) {
+      ctx.confluenciaSemanal = {
+        señalesAFavor: `${r.confluence.agreeCount}/${r.confluence.checksAvailable}`,
+        deAcuerdoConTendenciaDiaria: r.confluence.agree,
+      };
+    }
+    if (r.relativeStrength) {
+      ctx.fuerzaRelativaVsSPY = {
+        liderandoAlMercado: r.relativeStrength.trend === 'up',
+        enMaximoDeFuerzaRelativa: r.relativeStrength.isNewHigh,
+      };
+    }
     if (r.fundamentals?.hasData) {
       ctx.fundamentales = {
         crecimientoIngresosPct: r.fundamentals.revenueGrowth, crecimientoEpsPct: r.fundamentals.epsGrowth,
@@ -1075,6 +1093,21 @@ const BACKTEST_HORIZONS = [5, 10, 20, 40];
 const BACKTEST_WARMUP = 210; // barras necesarias para que EMA200/ADX/etc. dejen de ser NaN
 const BACKTEST_STEP = 3; // muestrea cada 3 velas: alcanza para una lectura estable sin miles de cálculos por click
 const BACKTEST_LABELS = ['Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'];
+const FACTOR_HORIZON = 20; // ~1 mes de rueda — horizonte usado para medir qué sub-factores del score realmente correlacionaron con el retorno futuro de ESTE activo
+
+/** Correlación de Pearson genérica — se reusa para validar empíricamente
+ *  cada sub-factor del score contra el retorno futuro real (no inventa
+ *  pesos nuevos: mide, sobre los mismos datos ya calculados del backtest,
+ *  qué tan bien predijo cada factor lo que pasó después). */
+function pearsonCorr(xs, ys) {
+  const n = xs.length;
+  if (n < 15) return null;
+  const mx = xs.reduce((a, b) => a + b, 0) / n, my = ys.reduce((a, b) => a + b, 0) / n;
+  let cov = 0, vx = 0, vy = 0;
+  for (let i = 0; i < n; i++) { const dx = xs[i] - mx, dy = ys[i] - my; cov += dx * dy; vx += dx * dx; vy += dy * dy; }
+  if (vx <= 0 || vy <= 0) return null;
+  return cov / Math.sqrt(vx * vy);
+}
 
 async function runBacktest(ticker) {
   const candles = await getCandles(ticker, '1day', 500);
@@ -1087,6 +1120,7 @@ async function runBacktest(ticker) {
   }
 
   const buckets = {};
+  const factorSamples = {}; // factorKey -> { label, values: [pct histórico], returns: [retorno fwd real] }
   let sampleCount = 0;
   for (let i = BACKTEST_WARMUP; i <= n - maxHorizon - 1; i += BACKTEST_STEP) {
     const slice = {
@@ -1104,8 +1138,23 @@ async function runBacktest(ticker) {
       if (fwd == null) continue;
       (buckets[label][h] ??= []).push((fwd - priceNow) / priceNow);
     }
+    const fwd20 = candles.c[i + FACTOR_HORIZON];
+    if (fwd20 != null) {
+      const ret20 = (fwd20 - priceNow) / priceNow;
+      for (const sb of scoreResult.scoreBreakdown) {
+        if (!sb.available) continue; // sin fundamentales/macro/noticias en el backtest — no ensucia la correlación con ceros artificiales
+        (factorSamples[sb.key] ??= { label: sb.label, values: [], returns: [] });
+        factorSamples[sb.key].values.push(sb.pct);
+        factorSamples[sb.key].returns.push(ret20);
+      }
+    }
     sampleCount++;
   }
+
+  const factorCorrelations = Object.values(factorSamples)
+    .map(d => ({ label: d.label, n: d.values.length, correlation: pearsonCorr(d.values, d.returns) }))
+    .filter(f => f.correlation != null)
+    .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
 
   const rows = BACKTEST_LABELS.map(label => {
     const byH = buckets[label] || {};
@@ -1121,7 +1170,7 @@ async function runBacktest(ticker) {
 
   return {
     ticker, isReal: candles.isReal, insufficientData: false, candleCount: n, sampleCount,
-    from: candles.t[BACKTEST_WARMUP], to: candles.t[n - 1], rows,
+    from: candles.t[BACKTEST_WARMUP], to: candles.t[n - 1], rows, factorCorrelations, factorHorizon: FACTOR_HORIZON,
   };
 }
 
@@ -1210,7 +1259,7 @@ function renderReportImpl() {
   }
 
   const r = state.report;
-  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation, earnings, daysToEarnings, earningsSoon, dividends } = r;
+  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation, relativeStrength, earnings, daysToEarnings, earningsSoon, dividends } = r;
 
   const trendUp = quote.changePct >= 0;
   const trendBg = trendUp ? 'oklch(0.30 0.09 152)' : 'oklch(0.30 0.10 23)';
@@ -1352,6 +1401,11 @@ function renderReportImpl() {
         <div class="stat-card-sub">${marketCorrelation?.beta != null ? (marketCorrelation.beta > 1.2 ? 'Alta' : marketCorrelation.beta < 0.8 ? 'Baja' : 'Moderada') : ''}</div>
       </div>
       <div class="card stat-card">
+        <div class="stat-card-label">Fuerza Relativa (vs SPY)</div>
+        <div class="stat-card-value ${relativeStrength ? (relativeStrength.trend === 'up' ? 'up' : 'down') : ''}">${relativeStrength ? (relativeStrength.trend === 'up' ? 'Liderando' : 'Rezagando') : 'N/D'}</div>
+        <div class="stat-card-sub">${relativeStrength?.isNewHigh ? '★ Máximo de RS — liderazgo' : relativeStrength ? `${relativeStrength.slopePct >= 0 ? '+' : ''}${relativeStrength.slopePct.toFixed(1)}% en 20 ruedas` : ''}</div>
+      </div>
+      <div class="card stat-card">
         <div class="stat-card-label">EMA 20</div>
         <div class="stat-card-value">${fmtNum(t.ema20)}</div>
         <div class="stat-card-sub ${t.price > t.ema20 ? 'up' : 'down'}">${t.price > t.ema20 ? 'Precio arriba' : 'Precio abajo'}</div>
@@ -1403,7 +1457,7 @@ function renderReportImpl() {
         </div>
         <div class="card panel-card">
           <div class="metrics-grid">
-            ${technicalMetricRows(t, confluence, marketCorrelation).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
+            ${technicalMetricRows(t, confluence, marketCorrelation, relativeStrength).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
           </div>
           <div class="narrative">${esc(technicalNarrative(t, confluence))}</div>
         </div>
@@ -1476,6 +1530,8 @@ function renderReportImpl() {
       <div class="plan-footer">
         <div class="plan-footer-item">Risk/Reward: <span>${esc(plan.riskReward)}</span></div>
         <div class="plan-footer-item">Drawdown esperado: <span>${esc(plan.drawdown)}</span></div>
+        ${plan.volumeProfilePoc ? `<div class="plan-footer-item" title="Precio con más volumen operado — soporte/resistencia real, no solo un extremo puntual">POC (volumen): <span>${esc(plan.volumeProfilePoc)}</span></div>` : ''}
+        ${plan.chandelierStop ? `<div class="plan-footer-item" title="Trailing stop (Chandelier Exit): sube con nuevos máximos, nunca baja — usar una vez adentro de la posición, no como stop inicial">Stop dinámico (trailing): <span>${esc(plan.chandelierStop)}</span></div>` : ''}
       </div>
       <div class="probability-row">
         <span class="probability-label">Probabilidad estimada</span>
@@ -1610,16 +1666,20 @@ function radarHTML(asset, scoreBreakdown) {
     </div>`;
 }
 
-function technicalMetricRows(t, confluence, marketCorrelation) {
+function technicalMetricRows(t, confluence, marketCorrelation, relativeStrength) {
   const nearestFib = Object.entries(t.fib.levels).sort((a, b) => Math.abs(a[1] - t.price) - Math.abs(b[1] - t.price))[0];
   const confluenceValue = !confluence ? 'N/D — historial semanal insuficiente'
-    : confluence.agree ? `✓ Confirmada (${BIAS_LABEL[confluence.dailyBias]})`
-    : `⚠ Divergencia (D:${BIAS_LABEL[confluence.dailyBias]} / S:${BIAS_LABEL[confluence.weeklyBias]})`;
+    : `${confluence.agreeCount}/${confluence.checksAvailable} señales (EMA/RSI/MACD) a favor de ${BIAS_LABEL[confluence.dailyBias]}`;
   const corrValue = !marketCorrelation || marketCorrelation.correlation == null ? 'N/D'
     : `${marketCorrelation.correlation.toFixed(2)} (beta ${marketCorrelation.beta.toFixed(2)})`;
+  const rsValue = !relativeStrength ? 'N/D'
+    : `${relativeStrength.trend === 'up' ? 'Liderando al mercado' : 'Rezagando vs. mercado'}${relativeStrength.isNewHigh ? ' — ★ máximo de fuerza relativa' : ''}`;
+  const pocValue = t.volumeProfile?.hasData ? `$${t.volumeProfile.poc.toFixed(2)} (zona ${t.volumeProfile.vaLow.toFixed(2)}–${t.volumeProfile.vaHigh.toFixed(2)})` : 'N/D — sin volumen';
   return [
-    { label: 'Confirmación semanal', value: confluenceValue },
+    { label: 'Confirmación semanal (multi-TF)', value: confluenceValue },
+    { label: 'Fuerza Relativa vs SPY', value: rsValue },
     { label: 'Correlación / Beta vs SPY', value: corrValue },
+    { label: 'Punto de Control de Volumen (POC)', value: pocValue },
     { label: 'EMA 20 / 50', value: `${fmtNum(t.ema20)} / ${fmtNum(t.ema50)}` },
     { label: 'EMA 100 / 200', value: `${fmtNum(t.ema100)} / ${fmtNum(t.ema200)}` },
     { label: 'RSI (14)', value: isNaN(t.rsi) ? 'N/D' : `${t.rsi.toFixed(0)} — ${t.rsi > 70 ? 'sobrecompra' : t.rsi < 30 ? 'sobreventa' : 'neutral'}` },
@@ -3470,7 +3530,47 @@ function backtestPageHTML() {
         </div>
       </div>
       <div class="bt-disclaimer">Resultado histórico calculado sobre datos reales, sin look-ahead (cada corte solo usa velas hasta ese día — nunca información futura). No es garantía de resultados futuros: las condiciones de mercado cambian y el tamaño de muestra puede ser chico en señales poco frecuentes (columna "Ocurrencias").</div>
+      ${factorValidationCardHTML(r)}
     `}`;
+}
+
+/** Validación empírica de factores: en vez de pesos fijos elegidos a mano,
+ *  mide sobre los mismos cortes históricos del backtest qué tan bien
+ *  correlacionó cada sub-factor del score (su valor 0-100 en ese momento)
+ *  con el retorno real ${FACTOR_HORIZON} ruedas después, PARA ESTE activo
+ *  puntual. No cambia los pesos del score en vivo (eso requeriría un
+ *  estudio cruzado sobre muchos activos que esta plataforma no tiene) — es
+ *  evidencia real, específica de este ticker, para que quien lo lea juzgue
+ *  qué tan confiable fue cada factor históricamente. */
+function factorValidationCardHTML(r) {
+  const rows = r.factorCorrelations ?? [];
+  if (!rows.length) return '';
+  const interpret = (c) => {
+    const abs = Math.abs(c);
+    const dir = c >= 0 ? 'a favor' : 'en contra';
+    if (abs >= 0.3) return `Correlación fuerte ${dir}`;
+    if (abs >= 0.15) return `Correlación moderada ${dir}`;
+    if (abs >= 0.05) return `Correlación débil ${dir}`;
+    return 'Sin correlación real';
+  };
+  return `
+    <div class="card bt-factor-card">
+      <div class="bt-factor-title">Validación empírica de factores — ${esc(r.ticker)}</div>
+      <div class="bt-factor-intro">Qué tan bien predijo cada sub-factor del score el retorno real a ${r.factorHorizon} ruedas, medido sobre los mismos ${r.sampleCount} cortes históricos de arriba — no es un peso inventado, es correlación calculada sobre datos reales de este activo.</div>
+      <table class="sim-table">
+        <thead><tr><th>Factor</th><th>Correlación</th><th>Muestras</th><th>Lectura</th></tr></thead>
+        <tbody>
+          ${rows.map(f => `
+            <tr>
+              <td class="sim-ticker-cell">${esc(f.label)}</td>
+              <td class="${f.correlation >= 0 ? 'bt-pos' : 'bt-neg'}">${f.correlation >= 0 ? '+' : ''}${f.correlation.toFixed(2)}</td>
+              <td>${f.n}</td>
+              <td>${esc(interpret(f.correlation))}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <div class="bt-disclaimer">Correlación de Pearson entre el valor histórico 0-100 de cada factor y el retorno real ${r.factorHorizon} ruedas después. Es específica de ${esc(r.ticker)} — no se traslada automáticamente a otros activos ni cambia los pesos del score en vivo.</div>
+    </div>`;
 }
 
 function wireBacktestEvents() {
