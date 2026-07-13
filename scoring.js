@@ -21,17 +21,30 @@ const FULL_WEIGHT = Object.values(WEIGHTS).reduce((a, b) => a + b, 0);
 
 const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
 
-function scoreTrend(t, confluence) {
+function scoreTrend(t, confluence, relativeStrength) {
   let s = t.bullishAlign ? 0.88 : t.bearishAlign ? 0.15 : (t.price > t.ema200 ? 0.62 : 0.38);
   if (!isNaN(t.adx)) s += clamp((t.adx - 15) / 40, -0.15, 0.15);
-  // Confirmar con la tendencia semanal reduce falsas señales del ruido diario;
-  // una divergencia diario/semanal penaliza más de lo que suma una confirmación,
-  // porque el timeframe mayor manda.
-  if (confluence) s += confluence.agree ? 0.08 : -0.12;
+  // Confirmar con la tendencia semanal reduce falsas señales del ruido diario.
+  // Confluencia extendida: además de EMAs, también compara RSI y MACD entre
+  // timeframes — cuantas más de las 3 confirmaciones coincidan, más fuerte
+  // el ajuste (graduado, no un simple sí/no como antes).
+  if (confluence && confluence.checksAvailable > 0) {
+    const bonus = (confluence.agreeCount / confluence.checksAvailable) * 0.24 - 0.12;
+    s += bonus;
+  }
   // Un movimiento de precio sin que el volumen (OBV) lo acompañe es la causa
   // más común de rupturas falsas — penaliza más de lo que suma confirmar.
   if (t.obvConfirms === true) s += 0.06;
   else if (t.obvConfirms === false) s -= 0.10;
+  // Fuerza relativa (Mansfield/IBD) vs. benchmark: un activo que le gana al
+  // mercado en tendencia (y más si está en máximos de fuerza relativa, señal
+  // de liderazgo real) tiene más probabilidad de seguir haciéndolo que uno
+  // que solo sube porque sube todo el mercado.
+  if (relativeStrength) {
+    if (relativeStrength.trend === 'up' && relativeStrength.isNewHigh) s += 0.08;
+    else if (relativeStrength.trend === 'up') s += 0.03;
+    else s -= 0.05;
+  }
   return clamp(s);
 }
 
@@ -130,9 +143,9 @@ function scoreLiquidity(candles) {
   return clamp(Math.log10(avgVol + 1) / 8);
 }
 
-export function computeScore({ technical, fundamentals, macro, newsSentiment, candles, confluence, sector, earningsSoon }) {
+export function computeScore({ technical, fundamentals, macro, newsSentiment, candles, confluence, sector, earningsSoon, relativeStrength }) {
   const raw = {
-    trend: scoreTrend(technical, confluence),
+    trend: scoreTrend(technical, confluence, relativeStrength),
     momentum: scoreMomentum(technical),
     fundamentals: scoreFundamentals(fundamentals),
     valuation: scoreValuation(fundamentals, sector),
@@ -191,14 +204,24 @@ export function computeScore({ technical, fundamentals, macro, newsSentiment, ca
 }
 
 export function computePlan(technical, score) {
-  const { price, support: rawSupport, resistance: rawResistance, atr } = technical;
+  const { price, support: rawSupport, resistance: rawResistance, atr, volumeProfile: vp, chandelierStop } = technical;
   const safeAtr = atr && atr > 0 && !isNaN(atr) ? atr : price * 0.02;
 
   // Si el swing de soporte/resistencia quedó demasiado pegado al precio (o el
   // precio ya lo rompió), un plan basado en él da un R/R degenerado — se
   // proyecta por ATR para asegurar una distancia mínima razonable.
-  const supportRef = rawSupport < price - 0.5 * safeAtr ? rawSupport : price - 1.2 * safeAtr;
-  const resistanceRef = rawResistance > price + 0.5 * safeAtr ? rawResistance : price + 1.2 * safeAtr;
+  let supportRef = rawSupport < price - 0.5 * safeAtr ? rawSupport : price - 1.2 * safeAtr;
+  let resistanceRef = rawResistance > price + 0.5 * safeAtr ? rawResistance : price + 1.2 * safeAtr;
+
+  // El punto de mayor volumen operado (POC) suele ser un soporte/resistencia
+  // más realista que un swing high/low crudo — representa dónde el mercado
+  // realmente acordó precio, no solo un extremo puntual. Se usa para afinar
+  // la referencia SOLO cuando queda más cerca del precio actual que el swing
+  // (nunca la aleja): un piso/techo más ajustado, no uno peor.
+  if (vp?.hasData) {
+    if (vp.poc < price && vp.poc > supportRef) supportRef = vp.poc;
+    if (vp.poc > price && vp.poc < resistanceRef) resistanceRef = vp.poc;
+  }
 
   // Stop: bajo el soporte, pero nunca a más de 3×ATR del precio (tendencias
   // extendidas dejarían un soporte demasiado lejos para ser operable).
@@ -223,6 +246,12 @@ export function computePlan(technical, score) {
 
   const fmt = (n) => n >= 1000 ? `US$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : `$${n.toFixed(2)}`;
 
+  // Chandelier Exit: solo tiene sentido como referencia de trailing stop
+  // cuando queda POR ENCIMA del stop inicial (si el precio recién arrancó a
+  // subir, el trailing puede dar más lejos que el stop fijo — en ese caso no
+  // aporta nada nuevo todavía y no se muestra).
+  const hasChandelier = chandelierStop != null && !isNaN(chandelierStop) && chandelierStop > stopLoss;
+
   return {
     compra: `${fmt(buyLow)} – ${fmt(buyHigh)}`,
     venta: `${fmt(sellLow)} – ${fmt(sellHigh)}`,
@@ -232,12 +261,14 @@ export function computePlan(technical, score) {
     probability: `~${Math.round(probability * 100)}%`,
     probabilityPct: Math.round(probability * 100),
     drawdown: `-${Math.round(drawdownPct * 100 * 1.5)}% a -${Math.round(drawdownPct * 100 * 2.5)}%`,
+    chandelierStop: hasChandelier ? fmt(chandelierStop) : null,
+    volumeProfilePoc: vp?.hasData ? fmt(vp.poc) : null,
     // Valores numéricos crudos, para comparar contra el precio (alertas) sin
     // tener que re-parsear los strings formateados de arriba. supportRef/
     // resistanceRef/safeAtr (sin el margen de +0.1×ATR que separa sellLow del
     // precio actual solo para que el rango se vea bien en la UI) son los que
     // usa detectPriceAlert, para que la condición de cruce sea alcanzable.
-    raw: { buyLow, buyHigh, sellLow, sellHigh, stopLoss, tp1, tp2, tp3, supportRef, resistanceRef, safeAtr },
+    raw: { buyLow, buyHigh, sellLow, sellHigh, stopLoss, tp1, tp2, tp3, supportRef, resistanceRef, safeAtr, chandelierStop: hasChandelier ? chandelierStop : null },
   };
 }
 

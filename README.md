@@ -144,6 +144,37 @@ Abrir `index.html` con cualquier servidor estático (ej. `npx serve .`) y
 agregar `?mode=mock` a la URL para forzar datos simulados sin pegarle a
 `/api/*` (útil para ver el diseño sin tener las keys a mano).
 
+## Mejoras de precisión del motor técnico (timing de compra/venta)
+
+Sobre el motor de indicadores/score original se agregaron 5 refinamientos
+orientados a afinar el momento de entrada/salida, todos calculados sobre
+datos reales ya obtenidos (sin pedidos extra al proveedor):
+
+- **Fuerza Relativa (Mansfield/IBD) vs. SPY** (`indicators.js:relativeStrength`) —
+  el ratio precio/benchmark, no el precio solo: un activo puede subir y
+  seguir "perdiéndole" al mercado. Un máximo de fuerza relativa es señal de
+  liderazgo real. Solo se calcula en la ficha del activo (no en las señales
+  livianas del Dashboard/Watchlist, para no multiplicar requests).
+- **Volume Profile / POC** (`indicators.js:volumeProfile`) — punto de mayor
+  volumen operado sobre la ventana reciente; se usa para afinar soporte/
+  resistencia del plan operativo cuando queda más cerca del precio que el
+  swing high/low crudo (nunca lo aleja).
+- **Confluencia multi-timeframe extendida** (`indicators.js:weeklyConfluence`) —
+  antes solo comparaba alineación de EMAs entre diario y semanal; ahora
+  también RSI y MACD, con un bonus graduado según cuántas de las 3
+  confirmaciones coinciden (en vez de un simple sí/no).
+- **Stop dinámico (Chandelier Exit)** (`indicators.js:chandelierExit`) —
+  trailing stop que sube con nuevos máximos y nunca baja, para usar una vez
+  adentro de la posición (complementa, no reemplaza, el stop fijo del plan
+  operativo inicial).
+- **Validación empírica de factores** (página Backtesting) — en vez de
+  confiar ciegamente en los pesos fijos del score, mide sobre los mismos
+  cortes históricos del backtest qué tan bien correlacionó cada sub-factor
+  con el retorno real futuro, para ese activo puntual. No cambia los pesos
+  del score en vivo (eso requeriría un estudio cruzado sobre muchos activos
+  que esta plataforma no tiene) — es evidencia real y específica para juzgar
+  cada factor, no un número inventado.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

@@ -143,6 +143,86 @@ export function rollingVwap(highs, lows, closes, volumes, period = 20) {
   return out;
 }
 
+/** Chandelier Exit: stop trailing clásico (Chuck LeBeau) — techo de las
+ *  últimas `period` ruedas menos `mult`×ATR. A diferencia del stop fijo del
+ *  plan operativo (calculado una sola vez contra soporte/ATR al momento de
+ *  entrar), este nivel sube solo con nuevos máximos, nunca baja — pensado
+ *  para usarse como referencia de "hasta dónde dejar correr la ganancia"
+ *  una vez adentro de la posición, no como stop inicial. */
+export function chandelierExit(highs, atrSeries, period = 22, mult = 3) {
+  const n = highs.length;
+  if (n < period) return NaN;
+  const highestHigh = Math.max(...highs.slice(-period));
+  const lastAtr = atrSeries[atrSeries.length - 1];
+  if (isNaN(lastAtr)) return NaN;
+  return highestHigh - mult * lastAtr;
+}
+
+/** Volume Profile simplificado: reparte el volumen de cada vela en el bin de
+ *  precio de su típico (H+L+C)/3 sobre una grilla fija de bins en el rango
+ *  de precios de la ventana — no es tick-by-tick (esta plataforma no tiene
+ *  ese dato), es la aproximación estándar cuando solo hay OHLCV por barra.
+ *  POC (point of control) = precio con más volumen operado: en la práctica
+ *  profesional actúa como soporte/resistencia más confiable que un swing
+ *  high/low simple, porque representa dónde el mercado realmente acordó
+ *  precio, no solo un extremo puntual. Value Area = rango que concentra el
+ *  70% del volumen alrededor del POC (convención estándar de mercado). */
+export function volumeProfile(highs, lows, closes, volumes, lookback = 90, bins = 24) {
+  const n = closes.length;
+  const hasVolume = volumes.some(v => v > 0);
+  if (!hasVolume || n < 10) return { hasData: false, poc: null, vaHigh: null, vaLow: null };
+  const start = Math.max(0, n - lookback);
+  const hSlice = highs.slice(start), lSlice = lows.slice(start);
+  const lo = Math.min(...lSlice), hi = Math.max(...hSlice);
+  if (!(hi > lo)) return { hasData: false, poc: null, vaHigh: null, vaLow: null };
+  const binSize = (hi - lo) / bins;
+  const volByBin = new Array(bins).fill(0);
+  for (let i = start; i < n; i++) {
+    const typical = (highs[i] + lows[i] + closes[i]) / 3;
+    let b = Math.floor((typical - lo) / binSize);
+    b = Math.max(0, Math.min(bins - 1, b));
+    volByBin[b] += volumes[i] || 0;
+  }
+  const totalVol = volByBin.reduce((a, b) => a + b, 0);
+  if (!(totalVol > 0)) return { hasData: false, poc: null, vaHigh: null, vaLow: null };
+  const pocBin = volByBin.indexOf(Math.max(...volByBin));
+  const poc = lo + (pocBin + 0.5) * binSize;
+
+  // Value Area: se expande desde el POC hacia el bin vecino con más volumen
+  // (arriba o abajo) hasta cubrir el 70% del volumen total — misma
+  // convención que usan las plataformas de Volume Profile profesionales.
+  let covered = volByBin[pocBin], lo_i = pocBin, hi_i = pocBin;
+  while (covered < totalVol * 0.7 && (lo_i > 0 || hi_i < bins - 1)) {
+    const nextLo = lo_i > 0 ? volByBin[lo_i - 1] : -1;
+    const nextHi = hi_i < bins - 1 ? volByBin[hi_i + 1] : -1;
+    if (nextHi >= nextLo) { hi_i++; covered += volByBin[hi_i]; }
+    else { lo_i--; covered += volByBin[lo_i]; }
+  }
+  return { hasData: true, poc, vaHigh: lo + (hi_i + 1) * binSize, vaLow: lo + lo_i * binSize };
+}
+
+/** Fuerza relativa estilo Mansfield/IBD: no mira el precio del activo solo,
+ *  sino el ratio precio/benchmark — si ese ratio sube, el activo le está
+ *  ganando al mercado (liderazgo real), aunque ambos suban en términos
+ *  absolutos. Un ratio en máximos de N ruedas es la señal clásica de
+ *  "líder" que usan los stock-pickers institucionales para priorizar qué
+ *  comprar, no solo cuándo. */
+export function relativeStrength(assetCloses, benchCloses, period = 50, lookbackHigh = 60) {
+  const n = Math.min(assetCloses.length, benchCloses.length);
+  if (n < period + 5) return null;
+  const a = assetCloses.slice(-n), b = benchCloses.slice(-n);
+  const ratio = a.map((v, i) => (b[i] ? v / b[i] : NaN)).filter(v => !isNaN(v));
+  if (ratio.length < period + 5) return null;
+  const ratioMA = sma(ratio, period);
+  const last = ratio.length - 1;
+  const trend = ratio[last] > ratioMA[last] ? 'up' : 'down';
+  const windowStart = Math.max(0, ratio.length - lookbackHigh);
+  const isNewHigh = ratio[last] >= Math.max(...ratio.slice(windowStart));
+  const prior = ratio[Math.max(0, last - 20)];
+  const slopePct = prior ? ((ratio[last] - prior) / prior) * 100 : 0;
+  return { trend, isNewHigh, slopePct, value: ratio[last] };
+}
+
 export function findSwings(highs, lows, lookback = 90, leftRight = 3) {
   const n = highs.length;
   const start = Math.max(leftRight, n - lookback);
@@ -274,7 +354,19 @@ export function weeklyConfluence(daily, weekly) {
   if (!weekly) return null;
   const dailyBias = daily.bullishAlign ? 'up' : daily.bearishAlign ? 'down' : (daily.price > daily.ema200 ? 'up' : 'down');
   const weeklyBias = weekly.bullishAlign ? 'up' : weekly.bearishAlign ? 'down' : (weekly.price > weekly.ema50 ? 'up' : 'down');
-  return { dailyBias, weeklyBias, agree: dailyBias === weeklyBias };
+  const emaAgree = dailyBias === weeklyBias;
+  // Confluencia extendida: además de la alineación de EMAs (ya existía),
+  // suma si el momentum (RSI a favor/en contra de 50) y el MACD coinciden
+  // en ambos timeframes — tres confirmaciones independientes dan una lectura
+  // más granular que un solo booleano "de acuerdo / en desacuerdo".
+  const rsiAgree = !isNaN(daily.rsi) && !isNaN(weekly.rsi) ? (daily.rsi > 50) === (weekly.rsi > 50) : null;
+  const macdAgree = !isNaN(daily.hist) && !isNaN(weekly.hist) ? (daily.hist > 0) === (weekly.hist > 0) : null;
+  const checks = [emaAgree, rsiAgree, macdAgree].filter(v => v != null);
+  const agreeCount = checks.filter(Boolean).length;
+  return {
+    dailyBias, weeklyBias, agree: emaAgree,
+    emaAgree, rsiAgree, macdAgree, agreeCount, checksAvailable: checks.length,
+  };
 }
 
 /** Calcula el bloque técnico completo listo para el reporte. */
@@ -295,6 +387,8 @@ export function computeTechnical(candles) {
   const fib = fibonacci(h, l);
   const structure = marketStructure(h, l);
   const trSeries = tr;
+  const chandelierStop = chandelierExit(h, tr);
+  const volProfile = volumeProfile(h, l, c, v);
 
   const obvSlope = ov[last] - ov[Math.max(0, last - 10)];
   const hasVolume = v.some(x => x > 0);
@@ -326,6 +420,7 @@ export function computeTechnical(candles) {
     fib, structure,
     priceAction: priceActionLabel(c, trSeries),
     bullishAlign, bearishAlign,
+    chandelierStop, volumeProfile: volProfile,
     primaryTrend: bullishAlign ? 'Alcista'
       : bearishAlign ? 'Bajista'
       : (price > ema200[last] ? 'Alcista de fondo, corrección de corto plazo' : 'Bajista de fondo, rebote de corto plazo'),
