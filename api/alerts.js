@@ -12,6 +12,7 @@
  *   POST ?action=subscribe        — agregar/quitar un ticker de las alertas de un chat_id
  *   GET  ?action=subscriptions&chatId=X — lista de tickers suscriptos de un chat_id
  *   GET  ?action=check&secret=X   — dispara las alertas (llamado por un cron externo)
+ *   GET  ?action=debug&secret=X   — presencia (nunca el valor) de cada env var, para diagnosticar setup
  */
 import universe from '../universe.json';
 import { computeTechnical } from '../indicators.js';
@@ -157,6 +158,27 @@ async function handleCheck(req, res) {
   }
 }
 
+// Solo presencia/largo, nunca el valor — mismo criterio que el ?debug=1 de
+// api/candles.js, para diagnosticar setup de env vars sin exponer secretos.
+function handleDebug(req, res) {
+  if (!process.env.CRON_SECRET || req.query.secret !== process.env.CRON_SECRET) return res.status(401).json({ error: 'secret inválido' });
+  const present = (name) => {
+    const v = process.env[name];
+    return { present: v != null && v !== '', length: v?.length ?? 0 };
+  };
+  return res.status(200).json({
+    KV_REST_API_URL: present('KV_REST_API_URL'),
+    KV_REST_API_TOKEN: present('KV_REST_API_TOKEN'),
+    UPSTASH_REDIS_REST_URL: present('UPSTASH_REDIS_REST_URL'),
+    UPSTASH_REDIS_REST_TOKEN: present('UPSTASH_REDIS_REST_TOKEN'),
+    TELEGRAM_BOT_TOKEN: present('TELEGRAM_BOT_TOKEN'),
+    TELEGRAM_BOT_USERNAME: { present: Boolean(process.env.TELEGRAM_BOT_USERNAME), value: process.env.TELEGRAM_BOT_USERNAME || null },
+    TELEGRAM_WEBHOOK_SECRET: present('TELEGRAM_WEBHOOK_SECRET'),
+    ANTHROPIC_API_KEY: present('ANTHROPIC_API_KEY'),
+    allEnvKeysWithRedisOrTelegramOrAnthropic: Object.keys(process.env).filter(k => /REDIS|KV_|TELEGRAM|ANTHROPIC/i.test(k)),
+  });
+}
+
 export default async function handler(req, res) {
   switch (req.query.action) {
     case 'webhook': return handleWebhook(req, res);
@@ -165,6 +187,7 @@ export default async function handler(req, res) {
     case 'subscribe': return handleSubscribe(req, res);
     case 'subscriptions': return handleSubscriptions(req, res);
     case 'check': return handleCheck(req, res);
+    case 'debug': return handleDebug(req, res);
     default: return res.status(400).json({ error: 'falta ?action= o valor inválido' });
   }
 }

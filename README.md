@@ -76,6 +76,16 @@ Como el proyecto ya está conectado a Vercel, alcanza con:
      *Storage → Create Database → Upstash for Redis* (o directo en
      [upstash.com](https://upstash.com), plan gratis) — al conectarlo desde
      la pestaña Storage del proyecto, Vercel carga estas dos env vars solo.
+     **Importante**: según cómo se conecte la base, Vercel puede llamar a
+     este mismo par de credenciales `KV_REST_API_URL`/`KV_REST_API_TOKEN`
+     (producto "Vercel KV" clásico) **o** `UPSTASH_REDIS_REST_URL`/
+     `UPSTASH_REDIS_REST_TOKEN` (integración nativa de Upstash del
+     Marketplace) — el código acepta cualquiera de los dos pares, no hace
+     falta elegir uno en particular. Lo que **no** sirve es una variable
+     `REDIS_URL` sola (es una connection string para clientes TCP tipo
+     `ioredis`, no las credenciales REST que usa este proyecto) — si solo
+     ves esa, hay que conectar la base de nuevo eligiendo la opción que
+     exponga las credenciales REST.
    - `TELEGRAM_BOT_TOKEN` y `TELEGRAM_BOT_USERNAME` — bot de Telegram para
      mandar las alertas. Gratis: hablale a
      [@BotFather](https://t.me/BotFather) en Telegram, `/newbot`, elegí un
