@@ -8,9 +8,16 @@
  * que sobrevive entre invocaciones de funciones serverless sin tabla
  * propia; todo lo demás en este proyecto vive en localStorage del
  * navegador, que no sirve para avisar con la pestaña cerrada.
- * Requiere KV_REST_API_URL / KV_REST_API_TOKEN (ver README) — sin esas
- * env vars, kvConfigured() da false y los endpoints devuelven 503 en vez
- * de romper el resto del sitio.
+ * Requiere el par de credenciales REST (ver README) — sin ellas,
+ * kvConfigured() da false y los endpoints devuelven 503 en vez de romper
+ * el resto del sitio.
+ *
+ * Vercel expone estas credenciales bajo DOS convenciones de nombre según
+ * cómo se haya conectado la base (producto "Vercel KV" legacy vs.
+ * integración nativa de Upstash del Marketplace) — se acepta cualquiera de
+ * las dos para no depender de cuál eligió el usuario:
+ *   KV_REST_API_URL / KV_REST_API_TOKEN               (Vercel KV, legacy)
+ *   UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN  (Upstash nativo)
  *
  * Claves usadas:
  *   tg:code:<CODE>            -> chatId (TTL 600s, se borra al leerse)
@@ -20,13 +27,20 @@
  *   tg:last:<chatId>:<TICKER> -> última señal notificada ('buy'|'sell'|'stop'|'')
  */
 
+function kvUrl() {
+  return process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || null;
+}
+function kvToken() {
+  return process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || null;
+}
+
 export function kvConfigured() {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return Boolean(kvUrl() && kvToken());
 }
 
 async function kvCommand(parts) {
-  const url = `${process.env.KV_REST_API_URL}/${parts.map(encodeURIComponent).join('/')}`;
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}` } });
+  const url = `${kvUrl()}/${parts.map(encodeURIComponent).join('/')}`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${kvToken()}` } });
   if (!r.ok) throw new Error(`kv ${r.status}: ${await r.text().catch(() => '')}`);
   const d = await r.json();
   return d.result;
