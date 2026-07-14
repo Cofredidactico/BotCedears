@@ -377,7 +377,14 @@ select.port-input { cursor: pointer; }
 }
 .watch-card:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow-card-hover); }
 .watch-card.has-alert { border-width: 1.5px; }
+.watch-card.is-pending { border-style: dashed; }
 .watch-alert { font-size: 11px; font-weight: 600; margin-top: 8px; }
+.plan-alert-badge { margin-top: 0; }
+.alert-confidence { font-weight: 700; text-transform: uppercase; font-size: 9px; letter-spacing: 0.03em; opacity: 0.85; }
+.alert-confidence.alta { color: var(--positive, #4ade80); }
+.alert-confidence.media { color: var(--gold-text, #d4a94a); }
+.alert-confidence.baja { color: var(--text-mute); }
+.alert-confidence.tentativa { color: var(--text-mute); font-style: italic; text-transform: none; }
 .watch-remove {
   position: absolute; top: 8px; right: 8px; background: transparent; border: none; cursor: pointer;
   color: var(--text-mute); font-size: 14px; line-height: 1; padding: 2px 4px;

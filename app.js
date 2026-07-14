@@ -1,11 +1,11 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings, getInflacion, getDividends, getBonds, isLive } from './dataSource.js';
-import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality } from './indicators.js';
+import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
 
-const GREEN = 'oklch(0.76 0.18 152)', AMBER = 'oklch(0.75 0.15 70)', RED = 'oklch(0.70 0.21 23)';
+const GREEN = 'oklch(0.76 0.18 152)', AMBER = 'oklch(0.75 0.15 70)', RED = 'oklch(0.70 0.21 23)', BLUE = 'oklch(0.72 0.15 250)';
 
 const els = {
   datebadge: document.getElementById('datebadge'),
@@ -227,9 +227,22 @@ const ALERT_META = {
   buy: { label: 'En zona de compra', color: GREEN },
   sell: { label: 'En zona de venta', color: AMBER },
   stop: { label: 'Tocó el stop loss', color: RED },
+  structure: { label: 'Cambio de estructura', color: BLUE },
 };
+const ALERT_CONFIDENCE_LABEL = { alta: 'confianza alta', media: 'confianza media', baja: 'confianza baja' };
+// El stop es gestión de riesgo incondicional (no pasa por el filtro de
+// confirmaciones), por eso no muestra sufijo de confianza.
+function alertConfidenceSuffix(a) {
+  if (!a || a.type === 'stop' || a.type === 'structure') return '';
+  if (a.pending) return ` <span class="alert-confidence tentativa">tentativa</span>`;
+  return ` <span class="alert-confidence ${esc(a.confidence)}">${esc(ALERT_CONFIDENCE_LABEL[a.confidence] ?? a.confidence)}</span>`;
+}
+function alertTitleAttr(a) {
+  return a?.confirmations?.length ? ` title="${esc(a.confirmations.join(' · '))}"` : '';
+}
 let alertsEnabled = lsGetSafe('icp_alerts_enabled', '0') === '1';
 const lastAlertByTicker = {}; // ticker -> 'buy'|'sell'|'stop'|null, para notificar solo en la transición
+const lastStructureByTicker = {}; // ticker -> structure.short ('BOS alcista'|'BOS bajista'|'CHoCH'|'Rango'), para notificar solo en el cambio
 
 /* ───────────────────────── configuración (preferencias reales) ───────────────────────── */
 // Reglas de tamaño máximo de posición por perfil de riesgo — determinísticas,
@@ -255,9 +268,9 @@ const ALERT_HISTORY_MAX = 50;
 function getAlertHistory() {
   try { return JSON.parse(localStorage.getItem(ALERT_HISTORY_KEY) || '[]'); } catch { return []; }
 }
-function logAlertHistory(ticker, type) {
+function logAlertHistory(ticker, type, confidence, confirmations) {
   const list = getAlertHistory();
-  list.unshift({ ticker, type, ts: Date.now() });
+  list.unshift({ ticker, type, confidence: confidence ?? null, confirmations: confirmations ?? [], ts: Date.now() });
   lsSetSafe(ALERT_HISTORY_KEY, JSON.stringify(list.slice(0, ALERT_HISTORY_MAX)));
 }
 function clearAlertHistory() {
@@ -267,14 +280,32 @@ function clearAlertHistory() {
 }
 
 function notifyIfNewAlert(ticker, priceAlert) {
-  const prev = lastAlertByTicker[ticker] ?? null;
   const curr = priceAlert?.type ?? null;
-  lastAlertByTicker[ticker] = curr;
-  if (!alertsEnabled || !curr || curr === prev) return;
-  logAlertHistory(ticker, curr);
+  const isStrong = curr && !priceAlert.pending && (priceAlert.confidence === 'alta' || priceAlert.confidence === 'media');
+  const prev = lastAlertByTicker[ticker] ?? null;
+  if (isStrong) lastAlertByTicker[ticker] = curr;
+  else if (!curr) lastAlertByTicker[ticker] = null;
+  if (!alertsEnabled || !isStrong || curr === prev) return;
+  logAlertHistory(ticker, curr, priceAlert.confidence, priceAlert.confirmations);
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   const meta = ALERT_META[curr];
-  new Notification(`${ticker}: ${meta.label}`, { body: 'Investment Copilot AI — seguimiento de precio', tag: `icp-${ticker}` });
+  new Notification(`${ticker}: ${meta.label}`, { body: `Investment Copilot AI — confianza ${priceAlert.confidence} (${priceAlert.confirmations.join(', ')})`, tag: `icp-${ticker}` });
+}
+
+/** Ruptura de estructura (BOS/CHoCH, ver marketStructure en indicators.js):
+ *  una señal independiente de las zonas de precio — un cambio de estructura
+ *  puede anticipar un giro de tendencia antes de que el precio llegue a un
+ *  soporte/resistencia. Solo navegador por ahora: no está conectada al cron
+ *  de Telegram (quedó fuera de este alcance para no abrir otro frente en la
+ *  misma tanda). */
+function notifyStructureChange(ticker, structure) {
+  const prevShort = lastStructureByTicker[ticker] ?? null;
+  const changed = structureChanged(prevShort, structure);
+  if (structure?.short) lastStructureByTicker[ticker] = structure.short;
+  if (!alertsEnabled || !changed) return;
+  logAlertHistory(ticker, 'structure', null, [structure.label]);
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  new Notification(`${ticker}: cambio de estructura`, { body: structure.label, tag: `icp-structure-${ticker}` });
 }
 
 async function toggleAlerts() {
@@ -1167,6 +1198,11 @@ const BACKTEST_HORIZONS = [5, 10, 20, 40];
 const BACKTEST_WARMUP = 210; // barras necesarias para que EMA200/ADX/etc. dejen de ser NaN
 const BACKTEST_STEP = 3; // muestrea cada 3 velas: alcanza para una lectura estable sin miles de cálculos por click
 const BACKTEST_LABELS = ['Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'];
+const ALERT_BT_TYPE_LABEL = { buy: 'En zona de compra', sell: 'En zona de venta', stop: 'Tocó el stop loss' };
+const ALERT_BT_CONFIDENCE_ORDER = { alta: 0, media: 1, baja: 2 };
+// Comprar da ganancia si el precio sube después; vender/stop "acierta" si el
+// precio efectivamente cae después (son señales bajistas/de salida).
+function alertBacktestWin(type, r) { return type === 'buy' ? r > 0 : r < 0; }
 const FACTOR_HORIZON = 20; // ~1 mes de rueda — horizonte usado para medir qué sub-factores del score realmente correlacionaron con el retorno futuro de ESTE activo
 
 /** Correlación de Pearson genérica — se reusa para validar empíricamente
@@ -1195,6 +1231,7 @@ async function runBacktest(ticker) {
 
   const buckets = {};
   const factorSamples = {}; // factorKey -> { label, values: [pct histórico], returns: [retorno fwd real] }
+  const alertBuckets = {}; // "type:confidence" -> { h -> [retorno fwd real] }
   let sampleCount = 0;
   for (let i = BACKTEST_WARMUP; i <= n - maxHorizon - 1; i += BACKTEST_STEP) {
     const slice = {
@@ -1222,6 +1259,20 @@ async function runBacktest(ticker) {
         factorSamples[sb.key].returns.push(ret20);
       }
     }
+    // Misma lógica de detectPriceAlert que usa el usuario en vivo (con las
+    // mismas ~3 velas previas para el filtro anti-whipsaw), para medir qué
+    // tan bien predijo cada combinación (tipo, confianza) el retorno real
+    // que vino después — la "confianza" que calcula el motor, puesta a prueba.
+    const priceAlert = detectPriceAlert(priceNow, technical, { recentCloses: slice.c.slice(-3) });
+    if (priceAlert && !priceAlert.pending) {
+      const key = `${priceAlert.type}:${priceAlert.confidence}`;
+      if (!alertBuckets[key]) alertBuckets[key] = {};
+      for (const h of BACKTEST_HORIZONS) {
+        const fwd = candles.c[i + h];
+        if (fwd == null) continue;
+        (alertBuckets[key][h] ??= []).push((fwd - priceNow) / priceNow);
+      }
+    }
     sampleCount++;
   }
 
@@ -1242,9 +1293,26 @@ async function runBacktest(ticker) {
     return { label, horizons, occurrences: horizons.reduce((max, x) => Math.max(max, x.n), 0) };
   });
 
+  const alertRows = Object.keys(alertBuckets).map(key => {
+    const [type, confidence] = key.split(':');
+    const byH = alertBuckets[key];
+    const horizons = BACKTEST_HORIZONS.map(h => {
+      const arr = byH[h] || [];
+      if (!arr.length) return { h, n: 0, avgPct: null, winRate: null };
+      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+      const wins = arr.filter(r => alertBacktestWin(type, r)).length;
+      return { h, n: arr.length, avgPct: avg * 100, winRate: Math.round((wins / arr.length) * 100) };
+    });
+    return {
+      type, confidence, label: `${ALERT_BT_TYPE_LABEL[type] ?? type} · confianza ${confidence}`,
+      horizons, occurrences: horizons.reduce((max, x) => Math.max(max, x.n), 0),
+    };
+  }).sort((a, b) => a.type.localeCompare(b.type) || (ALERT_BT_CONFIDENCE_ORDER[a.confidence] ?? 9) - (ALERT_BT_CONFIDENCE_ORDER[b.confidence] ?? 9));
+
   return {
     ticker, isReal: candles.isReal, insufficientData: false, candleCount: n, sampleCount,
     from: candles.t[BACKTEST_WARMUP], to: candles.t[n - 1], rows, factorCorrelations, factorHorizon: FACTOR_HORIZON,
+    alertRows,
   };
 }
 
@@ -1352,6 +1420,11 @@ function renderReportImpl() {
   const freshNews = freshnessFor(ts.news, news?.isReal, { staleAfterMs: 30 * 60 * 1000 });
   const freshPlan = freshTechnical;
   const planOpacity = (!quote.isReal && !r.candles.isReal) ? 0.55 : 1;
+  // Acá sí se pasa confluence semanal (a diferencia de computeLightSignal y
+  // el cron de Telegram): es un solo ticker, no hay riesgo de multiplicar
+  // pedidos por decenas de activos a la vez.
+  const priceAlert = detectPriceAlert(quote.usd, t, { confluence, recentCloses: r.candles.c.slice(-3) });
+  const priceAlertMeta = priceAlert ? ALERT_META[priceAlert.type] : null;
 
   const { risks, catalysts } = risksAndCatalysts(r);
   const w52 = fiftyTwoWeekRange(r.candles);
@@ -1595,7 +1668,10 @@ function renderReportImpl() {
 
     <div class="panel-header">
       ${sectionTitleHTML('Plan Operativo', 'target', 'margin-bottom:0;')}
-      <div class="freshness" style="color:${freshPlan.color};"><span class="dot" style="background:${freshPlan.color};"></span>${esc(freshPlan.text)}</div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        ${priceAlertMeta ? `<div class="watch-alert plan-alert-badge" style="color:${priceAlertMeta.color};"${alertTitleAttr(priceAlert)}>⚡ ${esc(priceAlertMeta.label)}${alertConfidenceSuffix(priceAlert)}</div>` : ''}
+        <div class="freshness" style="color:${freshPlan.color};"><span class="dot" style="background:${freshPlan.color};"></span>${esc(freshPlan.text)}</div>
+      </div>
     </div>
     <div class="card plan-card" style="opacity:${planOpacity};">
       <div class="plan-grid">
@@ -2004,7 +2080,7 @@ function dashCardHTML(ticker, d) {
   const up = d.changePct >= 0;
   const sig = scoreLabelColor(d.scoreLabel);
   const am = d.alert ? ALERT_META[d.alert.type] : null;
-  return `<div class="watch-card ${am ? 'has-alert' : ''}" data-dash-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
+  return `<div class="watch-card ${am ? 'has-alert' : ''} ${d.alert?.pending ? 'is-pending' : ''}" data-dash-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
     <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
     <div class="watch-name">${esc(d.name ?? '')}</div>
     <div class="watch-price">${fmtUsd(d.price)}</div>
@@ -2012,7 +2088,7 @@ function dashCardHTML(ticker, d) {
     ${sparklineSVG(d.sparkline, up)}
     <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
     ${d.highlight ? `<div class="watch-highlight">${esc(d.highlight)}</div>` : ''}
-    ${am ? `<div class="watch-alert" style="color:${am.color};">⚡ ${esc(am.label)}</div>` : ''}
+    ${am ? `<div class="watch-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
   </div>`;
 }
 
@@ -3454,14 +3530,14 @@ function watchCardHTML(ticker) {
   const up = d.changePct >= 0;
   const sig = scoreLabelColor(d.scoreLabel);
   const am = d.alert ? ALERT_META[d.alert.type] : null;
-  return `<div class="watch-card ${am ? 'has-alert' : ''}" data-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
+  return `<div class="watch-card ${am ? 'has-alert' : ''} ${d.alert?.pending ? 'is-pending' : ''}" data-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
     <button class="watch-remove" data-remove="${esc(ticker)}" title="Quitar" aria-label="Quitar ${esc(ticker)} de la watchlist">×</button>
     <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
     <div class="watch-name">${esc(d.name ?? '')}</div>
     <div class="watch-price">${fmtUsd(d.price)}</div>
     <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
     <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
-    ${am ? `<div class="watch-alert" style="color:${am.color};">⚡ ${esc(am.label)}</div>` : ''}
+    ${am ? `<div class="watch-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
   </div>`;
 }
 
@@ -3665,10 +3741,11 @@ function alertHistoryCardHTML() {
     <div class="card alert-history-card">
       ${history.map(h => {
         const meta = ALERT_META[h.type];
-        return `<div class="alert-history-row">
+        const confLabel = h.confidence && h.type !== 'stop' ? ` <span class="alert-confidence ${esc(h.confidence)}">${esc(ALERT_CONFIDENCE_LABEL[h.confidence] ?? h.confidence)}</span>` : '';
+        return `<div class="alert-history-row"${h.confirmations?.length ? ` title="${esc(h.confirmations.join(' · '))}"` : ''}>
           <span class="alert-history-dot" style="background:${meta?.color ?? 'var(--text-faint)'};"></span>
           <span class="alert-history-ticker">${esc(h.ticker)}</span>
-          <span class="alert-history-label">${esc(meta?.label ?? h.type)}</span>
+          <span class="alert-history-label">${esc(meta?.label ?? h.type)}${confLabel}</span>
           <span class="alert-history-time">${esc(relativeTime(h.ts))}</span>
         </div>`;
       }).join('')}
@@ -3749,8 +3826,44 @@ function backtestPageHTML() {
         </div>
       </div>
       <div class="bt-disclaimer">Resultado histórico calculado sobre datos reales, sin look-ahead (cada corte solo usa velas hasta ese día — nunca información futura). No es garantía de resultados futuros: las condiciones de mercado cambian y el tamaño de muestra puede ser chico en señales poco frecuentes (columna "Ocurrencias").</div>
+      ${alertBacktestCardHTML(r)}
       ${factorValidationCardHTML(r)}
     `}`;
+}
+
+/** Precisión histórica de las alertas de precio (zona de compra/venta/stop,
+ *  ver detectPriceAlert en scoring.js): mismo motor que ve el usuario hoy en
+ *  Watchlist/ficha, corrido sobre los mismos cortes del backtest de arriba,
+ *  agrupado por (tipo, confianza) — para responder "cuando el motor dijo
+ *  confianza alta, ¿cuántas veces acertó realmente?" con datos, no de oído. */
+function alertBacktestCardHTML(r) {
+  const rows = r.alertRows ?? [];
+  if (!rows.length) return `
+    <div class="card bt-disclaimer" style="margin-top:14px;">No hubo suficientes alertas de precio (zona de compra/venta/stop) disparadas en los cortes históricos de ${esc(r.ticker)} para medir su precisión.</div>`;
+  return `
+    <div class="card bt-table-card" style="margin-top:14px;">
+      <div class="bt-factor-title">Precisión histórica de las alertas de precio — ${esc(r.ticker)}</div>
+      <div class="bt-factor-intro">Cada vez que el motor de alertas hubiera avisado "zona de compra/venta" o "stop loss" en el pasado, con la confianza que calculó en ese momento — ¿qué retorno vino después? Compra acierta si el precio sube; venta/stop aciertan si el precio efectivamente cae.</div>
+      <div class="bt-table-wrap">
+        <table class="bt-table">
+          <thead><tr>
+            <th>Alerta</th><th>Ocurrencias</th>
+            ${BACKTEST_HORIZONS.map(h => `<th>${h}d retorno prom.</th><th>${h}d acierto</th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${rows.map(row => `
+              <tr>
+                <td class="bt-label-cell"><span class="bt-label-dot" style="background:${ALERT_META[row.type]?.color ?? 'var(--text-faint)'}"></span>${esc(row.label)}</td>
+                <td>${row.occurrences}</td>
+                ${row.horizons.map(x => x.n ? `
+                  <td class="${x.avgPct >= 0 ? 'bt-pos' : 'bt-neg'}">${x.avgPct >= 0 ? '+' : ''}${x.avgPct.toFixed(1)}%</td><td>${x.winRate}%</td>
+                ` : `<td class="bt-nd">—</td><td class="bt-nd">—</td>`).join('')}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="bt-disclaimer">La confianza "alta"/"media"/"baja" es la que calcula hoy el mismo motor de detectPriceAlert (confirmaciones de RSI, volumen y divergencia) — este cuadro mide si esa clasificación fue, en los hechos, más precisa cuanto más alta la confianza. Muestra chica en señales poco frecuentes: mirar la columna "Ocurrencias" antes de sacar conclusiones.</div>
+    </div>`;
 }
 
 /** Validación empírica de factores: en vez de pesos fijos elegidos a mano,
@@ -4002,7 +4115,7 @@ async function computeLightSignal(ticker, macro) {
     macro: { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null },
     newsSentiment: null, candles,
   });
-  const priceAlert = detectPriceAlert(quote.usd, technical);
+  const priceAlert = detectPriceAlert(quote.usd, technical, { recentCloses: candles.c.slice(-3) });
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
     price: quote.usd, changePct: quote.changePct,
@@ -4010,6 +4123,7 @@ async function computeLightSignal(ticker, macro) {
     cedearSource: quote.cedearSource ?? null, // 'live' (precio real BYMA) | 'estimated' (vía CCL) | null
     score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
     alert: priceAlert,
+    structure: technical.structure, // BOS/CHoCH — ya calculado acá, sin pedidos extra
     rsi: isNaN(technical.rsi) ? null : technical.rsi, // ya calculado acá — sin pedidos extra, para el Screener
     sparkline: candles.c.slice(-30), // últimos cierres reales, ya obtenidos acá — sin pedidos extra
     closes: candles.c, // serie completa (~220 ruedas) — reusada para volatilidad/drawdown de la cartera, sin pedidos extra
@@ -4051,6 +4165,7 @@ async function loadWatchlistData() {
     try {
       const signal = await computeLightSignal(ticker, macro);
       notifyIfNewAlert(ticker, signal.alert);
+      notifyStructureChange(ticker, signal.structure);
       watchState.data[ticker] = signal;
     } catch (e) {
       console.warn('[watchlist] no se pudo cargar', ticker, e.message);

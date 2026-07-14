@@ -221,6 +221,39 @@ Segunda tanda de mejoras, mismo criterio (datos reales, nunca inventados):
   chicos en cards, stat-cards y metric-rows para que entre más contenido
   sin scroll, sin romper el layout mobile.
 
+## Precisión de las alertas de precio (confirmación multi-señal)
+
+`detectPriceAlert` (scoring.js) dejó de disparar solo por nivel de precio —
+ahora exige al menos una confirmación técnica y expone qué tan confiable fue
+la lectura:
+
+- **Confirmación multi-señal**: al entrar en zona de compra/venta, se chequea
+  RSI (no sobrecomprado/sobrevendido), OBV (el volumen no contradice el
+  movimiento), ausencia de divergencia opuesta activa y, cuando ya está
+  calculada (ficha del activo), el sesgo semanal. Si ninguna confirma, no hay
+  alerta — antes bastaba con tocar el nivel de precio.
+- **Confianza (alta/media/baja)**: proporción de confirmaciones obtenidas
+  sobre las aplicables en ese momento. El stop loss sigue siendo incondicional
+  (gestión de riesgo no se filtra ni se retrasa).
+- **Anti-whipsaw**: si el cierre anterior no estaba también en la zona, la
+  alerta se marca "tentativa" (tocó la zona recién ahora) en vez de confirmada
+  — reduce falsas alertas por una mecha de una sola vela.
+- **Notificaciones (navegador y Telegram) solo para confianza alta/media** y
+  no tentativas — el resto queda visible en la tarjeta pero no interrumpe.
+  El Historial de Alertas y el Plan Operativo de la ficha muestran la
+  confianza y qué confirmó cada alerta (tooltip con el detalle).
+- **Alertas de ruptura de estructura (BOS/CHoCH)**: `structureChanged` en
+  indicators.js detecta cuando la estructura de mercado (máximos/mínimos
+  crecientes o decrecientes, ver `marketStructure`) cambia respecto a la
+  última lectura, y dispara una notificación/entrada de historial aparte —
+  una señal de giro de tendencia independiente de las zonas de precio. Por
+  ahora es **solo navegador**, no está conectada al cron de Telegram.
+- **Precisión histórica en Backtesting**: nueva tabla "Precisión histórica de
+  las alertas de precio" corre el mismo `detectPriceAlert` sobre los cortes
+  históricos del backtest y agrupa el retorno real hacia adelante por
+  (tipo, confianza) — para verificar con datos si "confianza alta" fue, en
+  los hechos, más precisa que "confianza baja".
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

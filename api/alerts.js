@@ -121,7 +121,9 @@ async function checkTicker(baseUrl, ticker) {
   ]);
   if (quote?.error || candles?.error || !candles?.c?.length) return null;
   const technical = computeTechnical(candles);
-  return detectPriceAlert(quote.usd, technical);
+  // Sin confluence semanal acá: exigiría otro fetch por ticker en cada corrida
+  // del cron, multiplicando requests. Igual que computeLightSignal en app.js.
+  return detectPriceAlert(quote.usd, technical, { recentCloses: candles.c.slice(-3) });
 }
 
 async function handleCheck(req, res) {
@@ -138,15 +140,23 @@ async function handleCheck(req, res) {
       try {
         const priceAlert = await checkTicker(baseUrl, ticker);
         const curr = priceAlert?.type ?? '';
+        // Solo se avisa por Telegram (y se actualiza el estado rastreado) para
+        // alertas confirmadas con confianza alta/media — igual que en el
+        // navegador (notifyIfNewAlert). Las "tentativa"/"baja" no molestan
+        // por chat, y tampoco pisan el último estado notificado.
+        const isStrong = Boolean(curr) && !priceAlert.pending && (priceAlert.confidence === 'alta' || priceAlert.confidence === 'media');
         const chatIds = await kvSmembers(`tg:subscribers:${ticker}`);
         for (const chatId of chatIds) {
           const prev = (await kvGet(`tg:last:${chatId}:${ticker}`)) || '';
+          if (!isStrong) {
+            if (!curr && prev) await kvSet(`tg:last:${chatId}:${ticker}`, '');
+            continue;
+          }
           if (curr === prev) continue;
           await kvSet(`tg:last:${chatId}:${ticker}`, curr);
-          if (curr) {
-            await sendTelegramMessage(chatId, ALERT_TEXT[curr].replace('{ticker}', ticker));
-            alertsSent++;
-          }
+          const confirmText = priceAlert.confirmations?.length ? `\n<i>Confirmaciones: ${priceAlert.confirmations.join(', ')}</i>` : '';
+          await sendTelegramMessage(chatId, ALERT_TEXT[curr].replace('{ticker}', ticker) + confirmText);
+          alertsSent++;
         }
       } catch (e) {
         errors.push(`${ticker}: ${e.message}`);
