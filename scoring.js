@@ -281,12 +281,66 @@ export function computePlan(technical, score) {
  *  plan operativo: ese se recalcula siempre relativo al precio del momento
  *  para que el plan mostrado tenga sentido, lo que lo vuelve inútil como
  *  referencia fija de un refresco al siguiente). Soporte/resistencia salen
- *  de swings históricos reales, así que sí sirven como nivel a "cruzar". */
-export function detectPriceAlert(price, technical) {
-  const { support, resistance, atr } = technical;
+ *  de swings históricos reales, así que sí sirven como nivel a "cruzar".
+ *
+ * A diferencia de la versión anterior (que disparaba "zona de compra/venta"
+ * solo con que el precio tocara el nivel), esta pide CONFIRMACIÓN de otras
+ * señales ya calculadas antes de avisar — un solo toque de precio es la
+ * causa más común de falsas alarmas (rebota al toque y no pasa nada). El
+ * stop loss es la excepción: se dispara siempre, sin pedir confirmación,
+ * porque en gestión de riesgo es peor tardar en avisar que avisar de más.
+ *
+ * opts.confluence (opcional): si se pasa, la confluencia semanal cuenta
+ * como una confirmación más — se omite en llamadas masivas (Dashboard/
+ * Watchlist, cron de Telegram) para no multiplicar pedidos de velas
+ * semanales por docenas de tickers a la vez.
+ * opts.recentCloses (opcional, ≥2 cierres): si se pasa, exige que el
+ * cierre ANTERIOR también haya estado en la zona antes de confirmar —
+ * anti-whipsaw simple, sin necesitar estado entre corridas. Si el toque es
+ * de una sola vela, la alerta vuelve marcada `pending: true` ("tentativa")
+ * en vez de confirmada. */
+export function detectPriceAlert(price, technical, opts = {}) {
+  const { confluence = null, recentCloses = null } = opts;
+  const { support, resistance, atr, rsi, obvConfirms, divergence } = technical;
   const safeAtr = atr && atr > 0 && !isNaN(atr) ? atr : price * 0.02;
-  if (price <= support - safeAtr) return { type: 'stop', label: 'Rompió el soporte' };
-  if (price <= support + 0.6 * safeAtr) return { type: 'buy', label: 'En zona de compra' };
-  if (price >= resistance - 0.6 * safeAtr) return { type: 'sell', label: 'En zona de venta' };
-  return null;
+
+  if (price <= support - safeAtr) {
+    return { type: 'stop', label: 'Rompió el soporte', confidence: 'alta', confirmations: [], pending: false };
+  }
+
+  const inBuyZone = price <= support + 0.6 * safeAtr;
+  const inSellZone = !inBuyZone && price >= resistance - 0.6 * safeAtr;
+  if (!inBuyZone && !inSellZone) return null;
+  const direction = inBuyZone ? 'buy' : 'sell';
+
+  // Anti-whipsaw: un solo cierre tocando la zona no confirma nada — se
+  // exige que el cierre previo también haya estado ahí.
+  let pending = false;
+  if (recentCloses && recentCloses.length >= 2) {
+    const prevClose = recentCloses[recentCloses.length - 2];
+    const prevInZone = direction === 'buy' ? prevClose <= support + 0.6 * safeAtr : prevClose >= resistance - 0.6 * safeAtr;
+    pending = !prevInZone;
+  }
+
+  // Confirmaciones: cada una es una señal YA calculada, independiente del
+  // precio tocando el nivel — cuantas más coincidan, más confiable la señal.
+  const checks = direction === 'buy' ? [
+    ['RSI no sobrecomprado', isNaN(rsi) ? null : rsi < 65],
+    ['Volumen no contradice', obvConfirms === false ? false : (obvConfirms === true ? true : null)],
+    ['Sin divergencia bajista activa', divergence?.type === 'bearish' ? false : true],
+    confluence ? ['Semanal alcista', confluence.weeklyBias === 'up'] : null,
+  ] : [
+    ['RSI no sobrevendido', isNaN(rsi) ? null : rsi > 35],
+    ['Volumen no sigue empujando al alza', obvConfirms === true ? false : (obvConfirms === false ? true : null)],
+    ['Sin divergencia alcista activa', divergence?.type === 'bullish' ? false : true],
+    confluence ? ['Semanal no fuerte alcista', confluence.weeklyBias !== 'up'] : null,
+  ];
+  const applicable = checks.filter(c => c && c[1] != null);
+  const confirmations = applicable.filter(c => c[1] === true).map(c => c[0]);
+  if (confirmations.length === 0) return null; // ni una sola confirmación real: se descarta, es ruido de precio puro
+
+  const ratio = confirmations.length / applicable.length;
+  const confidence = pending ? 'tentativa' : ratio >= 0.75 ? 'alta' : ratio >= 0.5 ? 'media' : 'baja';
+  const label = direction === 'buy' ? 'En zona de compra' : 'En zona de venta';
+  return { type: direction, label, confidence, confirmations, confirmationsAvailable: applicable.length, pending };
 }

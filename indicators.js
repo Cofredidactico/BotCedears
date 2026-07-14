@@ -404,6 +404,16 @@ const PRICE_ACTION = {
   flat: { short: 'Consolidación lateral', full: 'Consolidación lateral, sin dirección clara en las últimas sesiones.' },
 };
 
+/** Detecta si la estructura de mercado (BOS/CHoCH/Rango, ver marketStructure)
+ *  cambió respecto a la última lectura conocida. Una primera lectura (sin
+ *  estado previo) o un estado "Estructura indefinida" (historial insuficiente)
+ *  nunca cuentan como cambio — evita notificar ruido en la primera carga. */
+export function structureChanged(prevShort, currentStructure) {
+  if (!currentStructure || currentStructure.short === 'Estructura indefinida') return false;
+  if (!prevShort || prevShort === 'Estructura indefinida') return false;
+  return currentStructure.short !== prevShort;
+}
+
 export function priceActionLabel(closes, atrSeries) {
   const n = closes.length;
   const recentAtr = atrSeries.slice(-20).filter(v => !isNaN(v));
