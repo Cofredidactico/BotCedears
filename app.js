@@ -2819,9 +2819,15 @@ function computePortfolioStats(holdings) {
     const d = portState.data[h.ticker];
     const price = d?.price ?? null;
     const value = price != null ? price * h.shares : null;
-    return { ...h, d, value };
+    // Valor de la posición en pesos, a la última cotización real del CEDEAR
+    // (no una conversión vía CCL del precio en USD) — null para activos sin
+    // CEDEAR (cripto), no se estima con un tipo de cambio.
+    const valueArs = d?.cedearArs != null ? d.cedearArs * h.shares : null;
+    return { ...h, d, value, valueArs };
   });
   const totalValue = rows.reduce((s, r) => s + (r.value ?? 0), 0);
+  const arsEligibleRows = rows.filter(r => r.valueArs != null);
+  const totalValueArs = arsEligibleRows.length ? arsEligibleRows.reduce((s, r) => s + r.valueArs, 0) : null;
   for (const r of rows) {
     r.weight = (r.value != null && totalValue > 0) ? r.value / totalValue : null;
     // El valor de mercado (arriba) siempre es en USD — es el precio real del
@@ -2888,7 +2894,11 @@ function computePortfolioStats(holdings) {
   const totalRealGainArs = arsRowsWithReal.length ? arsRowsWithReal.reduce((s, r) => s + r.avgCost * r.shares * r.realGainPct, 0) : null;
   const totalRealCostArs = arsRowsWithReal.length ? sumCost(arsRowsWithReal) : null;
 
-  return { rows, totalValue, weightedScore, sectorRows, topHolding, concentrationRisk, sectorRisk, sellSignals, totalGainUsd, totalCostUsd, totalGainArs, totalCostArs, totalRealGainArs, totalRealCostArs };
+  return {
+    rows, totalValue, totalValueArs, arsEligibleCount: arsEligibleRows.length,
+    weightedScore, sectorRows, topHolding, concentrationRisk, sectorRisk, sellSignals,
+    totalGainUsd, totalCostUsd, totalGainArs, totalCostArs, totalRealGainArs, totalRealCostArs,
+  };
 }
 
 function portfolioRiskNotes(stats) {
@@ -3034,6 +3044,7 @@ function portfolioHTML() {
       <div class="card port-summary-card">
         <div class="dash-radar-title">Valor total</div>
         <div class="port-summary-value">${fmtUsd(stats.totalValue)}</div>
+        ${stats.totalValueArs != null ? `<div class="port-summary-sub" title="${stats.arsEligibleCount === stats.rows.length ? 'Suma de todas las posiciones, a la última cotización real del CEDEAR' : `Solo ${stats.arsEligibleCount} de ${stats.rows.length} posiciones tienen CEDEAR — no incluye cripto ni activos sin ratio ARS`}">${fmtArs(stats.totalValueArs)}${stats.arsEligibleCount < stats.rows.length ? ' (posiciones con CEDEAR)' : ''}</div>` : ''}
         ${stats.totalGainUsd != null ? `<div class="port-summary-sub ${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${fmtUsd(stats.totalGainUsd)} (${fmtPct(stats.totalCostUsd > 0 ? (stats.totalGainUsd / stats.totalCostUsd) * 100 : 0)}) en posiciones con costo en USD</div>` : ''}
         ${stats.totalGainArs != null ? `<div class="port-summary-sub ${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${fmtArs(stats.totalGainArs)} (${fmtPct(stats.totalCostArs > 0 ? (stats.totalGainArs / stats.totalCostArs) * 100 : 0)}) en posiciones con costo en ARS</div>` : ''}
         ${stats.totalRealGainArs != null ? `<div class="port-summary-sub port-real-sub ${stats.totalRealGainArs >= 0 ? 'up' : 'down'}">retorno real: ${fmtPct(stats.totalRealCostArs > 0 ? (stats.totalRealGainArs / stats.totalRealCostArs) * 100 : 0)} ajustado por inflación (IPC)</div>` : ''}
@@ -3121,8 +3132,12 @@ function portfolioRowHTML(r) {
   return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">
     <td class="port-ticker-cell">${esc(r.ticker)}${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}${r.costCurrency === 'ARS' ? ' <span class="watch-stale">ARS</span>' : ''}</td>
     <td>${r.shares}</td>
-    <td>${fmtUsd(r.d.price)}${r.costCurrency === 'ARS' && r.d.cedearArs != null ? `<br><span class="port-pnl-abs" title="${r.d.cedearSource === 'live' ? 'Precio real operado hoy en BYMA' : 'Estimado vía CCL — sin cotización real disponible para este símbolo'}">CEDEAR ${fmtArs(r.d.cedearArs)} ${r.d.cedearSource === 'live' ? '●' : '≈'}</span>` : ''}</td>
-    <td>${r.value != null ? fmtUsd(r.value) : 'N/D'}</td>
+    <td>${r.d.cedearArs != null
+      ? `${fmtArs(r.d.cedearArs)} <span title="${r.d.cedearSource === 'live' ? 'Precio real operado hoy en BYMA' : 'Estimado vía CCL — sin cotización real disponible para este símbolo'}">${r.d.cedearSource === 'live' ? '●' : '≈'}</span><br><span class="port-pnl-abs">subyacente ${fmtUsd(r.d.price)}</span>`
+      : fmtUsd(r.d.price)}</td>
+    <td>${r.valueArs != null
+      ? `${fmtArs(r.valueArs)}<br><span class="port-pnl-abs">${fmtUsd(r.value)}</span>`
+      : (r.value != null ? fmtUsd(r.value) : 'N/D')}</td>
     <td>${r.weight != null ? `${Math.round(r.weight * 100)}%` : 'N/D'}</td>
     <td class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${pnlCell}</td>
     <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>
