@@ -202,6 +202,25 @@ Segunda tanda de mejoras, mismo criterio (datos reales, nunca inventados):
 - **Historial de Alertas** (página Alertas) — log local (localStorage) de
   las últimas 50 alertas de navegador disparadas con la pestaña abierta.
 
+## Mejoras visuales (densidad y layout tipo terminal profesional)
+
+- **Sub-scores integrados en la card del gauge**: los 5 factores clave
+  (Fundamental/Técnico/Momentum/Valoración/Riesgo) se movieron de una lista
+  vertical en la card ejecutiva a una fila horizontal compacta debajo del
+  gauge — la card "Composición del Score" más abajo se mantiene igual,
+  porque tiene más detalle (los 9 factores completos, incluye Noticias/
+  Macro/Sentimiento/Liquidez).
+- **Más timeframes en el gráfico**: se agregaron 1M (velas mensuales), 1A y
+  5A (presets de zoom sobre velas semanales/mensuales respectivamente —
+  no existe una "vela de un año", así que son ventanas de tiempo, no
+  intervalos nuevos).
+- **EMA 200 en el gráfico principal** (ya se calculaba, no se dibujaba).
+- **Riesgos y Catalizadores unificados** en una sola card de dos columnas,
+  en vez de dos cards separadas lado a lado.
+- **Densidad general reducida**: paddings, gaps y tamaños de fuente más
+  chicos en cards, stat-cards y metric-rows para que entre más contenido
+  sin scroll, sin romper el layout mobile.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente
