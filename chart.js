@@ -23,6 +23,7 @@ const H = RSI_BOTTOM + DATE_H;
 const GREEN = 'oklch(0.72 0.17 152)', RED = 'oklch(0.68 0.19 23)';
 const GOLD = 'oklch(0.80 0.15 85)', WHITE = 'oklch(0.90 0.012 260)';
 const BLUE = 'oklch(0.78 0.13 199)';
+const PURPLE = 'oklch(0.74 0.15 291)';
 const GRID = 'oklch(0.32 0.03 262)', AXIS_TEXT = 'oklch(0.58 0.018 260)', PANEL_LABEL = 'oklch(0.62 0.018 260)';
 const BUY_ZONE_FILL = 'oklch(0.72 0.17 152 / 0.16)', BUY_ZONE_LINE = 'oklch(0.76 0.18 152 / 0.55)';
 const SELL_ZONE_FILL = 'oklch(0.75 0.15 70 / 0.16)', SELL_ZONE_LINE = 'oklch(0.75 0.15 70 / 0.55)';
@@ -61,6 +62,7 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
 
   const ema20 = ema(candles.c, 20).slice(start);
   const ema50 = ema(candles.c, 50).slice(start);
+  const ema200 = ema(candles.c, 200).slice(start);
   const bb = bollinger(candles.c, 20, 2);
   const bbUpper = bb.upper.slice(start), bbLower = bb.lower.slice(start);
   const rsiFull = rsi(candles.c, 14).slice(start);
@@ -142,7 +144,7 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
   }
 
   const bbSvg = polyline(bbUpper, x, yPrice, BLUE, 0.55) + polyline(bbLower, x, yPrice, BLUE, 0.55);
-  const emaSvg = polyline(ema20, x, yPrice, GOLD) + polyline(ema50, x, yPrice, WHITE);
+  const emaSvg = polyline(ema20, x, yPrice, GOLD) + polyline(ema50, x, yPrice, WHITE) + polyline(ema200, x, yPrice, PURPLE, 0.85);
 
   /* ── línea de último precio (referencia rápida de dónde está parado hoy) ── */
   const lastPrice = c[count - 1];
@@ -228,6 +230,7 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
       <span><i style="background:${RED};"></i>Bajista</span>
       <span><i style="background:${GOLD};"></i>EMA 20 / RSI</span>
       <span><i style="background:${WHITE};"></i>EMA 50</span>
+      <span><i style="background:${PURPLE};"></i>EMA 200</span>
       <span><i style="background:${BLUE};"></i>Bollinger</span>
       ${plan ? `
       <span><i style="background:${GREEN}; opacity:0.35;"></i>Zona de compra</span>

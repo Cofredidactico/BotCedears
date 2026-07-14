@@ -398,7 +398,19 @@ const CHART_TABS = [
   { key: '4h', label: '4H' },
   { key: '1day', label: '1D' },
   { key: '1week', label: '1S' },
+  { key: '1month', label: '1M' },
+  { key: '1year', label: '1A' },
+  { key: '5year', label: '5A' },
 ];
+// '1year'/'5year' no son intervalos de vela reales (no existe una "vela de
+// un año") — son presets de zoom que piden velas más gruesas (semanales/
+// mensuales) con más historial, mismo patrón que usan las plataformas de
+// referencia para las pestañas de rango largo.
+const CHART_TAB_API = {
+  '1month': { interval: '1month', n: 36 },  // ~3 años de velas mensuales
+  '1year': { interval: '1week', n: 56 },    // ~1 año+ de velas semanales
+  '5year': { interval: '1month', n: 62 },   // ~5 años de velas mensuales
+};
 const chartState = { tf: '1day', cache: {}, loading: new Set(), mode: 'institucional' }; // mode: 'institucional' | 'libre'
 function chartTabsForAsset(asset) {
   return asset?.category === 'Cripto' ? CHART_TABS.filter(t => t.key === '1day' || t.key === '1week') : CHART_TABS;
@@ -541,8 +553,10 @@ async function loadChartTf(tf) {
       candles = tf === '1week' ? resampleWeekly(base) : base;
       isReal = chartState.cache['1day']?.isReal ?? false;
     } else {
-      const n = tf === '1week' ? 130 : tf === '4h' ? 240 : tf === '45min' ? 220 : 220;
-      const res = await getCandles(ticker, tf, n);
+      const mapped = CHART_TAB_API[tf];
+      const apiInterval = mapped?.interval ?? tf;
+      const n = mapped?.n ?? (tf === '1week' ? 130 : tf === '4h' ? 240 : tf === '45min' ? 220 : 220);
+      const res = await getCandles(ticker, apiInterval, n);
       candles = res; isReal = res.isReal;
     }
     chartState.cache[tf] = { candles, isReal };
@@ -1401,15 +1415,6 @@ function renderReportImpl() {
           <div><div class="exec-stat-label">Horizonte</div><div class="exec-stat-value">${horizonFor(t)}</div></div>
           <div><div class="exec-stat-label">Tendencia primaria</div><div class="exec-stat-value">${esc(t.primaryTrend)}</div></div>
         </div>
-        ${subScores.length ? `
-        <div class="exec-subscores">
-          ${subScores.map(sb => `
-            <div class="exec-subscore-row">
-              <span class="exec-subscore-label">${esc(subScoreLabels[sb.key])}</span>
-              <div class="score-bar-bg"><div class="score-bar-fill" style="width:${sb.pct}%; opacity:${sb.available ? 1 : 0.25};"></div></div>
-              <span class="exec-subscore-value">${sb.available ? Math.round(sb.pct) : 'N/D'}</span>
-            </div>`).join('')}
-        </div>` : ''}
       </div>
       <div class="card gauge-card">
         <div class="gauge-ring" style="background:${gaugeGradient}; filter: drop-shadow(0 0 22px ${gaugeGlow});">
@@ -1420,6 +1425,15 @@ function renderReportImpl() {
         </div>
         <div class="gauge-label">${esc(scoreLabel)}</div>
         <div class="gauge-conviction" title="Convicción: ${esc(confidence)}">${convictionDotsHTML(confidence)}<span>Convicción: ${esc(confidence)}</span></div>
+        ${subScores.length ? `
+        <div class="gauge-subscores">
+          ${subScores.map(sb => `
+            <div class="gauge-subscore-col" title="${esc(subScoreLabels[sb.key])}: ${sb.available ? Math.round(sb.pct) : 'sin datos'}">
+              <span class="gauge-subscore-label">${esc(subScoreLabels[sb.key])}</span>
+              <div class="score-bar-bg"><div class="score-bar-fill" style="width:${sb.pct}%; opacity:${sb.available ? 1 : 0.25};"></div></div>
+              <span class="gauge-subscore-value">${sb.available ? Math.round(sb.pct) : 'N/D'}</span>
+            </div>`).join('')}
+        </div>` : ''}
       </div>
     </div>
 
@@ -1561,14 +1575,17 @@ function renderReportImpl() {
       </div>
     </div>
 
-    <div class="grid2">
-      <div>
-        ${sectionTitleHTML('Riesgos', 'warning')}
-        <div class="card rc-card"><ul class="rc-list">${risks.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
-      </div>
-      <div>
-        ${sectionTitleHTML('Catalizadores', 'bulb')}
-        <div class="card rc-card"><ul class="rc-list">${catalysts.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
+    ${sectionTitleHTML('Riesgos & Catalizadores', 'warning')}
+    <div class="card rc-combined-card">
+      <div class="rc-combined-grid">
+        <div class="rc-combined-col rc-combined-risks">
+          <div class="rc-combined-title">${ICONS.warning}<span>Riesgos</span></div>
+          <ul class="rc-list">${risks.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+        </div>
+        <div class="rc-combined-col rc-combined-catalysts">
+          <div class="rc-combined-title">${ICONS.bulb}<span>Catalizadores</span></div>
+          <ul class="rc-list">${catalysts.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+        </div>
       </div>
     </div>
 
