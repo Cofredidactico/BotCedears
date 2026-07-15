@@ -787,6 +787,14 @@ select.port-input { cursor: pointer; }
 /* ---------- Screener ---------- */
 .screener-filters-card { padding: 18px 20px; margin-bottom: 20px; }
 .screener-filters { display: flex; flex-wrap: wrap; gap: 16px 22px; }
+.screener-quick-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.screener-quick-chip {
+  background: transparent; border: 1px solid var(--border); border-radius: 20px;
+  color: var(--text-mute); font-family: 'IBM Plex Sans', sans-serif; font-size: 12px;
+  padding: 6px 14px; cursor: pointer; transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.screener-quick-chip:hover { border-color: var(--border-strong); color: var(--text); }
+.screener-quick-chip.active { background: var(--gold-soft); border-color: oklch(0.80 0.15 85 / 0.5); color: var(--gold-text); }
 .screener-filter { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--text-mute); }
 .screener-row { cursor: pointer; transition: background 0.15s; }
 .screener-row:hover td { background: var(--bg-input); }

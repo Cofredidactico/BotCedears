@@ -88,11 +88,16 @@ const DASHBOARD_UNIVERSE = [
   'TSLA', 'F',
   'GOLD', 'VALE',
   'MELI', 'GGAL', 'BMA', 'YPF', 'PAM', 'CEPU', 'TGS', 'SUPV', 'IRS', 'CRESY', 'LOMA', 'EDN', 'BBAR', 'TEO', 'TS', 'CAAP', 'AGRO', 'BIOX', 'GLOB',
-  'MSTR', 'RIOT', 'HUT', 'IREN',
+  'MSTR', 'RIOT', 'HUT', 'IREN', 'IBIT', 'ETHA',
   'SPY', 'QQQ', 'GLD', 'DIA',
   'BTC', 'ETH',
 ];
-const dashState = { data: {}, loading: new Set(), started: false };
+// Paneles temáticos: ADRs argentinos (empresas argentinas con cotización real
+// en NYSE/Nasdaq) y activos relacionados con cripto (CEDEARs de empresas
+// bitcoin-céntricas + ETFs spot + exchanges/brokers con exposición directa).
+const AR_TICKERS = new Set(['GGAL', 'BMA', 'SUPV', 'BBAR', 'YPF', 'PAM', 'CEPU', 'VIST', 'EDN', 'LOMA', 'TGS', 'TEO', 'CRESY', 'IRS', 'AGRO', 'CAAP', 'DESP', 'GLOB', 'BIOX', 'MELI', 'TS', 'TX', 'ARCO', 'SATL']);
+const CRYPTO_RELATED = new Set(['BTC', 'ETH', 'MSTR', 'RIOT', 'HUT', 'IREN', 'COIN', 'IBIT', 'ETHA']);
+const dashState = { data: {}, loading: new Set(), started: false, macro: null, ccl: null };
 // Subconjunto del universo del dashboard para el widget "Mercado Hoy" del
 // sidebar — reusa dashState.data, no dispara requests propios.
 const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
@@ -101,6 +106,8 @@ const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
 const DASH_WIDGETS = [
   { key: 'opportunities', label: 'Oportunidades del Día' },
   { key: 'buyzone', label: 'En Zona de Compra Ahora' },
+  { key: 'argentina', label: 'Panel Argentina' },
+  { key: 'cripto', label: 'Termómetro Cripto' },
   { key: 'heatmap', label: 'Heatmap Sectorial' },
   { key: 'radar', label: 'Radar del Mercado' },
   { key: 'watchlist', label: 'Watchlist Rápido' },
@@ -622,6 +629,8 @@ const withAlpha = (oklchStr, alpha) => oklchStr.replace(/\)\s*$/, ` / ${alpha})`
 /* ───────────────────────── iconografía (SVG inline, sin dependencias) ───────────────────────── */
 const ICON_ATTR = 'class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
 const ICONS = {
+  flag: `<svg ${ICON_ATTR}><line x1="5" y1="3" x2="5" y2="21"/><path d="M5 4.5h13l-3 4 3 4H5"/></svg>`,
+  zap: `<svg ${ICON_ATTR}><polygon points="13,2 4,14 11,14 10,22 20,9 13,9"/></svg>`,
   chart: `<svg ${ICON_ATTR}><polyline points="3,17 9,10 13,14 21,5"/><circle cx="21" cy="5" r="1.4" fill="currentColor" stroke="none"/></svg>`,
   briefcase: `<svg ${ICON_ATTR}><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`,
   warning: `<svg ${ICON_ATTR}><path d="M12 3.5 21.5 20h-19z"/><line x1="12" y1="9.5" x2="12" y2="14"/><circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none"/></svg>`,
@@ -765,10 +774,15 @@ async function loadReport(ticker) {
 
   try {
     const isCripto = asset.category === 'Cripto';
-    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, earnings, dividends] = await Promise.all([
+    // Beta/correlación vs Bitcoin: solo para activos relacionados con cripto
+    // (CEDEARs de mineras/tenedoras y ETFs spot) — BTC se cachea 60s en
+    // dataSource, así que no multiplica requests al mirar varios seguidos.
+    const wantsBtcBeta = CRYPTO_RELATED.has(ticker) && ticker !== 'BTC';
+    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, btcCandles, earnings, dividends] = await Promise.all([
       getQuote(ticker), getCandles(ticker, '1day', 260), getFundamentals(ticker), getNews(ticker), getMacro(), getCCL(),
       isCripto ? Promise.resolve(null) : getCandles(ticker, '1week', 130),
       ticker === 'SPY' ? Promise.resolve(null) : getCandles('SPY', '1day', 220),
+      wantsBtcBeta ? getCandles('BTC', '1day', 220) : Promise.resolve(null),
       getEarnings(ticker),
       getDividends(ticker),
     ]);
@@ -795,6 +809,9 @@ async function loadReport(ticker) {
     // (computeLightSignal) para no multiplicar pedidos por decenas de
     // tickers a la vez, mismo criterio que ya se usa ahí con fundamentales.
     const relativeStrength = spyCandles ? relStrength(candles.c, spyCandles.c) : null;
+    // Sensibilidad a Bitcoin: mismo cálculo (Pearson + covarianza/varianza)
+    // que la correlación/beta vs SPY, contra los cierres de BTC.
+    const btcCorrelation = btcCandles ? correlationAndBeta(candles.c, btcCandles.c) : null;
 
     // Confirmación con el timeframe semanal: nativo (Twelve Data) para
     // acciones/CEDEARs/ETFs, resampleado de las velas diarias para cripto
@@ -817,7 +834,7 @@ async function loadReport(ticker) {
 
     state.report = {
       asset, quote, candles, fundamentals, news, macro, ccl,
-      technical, weeklyTechnical, confluence, marketCorrelation, relativeStrength, earnings, daysToEarnings, earningsSoon, dividends, ...scoreResult, plan,
+      technical, weeklyTechnical, confluence, marketCorrelation, relativeStrength, btcCorrelation, earnings, daysToEarnings, earningsSoon, dividends, ...scoreResult, plan,
       ts: { quote: now, candles: now, fundamentals: now, news: now },
     };
 
@@ -1411,7 +1428,7 @@ function renderReportImpl() {
   }
 
   const r = state.report;
-  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation, relativeStrength, earnings, daysToEarnings, earningsSoon, dividends } = r;
+  const { asset, quote, technical: t, fundamentals: f, news, macro, ccl, score, scoreLabel, confidence, scoreBreakdown, plan, ts, coverageWeight, fullWeight, confluence, marketCorrelation, relativeStrength, btcCorrelation, earnings, daysToEarnings, earningsSoon, dividends } = r;
 
   const trendUp = quote.changePct >= 0;
   const trendBg = trendUp ? 'oklch(0.30 0.09 152)' : 'oklch(0.30 0.10 23)';
@@ -1440,14 +1457,23 @@ function renderReportImpl() {
   const w52 = fiftyTwoWeekRange(r.candles);
   const volStats = volumeStats(r.candles);
 
-  const isCedear = (asset.category === 'CEDEAR' || asset.category === 'ETF') && asset.ratio;
+  const effectiveRatio = quote.ratio ?? asset.ratio;
+  const isCedear = (asset.category === 'CEDEAR' || asset.category === 'ETF') && effectiveRatio;
   const cedearPriceTxt = quote.cedearArs != null ? `AR$${Math.round(quote.cedearArs).toLocaleString('es-AR')} por CEDEAR` : 'N/D';
   const cedearSourceTxt = quote.cedearSource === 'live'
     ? 'precio real operado hoy en BYMA'
     : `estimación vía CCL${ccl?.value ? ` ≈ $${Math.round(ccl.value).toLocaleString('es-AR')}` : ''} — sin cotización real disponible para este símbolo`;
+  // Dólar implícito: solo se puede calcular con precio real de BYMA (no vale
+  // la pena con la estimación vía CCL, que ya ES el CCL por construcción).
+  const cclImpliedTxt = quote.cclImplied != null && quote.cclRef != null ? (() => {
+    const spread = (quote.cclImplied / quote.cclRef - 1) * 100;
+    const read = Math.abs(spread) < 1.5 ? 'en línea con el CCL' : spread > 0 ? 'más caro que el CCL' : 'más barato que el CCL';
+    return ` Dólar implícito en este CEDEAR: ${fmtArs(quote.cclImplied)} (CCL de referencia ${fmtArs(quote.cclRef)}, ${spread >= 0 ? '+' : ''}${spread.toFixed(1)}% — ${read}).`;
+  })() : '';
+  const ratioNote = quote.ratioSource === 'implied' ? ` (ratio actualizado automáticamente contra el precio real de BYMA — el estático del universo estaba desactualizado)` : '';
   const cedearNote = isCedear ? `
     <div class="cedear-note">
-      <strong>Referencia CEDEAR (solo informativa):</strong> el análisis completo se realizó sobre ${esc(asset.name)} (${esc(asset.ticker)}) cotizando en USD. El CEDEAR argentino replica esta acción con ratio de referencia 1:${asset.ratio}. Equivalente: ${cedearPriceTxt} (${cedearSourceTxt}). Ninguna recomendación de esta sección se basa en el precio en pesos.
+      <strong>Referencia CEDEAR (solo informativa):</strong> el análisis completo se realizó sobre ${esc(asset.name)} (${esc(asset.ticker)}) cotizando en USD. El CEDEAR argentino replica esta acción con ratio de referencia 1:${effectiveRatio}${ratioNote}. Equivalente: ${cedearPriceTxt} (${cedearSourceTxt}).${cclImpliedTxt} Ninguna recomendación de esta sección se basa en el precio en pesos.
     </div>` : '';
 
   const breadcrumbLabel = { CEDEAR: 'Acciones / CEDEARs', ETF: 'ETFs', Cripto: 'Cripto' }[asset.category] ?? asset.category;
@@ -1562,6 +1588,12 @@ function renderReportImpl() {
         <div class="stat-card-value ${relativeStrength ? (relativeStrength.trend === 'up' ? 'up' : 'down') : ''}">${relativeStrength ? (relativeStrength.trend === 'up' ? 'Liderando' : 'Rezagando') : 'N/D'}</div>
         <div class="stat-card-sub">${relativeStrength?.isNewHigh ? '★ Máximo de RS — liderazgo' : relativeStrength ? `${relativeStrength.slopePct >= 0 ? '+' : ''}${relativeStrength.slopePct.toFixed(1)}% en 20 ruedas` : ''}</div>
       </div>
+      ${CRYPTO_RELATED.has(asset.ticker) && asset.ticker !== 'BTC' ? `
+      <div class="card stat-card" title="Cuánto se movió esta acción por cada 1% de Bitcoin, sobre las últimas ~220 ruedas">
+        <div class="stat-card-label">Beta (vs BTC)</div>
+        <div class="stat-card-value">${btcCorrelation?.beta != null ? btcCorrelation.beta.toFixed(2) : 'N/D'}</div>
+        <div class="stat-card-sub">${btcCorrelation?.correlation != null ? `correlación ${btcCorrelation.correlation.toFixed(2)}` : ''}</div>
+      </div>` : ''}
       <div class="card stat-card">
         <div class="stat-card-label">EMA 20</div>
         <div class="stat-card-value">${fmtNum(t.ema20)}</div>
@@ -2178,6 +2210,68 @@ function dashboardHTML() {
           <div class="dash-intro" style="margin-bottom:14px;">Activos del universo curado cuyo precio está, ahora mismo, en zona de compra o recién rompió el soporte según el análisis técnico (mismo criterio que las alertas de Seguimiento) — no es una recomendación, es dónde está el precio respecto al plan operativo de cada uno.</div>
           ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : !buyZone.length ? `<div class="card watch-empty">Ningún activo del universo curado está en zona de compra en este momento.</div>` : `<div class="watch-grid">${buyZone.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
         `,
+        argentina: (() => {
+          const arRows = loaded.filter(e => AR_TICKERS.has(e.ticker)).sort((a, b) => b.d.changePct - a.d.changePct);
+          const rp = dashState.macro?.riesgoPaisArg;
+          const cclRef = dashState.ccl?.value ?? arRows.find(e => e.d.cclRef)?.d.cclRef ?? null;
+          return `
+          ${sectionTitleHTML('Panel Argentina', 'flag')}
+          <div class="dash-intro" style="margin-bottom:14px;">Todas las empresas argentinas con cotización real en NYSE/Nasdaq (análisis sobre el ADR en USD, precio local BYMA en vivo cuando está disponible).${rp != null ? ` Riesgo país: <strong>${Math.round(rp)} pb</strong>.` : ''}${cclRef ? ` CCL de referencia: <strong>${fmtArs(cclRef)}</strong>.` : ''} El "dólar implícito" es a cuánto está comprando dólar quien paga el precio en pesos de cada papel — si está muy por encima del CCL, el papel está caro en pesos hoy.</div>
+          ${!arRows.length ? `<div class="card watch-empty">Cargando panel argentino…</div>` : `
+          <div class="card bt-table-card">
+            <div class="bt-table-wrap">
+              <table class="bt-table">
+                <thead><tr><th>Ticker</th><th>USD</th><th>% día</th><th>ARS (BYMA)</th><th>Dólar implícito</th><th>Señal</th></tr></thead>
+                <tbody>
+                  ${arRows.map(({ ticker, d }) => {
+                    const sig = scoreLabelColor(d.scoreLabel);
+                    const spread = d.cclImplied != null && cclRef ? (d.cclImplied / cclRef - 1) * 100 : null;
+                    return `<tr class="port-row" data-dash-ticker="${esc(ticker)}">
+                      <td class="bt-label-cell" style="font-weight:700;">${esc(ticker)} <span class="port-pnl-abs">${esc(d.name)}</span></td>
+                      <td>${fmtUsd(d.price)}</td>
+                      <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
+                      <td>${d.cedearArs != null ? `${fmtArs(d.cedearArs)} ${d.cedearSource === 'live' ? '●' : '≈'}` : '—'}</td>
+                      <td>${d.cclImplied != null ? `${fmtArs(d.cclImplied)}${spread != null ? ` <span class="${Math.abs(spread) < 1.5 ? 'bt-nd' : spread > 0 ? 'bt-neg' : 'bt-pos'}" title="Diferencia vs CCL de referencia — positivo: caro en pesos; negativo: barato en pesos">(${spread >= 0 ? '+' : ''}${spread.toFixed(1)}%)</span>` : ''}` : '—'}
+                      <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</span></td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>`}
+        `;
+        })(),
+        cripto: (() => {
+          const rows = loaded.filter(e => CRYPTO_RELATED.has(e.ticker));
+          const btc = dashState.data['BTC'];
+          const ordered = rows.slice().sort((a, b) => (a.ticker === 'BTC' ? -1 : b.ticker === 'BTC' ? 1 : b.d.score - a.d.score));
+          return `
+          ${sectionTitleHTML('Termómetro Cripto', 'zap')}
+          <div class="dash-intro" style="margin-bottom:14px;">Bitcoin/Ethereum, los CEDEARs de empresas cripto que operan en BYMA (MSTR, RIOT, HUT, IREN) y los ETFs spot. La correlación y el beta vs BTC (últimas ~220 ruedas) miden cuánto amplifica cada acción los movimientos de bitcoin — beta 2 significa que históricamente se movió ~2% por cada 1% de BTC.</div>
+          ${!ordered.length ? `<div class="card watch-empty">Cargando activos cripto…</div>` : `
+          <div class="card bt-table-card">
+            <div class="bt-table-wrap">
+              <table class="bt-table">
+                <thead><tr><th>Activo</th><th>Precio</th><th>% día</th><th>Correlación vs BTC</th><th>Beta vs BTC</th><th>Señal</th></tr></thead>
+                <tbody>
+                  ${ordered.map(({ ticker, d }) => {
+                    const sig = scoreLabelColor(d.scoreLabel);
+                    const cb = ticker !== 'BTC' && btc?.closes && d.closes ? correlationAndBeta(d.closes, btc.closes) : null;
+                    return `<tr class="port-row" data-dash-ticker="${esc(ticker)}">
+                      <td class="bt-label-cell" style="font-weight:700;">${esc(ticker)} <span class="port-pnl-abs">${esc(d.name)}</span></td>
+                      <td>${fmtUsd(d.price)}</td>
+                      <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
+                      <td>${ticker === 'BTC' ? '<span class="bt-nd">—</span>' : cb?.correlation != null ? cb.correlation.toFixed(2) : '<span class="bt-nd">N/D</span>'}</td>
+                      <td>${ticker === 'BTC' ? '<span class="bt-nd">—</span>' : cb?.beta != null ? `<span class="${Math.abs(cb.beta) >= 1.5 ? 'bt-neg' : ''}">${cb.beta.toFixed(2)}</span>` : '<span class="bt-nd">N/D</span>'}</td>
+                      <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</span></td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>`}
+        `;
+        })(),
         heatmap: `
           ${sectionTitleHTML('Heatmap Sectorial', 'grid')}
           <div class="dash-intro" style="margin-bottom:14px;">Performance promedio del día por sector, sobre el mismo universo curado — panorama de rotación sectorial de un vistazo (qué sectores lideran/rezagan hoy, no el score).</div>
@@ -2386,7 +2480,12 @@ const SCREENER_SORT_OPTIONS = [
   { key: 'rsi', label: 'RSI (menor a mayor)' },
   { key: 'ticker', label: 'Ticker (A-Z)' },
 ];
-const screenerState = { minScore: 0, category: 'all', sector: 'all', signal: 'all', rsiFilter: 'all', sortBy: 'score' };
+const screenerState = { minScore: 0, category: 'all', sector: 'all', signal: 'all', rsiFilter: 'all', sortBy: 'score', quick: 'all' };
+const SCREENER_QUICK_FILTERS = [
+  { key: 'all', label: 'Todo el universo' },
+  { key: 'argentina', label: '🇦🇷 Argentina' },
+  { key: 'cripto', label: '₿ Cripto' },
+];
 
 function screenerSectorOptions() {
   const set = new Set();
@@ -2399,6 +2498,8 @@ function screenerSectorOptions() {
 
 function screenerRows() {
   let rows = DASHBOARD_UNIVERSE.map(ticker => ({ ticker, d: dashState.data[ticker] })).filter(e => e.d);
+  if (screenerState.quick === 'argentina') rows = rows.filter(e => AR_TICKERS.has(e.ticker));
+  else if (screenerState.quick === 'cripto') rows = rows.filter(e => CRYPTO_RELATED.has(e.ticker));
   if (screenerState.category !== 'all') rows = rows.filter(e => e.d.category === screenerState.category);
   if (screenerState.sector !== 'all') rows = rows.filter(e => e.d.sector === screenerState.sector);
   if (screenerState.signal !== 'all') rows = rows.filter(e => e.d.scoreLabel === screenerState.signal);
@@ -2426,6 +2527,9 @@ function screenerPageHTML() {
   return `
     ${sectionTitleHTML('Screener', 'filter')}
     <div class="dash-intro">Filtrá el universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos por score, sector, categoría, señal técnica y RSI — mismo motor de análisis que el resto de la plataforma, sin pedidos extra.${totalLoaded < DASHBOARD_UNIVERSE.length ? ` Cargando datos de ${DASHBOARD_UNIVERSE.length - totalLoaded} activo(s) más…` : ''}</div>
+    <div class="screener-quick-filters">
+      ${SCREENER_QUICK_FILTERS.map(q => `<button class="screener-quick-chip ${screenerState.quick === q.key ? 'active' : ''}" data-quick="${q.key}">${esc(q.label)}</button>`).join('')}
+    </div>
     <div class="card screener-filters-card">
       <div class="screener-filters">
         ${selectField('scr-minscore', 'Score mínimo', [0, 30, 45, 65, 80].map(v => `<option value="${v}" ${screenerState.minScore === v ? 'selected' : ''}>${v === 0 ? 'Cualquiera' : `${v}+`}</option>`).join(''))}
@@ -2473,6 +2577,9 @@ function wireScreenerEvents() {
   bind('scr-category', 'category');
   bind('scr-rsi', 'rsiFilter');
   bind('scr-sort', 'sortBy');
+  els.report.querySelectorAll('.screener-quick-chip').forEach(el => {
+    el.addEventListener('click', () => { screenerState.quick = el.dataset.quick; renderReport(); });
+  });
   els.report.querySelectorAll('.screener-row').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.ticker));
   });
@@ -4828,7 +4935,12 @@ async function computeLightSignal(ticker, macro) {
     price: quote.usd, changePct: quote.changePct,
     cedearArs: quote.cedearArs ?? null, // precio del CEDEAR en pesos — null para cripto, que no tiene CEDEAR
     cedearSource: quote.cedearSource ?? null, // 'live' (precio real BYMA) | 'estimated' (vía CCL) | null
-    ratio: asset?.ratio ?? null, // CEDEARs por acción subyacente — para convertir unidades sin pasar por el CCL
+    // Ratio efectivo: el servidor lo autocorrige midiendo el ratio implícito
+    // en vivo (BYMA re-ratea papeles y el estático queda viejo); si el quote
+    // no lo trae (mock/fallback), se usa el del universo.
+    ratio: quote.ratio ?? asset?.ratio ?? null,
+    cclImplied: quote.cclImplied ?? null, // dólar implícito en este CEDEAR (solo con precio BYMA real)
+    cclRef: quote.cclRef ?? null,
     score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
     alert: priceAlert,
     structure: technical.structure, // BOS/CHoCH — ya calculado acá, sin pedidos extra
@@ -4897,6 +5009,10 @@ const DASHBOARD_BATCH_DELAY_MS = 1500;
 async function loadDashboardData() {
   dashState.started = true;
   const macro = await getMacro();
+  dashState.macro = macro; // riesgo país para el Panel Argentina
+  if (!dashState.ccl) {
+    try { dashState.ccl = await getCCL(); } catch (e) { console.warn('[dashboard] no se pudo cargar CCL', e.message); }
+  }
   const pending = DASHBOARD_UNIVERSE.filter(t => !dashState.data[t] && !dashState.loading.has(t));
   for (let i = 0; i < pending.length; i += DASHBOARD_BATCH_SIZE) {
     const batch = pending.slice(i, i + DASHBOARD_BATCH_SIZE);

@@ -328,6 +328,33 @@ unidades.
 - **Fixes**: el ticker inválido TXR pasó a TX (ADR real de Ternium) y TEO
   ahora sí toma su precio local en vivo (mapeo TEO→TECO2 en api/quote).
 
+## Panel Argentina, Termómetro Cripto y ratio autocorregido
+
+- **Panel Argentina** (widget nuevo del Dashboard): todas las empresas
+  argentinas del universo en una tabla — precio USD, % del día, CEDEAR en
+  pesos (BYMA en vivo o estimado), dólar implícito y señal. Muestra el
+  riesgo país y el CCL de referencia en la intro.
+- **Termómetro Cripto** (widget nuevo): BTC, ETH, los CEDEARs cripto (MSTR,
+  RIOT, HUT, IREN) y los ETFs spot (IBIT, ETHA), con **correlación y beta
+  contra Bitcoin** de cada acción (mismo motor que la beta vs SPY).
+- **Beta vs BTC en la ficha**: card nueva en Análisis Técnico para los
+  activos cripto-relacionados (excepto BTC), mismo cálculo de
+  `correlationAndBeta` ya usado contra SPY, sin requests extra si SPY ya se
+  pidió (BTC se cachea 60s en dataSource).
+- **Chips "Argentina" / "Cripto" en el Screener** para filtrar rápido esos
+  dos grupos sin tocar los selects de sector/categoría.
+- **Ratio de CEDEAR autocorregido en vivo**: `api/quote` mide el ratio
+  implícito (USD en vivo × CCL ÷ precio BYMA en vivo) en cada request con
+  precio real de BYMA, y lo usa en vez del estático del universo cuando
+  coincide a ≤5% con un ratio estándar — corrige solo si BYMA vuelve a
+  re-ratear un papel, sin tocar el JSON de nuevo. La ficha avisa cuando el
+  ratio mostrado viene de esta autocorrección.
+- **Dólar implícito por CEDEAR**: con precio BYMA + USD reales se calcula a
+  cuánto está comprando dólar quien paga ese precio en pesos, y se compara
+  contra el CCL de referencia — visible en el Panel Argentina y en la nota
+  CEDEAR de la ficha (solo con precio real, no con la estimación vía CCL,
+  que por construcción ya es igual al CCL).
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente
