@@ -254,6 +254,58 @@ la lectura:
   (tipo, confianza) — para verificar con datos si "confianza alta" fue, en
   los hechos, más precisa que "confianza baja".
 
+## Portfolio Advisor profesional (mega-tanda)
+
+La página de Portfolio pasó a ser una mesa de análisis de cartera completa.
+Convención de unidades: si el costo se cargó en **ARS**, la cantidad son
+**CEDEARs**; si se cargó en **USD**, son **acciones del subyacente** — el
+ratio real del CEDEAR (universe.json) convierte entre ambas sin mezclar
+unidades.
+
+**Analítica de riesgo**
+- **Aporte al riesgo por posición**: peso vs. porción de la varianza total
+  que explica cada tenencia (descomposición estándar por covarianza).
+- **Beta de la cartera vs SPY** + comparación de retorno total vs. "todo en
+  SPY" sobre la misma ventana.
+- **Estrés histórico**: peor semana (5 ruedas) y peor mes (21 ruedas) de la
+  cartera con los pesos actuales.
+- **Solapamiento**: pares de tenencias con correlación >0.8 (diversificación
+  ilusoria), sumado a la Lectura de diversificación.
+- **Salud de la cartera 0-100**: fórmula determinística y visible
+  (concentración, sector, señales de venta, volatilidad, solapamiento).
+
+**Operatoria**
+- **Stop / objetivo por fila** con distancia al stop (rojo a ≤3%).
+- **Rebalanceo sugerido** según el tope por posición del perfil de riesgo.
+- **"¿Qué compro con estos pesos?"**: monto en AR$ → CEDEARs concretos entre
+  tus posiciones con señal de compra, avisando si superás tu tope.
+- **Registro de operaciones**: botón ⤓ por fila para registrar ventas (P&L
+  realizado vs. no realizado, por moneda); las altas con costo se loguean
+  como compras. Solo localStorage.
+
+**Contexto argentino**
+- **Cartera en dólares CCL y vs. IPC**: cada posición con fecha de compra se
+  mide también en dólares reales (serie histórica del CCL, argentinadatos.com,
+  fetch directo del navegador — sin nueva función de Vercel) y contra la
+  inflación.
+- **Dividendos agregados**: yield ponderado TTM e ingreso anual estimado con
+  el historial real de pagos (sin predecir fechas futuras).
+
+**Alertas y seguimiento**
+- Las tenencias disparan las mismas notificaciones de navegador que la
+  Watchlist (zona de compra/venta/stop + BOS/CHoCH) y muestran la alerta
+  activa en su fila.
+- **Resumen diario por Telegram**: con Telegram vinculado, el sitio sincroniza
+  (ticker, cantidad, unidad) vía `?action=sync-portfolio` y el cron manda un
+  digest diario (valor, variación ponderada del día, detalle por posición) —
+  deduplicado por fecha en Redis.
+- **Cambios de recomendación**: historial local de cuándo cada posición pasó
+  de una recomendación a otra.
+
+**UX**
+- **Treemap** (tamaño = peso, color = P&L), **fila de totales**, **vista
+  compacta** y **modo privacidad** (oculta montos absolutos, deja los %).
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

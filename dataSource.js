@@ -127,6 +127,9 @@ const Mock = {
   // en vez de inventar meses de IPC (el retorno real necesita el número
   // verdadero, no uno simulado que no representaría nada).
   async getInflacion() { return { items: [], isReal: false }; },
+  // Sin serie histórica real del CCL en modo mock — vacío en vez de inventar
+  // cotizaciones pasadas (los benchmarks de cartera necesitan el dato real).
+  async getCCLHistory() { return { items: [], isReal: false }; },
   async getDividends() { return { items: [], isReal: false }; },
   async getBonds() { return { items: [], isReal: false }; },
 };
@@ -200,6 +203,21 @@ const Live = {
       const r = await fetch(`${API_BASE}/dividends?symbol=${encodeURIComponent(ticker)}`);
       if (!r.ok) throw new Error('dividends ' + r.status);
       const d = await r.json(); return { ...d, isReal: true };
+    });
+  },
+  // Serie histórica del CCL — directo a argentinadatos.com desde el browser
+  // (permite CORS), sin pasar por una función de Vercel: el plan Hobby ya
+  // está en el tope de 12 funciones y esta fuente no necesita API key.
+  async getCCLHistory() {
+    return cached('ccl-hist', 12 * 60 * 60 * 1000, async () => {
+      const r = await fetch('https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui');
+      if (!r.ok) throw new Error('ccl history ' + r.status);
+      const d = await r.json(); // [{casa, compra, venta, fecha}]
+      const items = (Array.isArray(d) ? d : [])
+        .filter(x => x?.fecha && x?.venta > 0)
+        .map(x => ({ fecha: x.fecha, venta: x.venta }))
+        .sort((a, b) => a.fecha.localeCompare(b.fecha));
+      return { items, isReal: true };
     });
   },
   async getBonds() {
@@ -292,6 +310,10 @@ export async function getDividends(ticker) {
   const asset = await getAsset(ticker);
   if (asset?.category === 'Cripto') return { items: [], isReal: true }; // no aplica
   return withFallback('getDividends', [ticker], Mock.getDividends.bind(Mock));
+}
+
+export async function getCCLHistory() {
+  return withFallback('getCCLHistory', [], Mock.getCCLHistory.bind(Mock));
 }
 
 export async function getBonds() {

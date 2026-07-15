@@ -222,7 +222,54 @@ a { color: inherit; }
 .risk-metric-value { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 600; color: var(--text); }
 .risk-metric-value.up { color: var(--up-text); }
 .risk-metric-value.down { color: var(--down-text); }
+.risk-metric-hint { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; line-height: 1.4; }
 @media (max-width: 860px) { .risk-metrics-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* salud de la cartera */
+.port-health-head { display: flex; gap: 24px; align-items: flex-start; }
+.port-health-score { font-family: 'Newsreader', serif; font-size: 46px; line-height: 1; min-width: 110px; }
+.port-health-score.up { color: var(--up-text); }
+.port-health-score.down { color: var(--down-text); }
+.port-health-max { font-size: 16px; color: var(--text-mute); }
+.port-health-rows { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 700px) { .port-health-head { flex-direction: column; gap: 12px; } }
+
+/* aporte al riesgo por posición */
+.risk-contrib-row { display: flex; gap: 14px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border-soft); }
+.risk-contrib-row:last-child { border-bottom: none; }
+.risk-contrib-bars { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.risk-contrib-label { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.4px; }
+.risk-contrib-fill { background: var(--amber-text, oklch(0.78 0.13 70)); }
+.risk-contrib-fill.hot { background: var(--down-text, oklch(0.72 0.19 23)); }
+
+/* operaciones / historial de recomendaciones / dividendos */
+.port-ops-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; margin-bottom: 12px; }
+@media (max-width: 700px) { .port-ops-summary { grid-template-columns: 1fr; } }
+.port-ops-list { border-top: 1px solid var(--border-soft); }
+.port-ops-row { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+.port-ops-row:last-child { border-bottom: none; }
+.port-ops-type { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 7px; border-radius: 6px; }
+.port-ops-type.buy { background: oklch(0.30 0.09 152); color: oklch(0.87 0.14 152); }
+.port-ops-type.sell { background: oklch(0.30 0.10 45); color: oklch(0.86 0.13 45); }
+.port-ops-detail { flex: 1; color: var(--text-dim); }
+.port-ops-realized { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.port-ops-realized.up { color: var(--up-text); }
+.port-ops-realized.down { color: var(--down-text); }
+
+/* tabla: fila de totales, stop, alerta por fila, acciones */
+.port-totals-row td { border-top: 2px solid var(--border); font-weight: 700; font-family: 'IBM Plex Mono', monospace; background: var(--bg-card); }
+.port-stop-dist { font-size: 10.5px; color: var(--text-mute); font-family: 'IBM Plex Mono', monospace; }
+.port-stop-dist.near { color: var(--down-text); font-weight: 700; }
+.port-row-alert { font-size: 10.5px; font-weight: 600; }
+.port-actions-cell { white-space: nowrap; }
+.port-sell { background: transparent; border: none; color: var(--text-mute); font-size: 13px; cursor: pointer; margin-right: 6px; }
+.port-sell:hover { color: var(--amber-text, oklch(0.8 0.13 70)); }
+
+/* treemap */
+.treemap-card { padding: 18px 20px; margin-bottom: 24px; }
+.treemap-svg { width: 100%; height: auto; display: block; margin-top: 8px; }
+.treemap-ticker { fill: oklch(0.95 0.01 262); font-family: 'IBM Plex Mono', monospace; font-size: 17px; font-weight: 700; }
+.treemap-sub { fill: oklch(0.85 0.01 262 / 0.85); font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 .port-table-wrap { overflow-x: auto; margin-bottom: 40px; border: 1px solid var(--border); border-radius: 14px; }
 .port-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .port-table th {
