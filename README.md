@@ -306,6 +306,28 @@ unidades.
 - **Treemap** (tamaño = peso, color = P&L), **fila de totales**, **vista
   compacta** y **modo privacidad** (oculta montos absolutos, deja los %).
 
+## Universo ampliado y ratios verificados contra BYMA
+
+- **Acciones argentinas completas** (ADRs con datos reales en Finnhub/Alpaca):
+  se sumaron BBAR (BBVA Argentina), TS (Tenaris), ARCO (Arcos Dorados) y
+  SATL (Satellogic) al panel ya existente (GGAL, BMA, SUPV, YPF, PAM, CEPU,
+  VIST, EDN, LOMA, TGS, TEO, CRESY, IRS, AGRO, CAAP, DESP, GLOB, BIOX, MELI).
+  Las acciones que solo cotizan en BYMA (ALUA, COME, etc.) no se agregan:
+  no hay fuente gratuita de velas/fundamentales para ellas y no se inventan.
+- **CEDEARs cripto**: MSTR (Strategy), RIOT, HUT 8 e IREN — verificados
+  contra la lista real de CEDEARs que operan en BYMA (data912); MARA, CLSK,
+  BITF y similares NO tienen CEDEAR hoy, por eso no están.
+- **Ratios recalibrados con datos reales**: se midió el ratio implícito de
+  cada CEDEAR (precio USD en vivo × CCL ÷ precio BYMA en vivo) y se
+  corrigieron ~96 ratios desactualizados (BYMA re-ratió muchos: MELI 40→120,
+  GLOB 8→18, AVGO 2→40, HOOD 1→29, y los ADRs argentinos TGS/EDN/IRS/CRESY/
+  LOMA/CEPU/TEO/VIST que figuraban con ratio viejo). Solo se aplicó el cambio
+  cuando la medición coincidía a ≤5% con un ratio estándar — el resto quedó
+  como estaba. El ratio solo afecta la ESTIMACIÓN vía CCL: cuando hay precio
+  real operado en BYMA, se usa ese (fuente `live`).
+- **Fixes**: el ticker inválido TXR pasó a TX (ADR real de Ternium) y TEO
+  ahora sí toma su precio local en vivo (mapeo TEO→TECO2 en api/quote).
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente
