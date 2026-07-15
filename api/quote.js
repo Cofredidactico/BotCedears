@@ -8,7 +8,7 @@ const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 
 // Compañías argentinas cuyo ticker de ADR (el que usa Finnhub/el resto del
 // sitio) no coincide con el ticker de la acción local en BYMA.
-const AR_LOCAL_SYMBOL = { YPF: 'YPFD', PAM: 'PAMP', TGS: 'TGSU2', IRS: 'IRSA', CRESY: 'CRES' };
+const AR_LOCAL_SYMBOL = { YPF: 'YPFD', PAM: 'PAMP', TGS: 'TGSU2', IRS: 'IRSA', CRESY: 'CRES', TEO: 'TECO2' };
 
 // Cache best-effort en memoria del proceso: sobrevive entre invocaciones si
 // Vercel reutiliza la misma instancia "tibia" (común entre requests

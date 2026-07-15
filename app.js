@@ -87,7 +87,8 @@ const DASHBOARD_UNIVERSE = [
   'NFLX', 'DIS', 'T', 'VZ',
   'TSLA', 'F',
   'GOLD', 'VALE',
-  'MELI', 'GGAL', 'BMA', 'YPF', 'PAM', 'CEPU', 'TGS', 'SUPV', 'IRS', 'CRESY', 'LOMA', 'EDN',
+  'MELI', 'GGAL', 'BMA', 'YPF', 'PAM', 'CEPU', 'TGS', 'SUPV', 'IRS', 'CRESY', 'LOMA', 'EDN', 'BBAR', 'TEO', 'TS', 'CAAP', 'AGRO', 'BIOX', 'GLOB',
+  'MSTR', 'RIOT', 'HUT', 'IREN',
   'SPY', 'QQQ', 'GLD', 'DIA',
   'BTC', 'ETH',
 ];
