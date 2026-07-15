@@ -1,4 +1,4 @@
-import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getEarnings, getInflacion, getDividends, getBonds, isLive } from './dataSource.js';
+import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, isLive } from './dataSource.js';
 import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
@@ -121,7 +121,16 @@ function saveDashWidgetState() {
 }
 
 /* ───────────────────────── portfolio advisor ───────────────────────── */
-const portState = { data: {}, loading: new Set(), sortBy: lsGetSafe('icp_port_sort', 'weight'), editing: null, macro: null, inflacion: null, ccl: null };
+const portState = {
+  data: {}, loading: new Set(), sortBy: lsGetSafe('icp_port_sort', 'weight'), editing: null,
+  macro: null, inflacion: null, ccl: null,
+  spy: null, // cierres de SPY para beta/benchmark de la cartera
+  cclHistory: null, // serie histórica del CCL (argentinadatos) para medir la cartera en dólares reales
+  dividends: {}, // ticker -> historial de dividendos, para el yield agregado de la cartera
+  compact: lsGetSafe('icp_port_compact', '0') === '1',
+  privacy: lsGetSafe('icp_port_privacy', '0') === '1',
+  allocAmount: '', allocResult: null, // asignador "¿qué compro con AR$X?"
+};
 const taxState = { cumplidor: lsGetSafe('icp_tax_cumplidor', '0') === '1' };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
 
@@ -2676,7 +2685,7 @@ const TRADING_DAYS_YEAR = 252;
  *  se aclara en la UI). Si una posición no tiene suficiente historial, se
  *  excluye y se recalculan los pesos solo entre las que sí lo tienen —
  *  nunca se inventa una serie de precios para completar. */
-function computePortfolioRiskMetrics(rows, macro) {
+function computePortfolioRiskMetrics(rows, macro, spyCloses = null) {
   const MIN_DAYS = 60;
   const withCloses = rows.filter(r => r.d?.closes?.length >= MIN_DAYS && r.weight != null && r.weight > 0);
   const totalWithWeight = rows.filter(r => r.weight != null && r.weight > 0).length;
@@ -2684,12 +2693,18 @@ function computePortfolioRiskMetrics(rows, macro) {
 
   const minLen = Math.min(...withCloses.map(r => r.d.closes.length));
   const totalW = withCloses.reduce((s, r) => s + r.weight, 0);
-  const series = withCloses.map(r => ({ weight: r.weight / totalW, closes: r.d.closes.slice(-minLen) }));
+  const series = withCloses.map(r => ({ ticker: r.ticker, weight: r.weight / totalW, closes: r.d.closes.slice(-minLen) }));
 
+  const returnsOf = (closes) => {
+    const out = [];
+    for (let i = 1; i < closes.length; i++) out.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+    return out;
+  };
+  const assetReturns = series.map(s => returnsOf(s.closes));
   const portfolioReturns = [];
-  for (let i = 1; i < minLen; i++) {
+  for (let i = 0; i < minLen - 1; i++) {
     let ret = 0;
-    for (const s of series) ret += s.weight * ((s.closes[i] - s.closes[i - 1]) / s.closes[i - 1]);
+    for (let k = 0; k < series.length; k++) ret += series[k].weight * assetReturns[k][i];
     portfolioReturns.push(ret);
   }
   const mean = portfolioReturns.reduce((a, b) => a + b, 0) / portfolioReturns.length;
@@ -2707,10 +2722,108 @@ function computePortfolioRiskMetrics(rows, macro) {
     maxDD = Math.max(maxDD, (peak - equity) / peak);
   }
 
+  // Aporte al riesgo por posición: peso × covarianza(activo, cartera) /
+  // varianza(cartera) — la descomposición estándar de la varianza total.
+  // Una posición chica pero muy volátil y correlacionada puede aportar más
+  // riesgo que una grande y estable; esto lo hace visible.
+  const cov = (xs, ys) => {
+    const n = Math.min(xs.length, ys.length);
+    if (n < 2) return null;
+    const mx = xs.slice(0, n).reduce((a, b) => a + b, 0) / n, my = ys.slice(0, n).reduce((a, b) => a + b, 0) / n;
+    let c = 0;
+    for (let i = 0; i < n; i++) c += (xs[i] - mx) * (ys[i] - my);
+    return c / (n - 1);
+  };
+  const riskContributions = variance > 0 ? series.map((s, k) => {
+    const c = cov(assetReturns[k], portfolioReturns);
+    return { ticker: s.ticker, weight: s.weight, riskShare: c != null ? (s.weight * c) / variance : null };
+  }).filter(x => x.riskShare != null).sort((a, b) => b.riskShare - a.riskShare) : [];
+
+  // Peor semana (5 ruedas) y peor mes (21 ruedas) de ESTA cartera con los
+  // pesos actuales, sobre el historial real — retorno compuesto rodante.
+  const worstWindow = (win) => {
+    if (portfolioReturns.length < win) return null;
+    let worst = Infinity;
+    for (let i = 0; i + win <= portfolioReturns.length; i++) {
+      let acc = 1;
+      for (let j = i; j < i + win; j++) acc *= (1 + portfolioReturns[j]);
+      worst = Math.min(worst, acc - 1);
+    }
+    return worst === Infinity ? null : worst;
+  };
+  const worstWeek = worstWindow(5);
+  const worstMonth = worstWindow(21);
+
+  // Beta y comparación vs SPY, sobre la ventana común de datos.
+  let beta = null, portfolioTotalReturn = null, spyTotalReturn = null;
+  if (spyCloses?.length >= MIN_DAYS) {
+    const spyReturns = returnsOf(spyCloses);
+    const n = Math.min(portfolioReturns.length, spyReturns.length);
+    const p = portfolioReturns.slice(-n), s = spyReturns.slice(-n);
+    const cps = cov(p, s), vs = cov(s, s);
+    beta = cps != null && vs > 0 ? cps / vs : null;
+    portfolioTotalReturn = p.reduce((acc, r) => acc * (1 + r), 1) - 1;
+    spyTotalReturn = s.reduce((acc, r) => acc * (1 + r), 1) - 1;
+  }
+
+  // Solapamiento: pares de tenencias cuyos retornos van >0.8 correlacionados
+  // — se mueven casi igual, la diversificación entre ellos es ilusoria.
+  const pearson = (xs, ys) => {
+    const c = cov(xs, ys), vx = cov(xs, xs), vy = cov(ys, ys);
+    return c != null && vx > 0 && vy > 0 ? c / Math.sqrt(vx * vy) : null;
+  };
+  const overlaps = [];
+  for (let a = 0; a < series.length; a++) {
+    for (let b = a + 1; b < series.length; b++) {
+      const corr = pearson(assetReturns[a], assetReturns[b]);
+      if (corr != null && corr > 0.8) overlaps.push({ a: series[a].ticker, b: series[b].ticker, corr });
+    }
+  }
+  overlaps.sort((x, y) => y.corr - x.corr);
+
   return {
     coveredHoldings: withCloses.length, totalHoldings: totalWithWeight, days: minLen,
     annualizedReturn, annualizedVol, sharpe, maxDrawdown: maxDD, riskFreeUsed: riskFree,
+    riskContributions, worstWeek, worstMonth, beta, portfolioTotalReturn, spyTotalReturn, overlaps,
   };
+}
+
+/** Score de salud de la cartera (0-100): fórmula determinística y visible
+ *  sobre métricas ya calculadas — no es una opinión de IA. Cada componente
+ *  aporta puntos según umbrales documentados en su etiqueta. */
+function computePortfolioHealth(stats, risk) {
+  if (!stats?.rows?.length) return null;
+  const items = [];
+  const linear = (value, best, worst, maxPts) => {
+    if (value == null) return null;
+    if (value <= best) return maxPts;
+    if (value >= worst) return 0;
+    return Math.round(maxPts * (worst - value) / (worst - best));
+  };
+
+  const topW = stats.topHolding?.weight ?? null;
+  const pConc = linear(topW, 0.15, 0.5, 25);
+  items.push({ label: 'Concentración por activo', detail: topW != null ? `mayor posición ${Math.round(topW * 100)}% (ideal ≤15%, crítico ≥50%)` : 'sin datos', pts: pConc, max: 25 });
+
+  const topSector = stats.sectorRows?.[0]?.pct ?? null;
+  const pSector = linear(topSector, 0.3, 0.7, 20);
+  items.push({ label: 'Concentración sectorial', detail: topSector != null ? `mayor sector ${Math.round(topSector * 100)}% (ideal ≤30%, crítico ≥70%)` : 'sin datos', pts: pSector, max: 20 });
+
+  const sellWeight = stats.rows.filter(r => stats.sellSignals.includes(r)).reduce((s, r) => s + (r.weight ?? 0), 0);
+  const pSell = linear(sellWeight, 0, 0.5, 20);
+  items.push({ label: 'Posiciones en Venta/Reducir', detail: `${stats.sellSignals.length} posición(es), ${Math.round(sellWeight * 100)}% del peso`, pts: pSell, max: 20 });
+
+  const pVol = risk ? linear(risk.annualizedVol, 0.15, 0.5, 20) : null;
+  items.push({ label: 'Volatilidad', detail: risk ? `${(risk.annualizedVol * 100).toFixed(1)}% anualizada (ideal ≤15%, crítico ≥50%)` : 'sin historial suficiente', pts: pVol, max: 20 });
+
+  const pOverlap = risk ? Math.max(0, 15 - (risk.overlaps?.length ?? 0) * 5) : null;
+  items.push({ label: 'Solapamiento entre tenencias', detail: risk ? `${risk.overlaps?.length ?? 0} par(es) con correlación >0.8 (−5 pts c/u)` : 'sin historial suficiente', pts: pOverlap, max: 15 });
+
+  const applicable = items.filter(i => i.pts != null);
+  if (!applicable.length) return null;
+  const got = applicable.reduce((s, i) => s + i.pts, 0);
+  const max = applicable.reduce((s, i) => s + i.max, 0);
+  return { score: Math.round((got / max) * 100), items };
 }
 
 function riskMetricsCardHTML(risk, holdingsCount) {
@@ -2746,8 +2859,80 @@ function riskMetricsCardHTML(risk, holdingsCount) {
           <div class="risk-metric-label">Sharpe ratio (aprox.)</div>
           <div class="risk-metric-value ${sharpeTone}">${risk.sharpe == null ? 'N/D' : risk.sharpe.toFixed(2)}</div>
         </div>
+        <div class="risk-metric">
+          <div class="risk-metric-label">Beta vs SPY</div>
+          <div class="risk-metric-value">${risk.beta == null ? 'N/D' : risk.beta.toFixed(2)}</div>
+          ${risk.beta != null ? `<div class="risk-metric-hint">si SPY cae 10%, tu cartera tiende a ${risk.beta >= 0 ? 'caer' : 'subir'} ~${Math.abs(risk.beta * 10).toFixed(1)}%</div>` : ''}
+        </div>
+        <div class="risk-metric">
+          <div class="risk-metric-label">Peor semana histórica</div>
+          <div class="risk-metric-value ${risk.worstWeek != null && risk.worstWeek < 0 ? 'down' : ''}">${risk.worstWeek == null ? 'N/D' : fmtPct(risk.worstWeek * 100)}</div>
+          <div class="risk-metric-hint">5 ruedas, pesos actuales</div>
+        </div>
+        <div class="risk-metric">
+          <div class="risk-metric-label">Peor mes histórico</div>
+          <div class="risk-metric-value ${risk.worstMonth != null && risk.worstMonth < 0 ? 'down' : ''}">${risk.worstMonth == null ? 'N/D' : fmtPct(risk.worstMonth * 100)}</div>
+          <div class="risk-metric-hint">21 ruedas, pesos actuales</div>
+        </div>
+        <div class="risk-metric">
+          <div class="risk-metric-label">Tu cartera vs SPY</div>
+          <div class="risk-metric-value ${risk.portfolioTotalReturn != null && risk.spyTotalReturn != null ? (risk.portfolioTotalReturn >= risk.spyTotalReturn ? 'up' : 'down') : ''}">${risk.portfolioTotalReturn == null || risk.spyTotalReturn == null ? 'N/D' : `${fmtPct(risk.portfolioTotalReturn * 100)} vs ${fmtPct(risk.spyTotalReturn * 100)}`}</div>
+          ${risk.portfolioTotalReturn != null && risk.spyTotalReturn != null ? `<div class="risk-metric-hint">${risk.portfolioTotalReturn >= risk.spyTotalReturn ? 'le venís ganando al índice' : 'todo en SPY habría rendido más'} en la ventana analizada</div>` : ''}
+        </div>
       </div>
-      <div class="port-note" style="margin-top:14px;">${esc(coverageNote)} El Sharpe usa ${(risk.riskFreeUsed * 100).toFixed(2)}% como tasa libre de riesgo de referencia (punto medio de la tasa de la FED, snapshot macro).</div>
+      <div class="port-note" style="margin-top:14px;">${esc(coverageNote)} El Sharpe usa ${(risk.riskFreeUsed * 100).toFixed(2)}% como tasa libre de riesgo de referencia (punto medio de la tasa de la FED, snapshot macro). La comparación vs SPY usa los pesos ACTUALES sobre la misma ventana — no reconstruye compras pasadas.</div>
+    </div>`;
+}
+
+/** Salud de la cartera 0-100 — fórmula determinística sobre métricas ya
+ *  calculadas (concentración, sector, señales de venta, volatilidad,
+ *  solapamiento), con el desglose de puntos visible. */
+function portfolioHealthCardHTML(health) {
+  if (!health) return '';
+  const tone = health.score >= 70 ? 'up' : health.score >= 45 ? '' : 'down';
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Salud de la cartera</div>
+      <div class="port-health-head">
+        <div class="port-health-score ${tone}">${health.score}<span class="port-health-max">/100</span></div>
+        <div class="port-health-rows">
+          ${health.items.map(i => `
+            <div class="score-row" style="grid-template-columns: 210px 1fr 60px;">
+              <span class="score-label" title="${esc(i.detail)}">${esc(i.label)}</span>
+              <div class="score-bar-bg"><div class="score-bar-fill" style="width:${i.pts == null ? 0 : Math.round((i.pts / i.max) * 100)}%;"></div></div>
+              <span class="score-fraction">${i.pts == null ? 'N/D' : `${i.pts}/${i.max}`}</span>
+            </div>`).join('')}
+        </div>
+      </div>
+      <div class="port-note" style="margin-top:10px;">Fórmula fija y visible (pasá el mouse por cada componente para ver el umbral) — no es una opinión: mide concentración, señales activas, volatilidad y solapamiento con los datos de arriba.</div>
+    </div>`;
+}
+
+/** Aporte al riesgo por posición: peso vs. porción de la varianza total que
+ *  esa posición explica — hace visible cuando una posición "chica" concentra
+ *  el riesgo real de la cartera. */
+function riskContributionCardHTML(risk) {
+  if (!risk?.riskContributions?.length || risk.riskContributions.length < 2) return '';
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Aporte al riesgo por posición</div>
+      <div class="port-note" style="padding:0 0 10px;">Peso en cartera vs. porción del riesgo total (varianza) que aporta cada posición — pueden diferir mucho: una posición volátil y correlacionada aporta más riesgo del que pesa.</div>
+      ${risk.riskContributions.map(rc => `
+        <div class="risk-contrib-row">
+          <span class="port-reco-ticker">${esc(rc.ticker)}</span>
+          <div class="risk-contrib-bars">
+            <div class="score-row" style="grid-template-columns: 52px 1fr 46px; margin:0;">
+              <span class="risk-contrib-label">peso</span>
+              <div class="score-bar-bg"><div class="score-bar-fill" style="width:${Math.round(rc.weight * 100)}%;"></div></div>
+              <span class="score-fraction">${Math.round(rc.weight * 100)}%</span>
+            </div>
+            <div class="score-row" style="grid-template-columns: 52px 1fr 46px; margin:0;">
+              <span class="risk-contrib-label">riesgo</span>
+              <div class="score-bar-bg"><div class="score-bar-fill risk-contrib-fill ${rc.riskShare > rc.weight * 1.3 ? 'hot' : ''}" style="width:${Math.max(0, Math.min(100, Math.round(rc.riskShare * 100)))}%;"></div></div>
+              <span class="score-fraction">${Math.round(rc.riskShare * 100)}%</span>
+            </div>
+          </div>
+        </div>`).join('')}
     </div>`;
 }
 
@@ -2818,11 +3003,19 @@ function computePortfolioStats(holdings) {
   const rows = holdings.map(h => {
     const d = portState.data[h.ticker];
     const price = d?.price ?? null;
-    const value = price != null ? price * h.shares : null;
-    // Valor de la posición en pesos, a la última cotización real del CEDEAR
-    // (no una conversión vía CCL del precio en USD) — null para activos sin
-    // CEDEAR (cripto), no se estima con un tipo de cambio.
-    const valueArs = d?.cedearArs != null ? d.cedearArs * h.shares : null;
+    // La "cantidad" sigue a la moneda del costo: si el costo está en ARS, son
+    // CEDEARs; si está en USD, son acciones del subyacente. El ratio real del
+    // CEDEAR (universe.json) convierte entre unidades sin pasar por el CCL —
+    // mezclar unidades daba valores corridos por el ratio (ej. 1:20 en AAPL).
+    const isCedearUnits = h.costCurrency === 'ARS';
+    let value = null, valueArs = null;
+    if (isCedearUnits && d?.ratio) {
+      value = price != null ? (price / d.ratio) * h.shares : null;
+      valueArs = d?.cedearArs != null ? d.cedearArs * h.shares : null;
+    } else {
+      value = price != null ? price * h.shares : null;
+      valueArs = d?.cedearArs != null && d?.ratio ? d.cedearArs * d.ratio * h.shares : null;
+    }
     return { ...h, d, value, valueArs };
   });
   const totalValue = rows.reduce((s, r) => s + (r.value ?? 0), 0);
@@ -2901,12 +3094,15 @@ function computePortfolioStats(holdings) {
   };
 }
 
-function portfolioRiskNotes(stats) {
+function portfolioRiskNotes(stats, risk = null) {
   const notes = [];
   if (stats.concentrationRisk) notes.push({ type: 'risk', text: `${stats.topHolding.ticker} representa ${Math.round(stats.topHolding.weight * 100)}% de la cartera — concentración alta en un solo activo.` });
   if (stats.sectorRisk) notes.push({ type: 'risk', text: `El sector ${stats.sectorRisk.sector} concentra ${Math.round(stats.sectorRisk.pct * 100)}% de la cartera.` });
   if (stats.sellSignals.length) notes.push({ type: 'risk', text: `${stats.sellSignals.length} posición(es) con señal de Venta/Reducir: ${stats.sellSignals.map(r => r.ticker).join(', ')}.` });
-  if (!notes.length && stats.rows.length) notes.push({ type: 'ok', text: 'Sin señales de concentración excesiva ni posiciones en zona de Venta/Reducir en este momento.' });
+  for (const o of risk?.overlaps ?? []) {
+    notes.push({ type: 'risk', text: `${o.a} y ${o.b} se mueven casi igual (correlación ${o.corr.toFixed(2)}) — tenerlos a ambos diversifica menos de lo que parece.` });
+  }
+  if (!notes.length && stats.rows.length) notes.push({ type: 'ok', text: 'Sin señales de concentración excesiva, solapamiento ni posiciones en zona de Venta/Reducir en este momento.' });
   return notes;
 }
 
@@ -3005,17 +3201,344 @@ function parseHoldingsCsv(text) {
   return out;
 }
 
+/* ── modo privacidad: oculta montos absolutos (los % siempre se ven) ── */
+function pv(formatted) { return portState.privacy ? '•••' : formatted; }
+
+/* ── registro de operaciones (compras/ventas) — localStorage, este navegador ── */
+const PORT_OPS_KEY = 'icp_port_ops';
+const PORT_OPS_MAX = 100;
+function getPortOps() {
+  try { const v = JSON.parse(localStorage.getItem(PORT_OPS_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function logPortOp(op) {
+  const list = getPortOps();
+  list.unshift({ ...op, ts: Date.now() });
+  lsSetSafe(PORT_OPS_KEY, JSON.stringify(list.slice(0, PORT_OPS_MAX)));
+}
+
+/** P&L realizado (ventas registradas) vs. no realizado (posiciones abiertas),
+ *  separado por moneda — nunca se suman pesos con dólares. */
+function opsCardHTML(stats) {
+  const ops = getPortOps();
+  const realized = { USD: 0, ARS: 0 };
+  let realizedCount = 0;
+  for (const op of ops) {
+    if (op.type === 'sell' && op.realized != null) { realized[op.currency === 'ARS' ? 'ARS' : 'USD'] += op.realized; realizedCount++; }
+  }
+  const fmtCur = (cur, n) => cur === 'ARS' ? fmtArs(n) : fmtUsd(n);
+  const recent = ops.slice(0, 8);
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Operaciones y P&amp;L realizado</div>
+      <div class="port-ops-summary">
+        <div class="risk-metric">
+          <div class="risk-metric-label">Realizado (ventas registradas)</div>
+          <div class="risk-metric-value">${realizedCount ? [realized.USD ? `<span class="${realized.USD >= 0 ? 'up' : 'down'}">${realized.USD >= 0 ? '+' : ''}${pv(fmtUsd(realized.USD))}</span>` : '', realized.ARS ? `<span class="${realized.ARS >= 0 ? 'up' : 'down'}">${realized.ARS >= 0 ? '+' : ''}${pv(fmtArs(realized.ARS))}</span>` : ''].filter(Boolean).join(' · ') : 'Sin ventas registradas'}</div>
+        </div>
+        <div class="risk-metric">
+          <div class="risk-metric-label">No realizado (posiciones abiertas)</div>
+          <div class="risk-metric-value">${[stats?.totalGainUsd != null ? `<span class="${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${pv(fmtUsd(stats.totalGainUsd))}</span>` : '', stats?.totalGainArs != null ? `<span class="${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${pv(fmtArs(stats.totalGainArs))}</span>` : ''].filter(Boolean).join(' · ') || 'N/D (cargá costo promedio)'}</div>
+        </div>
+      </div>
+      ${recent.length ? `
+      <div class="port-ops-list">
+        ${recent.map(op => `
+          <div class="port-ops-row">
+            <span class="port-ops-type ${op.type === 'sell' ? 'sell' : 'buy'}">${op.type === 'sell' ? 'VENTA' : 'COMPRA'}</span>
+            <span class="port-reco-ticker">${esc(op.ticker)}</span>
+            <span class="port-ops-detail">${op.shares} × ${op.price != null ? pv(fmtCur(op.currency, op.price)) : 's/precio'}</span>
+            <span class="port-ops-realized ${op.realized != null ? (op.realized >= 0 ? 'up' : 'down') : ''}">${op.realized != null ? `${op.realized >= 0 ? '+' : ''}${pv(fmtCur(op.currency, op.realized))}` : ''}</span>
+            <span class="alert-history-time">${esc(relativeTime(op.ts))}</span>
+          </div>`).join('')}
+      </div>` : `<div class="port-note" style="padding-top:8px;">Registrá una venta con el botón ⤓ de cada fila (o agregá posiciones nuevas con costo) para construir tu historial de operaciones y separar ganancia realizada de no realizada. Solo se guarda en este navegador.</div>`}
+    </div>`;
+}
+
+/* ── historial de cambios de recomendación por posición ── */
+const PORT_RECO_HIST_KEY = 'icp_port_reco_hist';
+const PORT_RECO_LAST_KEY = 'icp_port_reco_last';
+function trackRecoChanges(rows) {
+  let last, hist;
+  try { last = JSON.parse(localStorage.getItem(PORT_RECO_LAST_KEY) || '{}'); } catch { last = {}; }
+  try { hist = JSON.parse(localStorage.getItem(PORT_RECO_HIST_KEY) || '[]'); } catch { hist = []; }
+  let changed = false;
+  for (const r of rows) {
+    if (!r.d) continue;
+    const reco = portfolioRecommendation(r);
+    if (!reco) continue;
+    const prev = last[r.ticker];
+    if (prev && prev !== reco.label) { hist.unshift({ ticker: r.ticker, from: prev, to: reco.label, ts: Date.now() }); changed = true; }
+    if (prev !== reco.label) { last[r.ticker] = reco.label; changed = true; }
+  }
+  if (changed) {
+    lsSetSafe(PORT_RECO_LAST_KEY, JSON.stringify(last));
+    lsSetSafe(PORT_RECO_HIST_KEY, JSON.stringify(hist.slice(0, 50)));
+  }
+  return hist;
+}
+function recoHistoryCardHTML(hist) {
+  if (!hist.length) return '';
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Cambios de recomendación</div>
+      <div class="port-note" style="padding:0 0 8px;">Cuándo cambió la recomendación de cada posición, según lo que este navegador observó — sirve para revisar si los cambios anticiparon movimientos.</div>
+      ${hist.slice(0, 8).map(h => `
+        <div class="port-ops-row">
+          <span class="port-reco-ticker">${esc(h.ticker)}</span>
+          <span class="port-ops-detail">${esc(h.from)} → <strong>${esc(h.to)}</strong></span>
+          <span class="alert-history-time">${esc(relativeTime(h.ts))}</span>
+        </div>`).join('')}
+    </div>`;
+}
+
+/* ── rebalanceo sugerido según el perfil de riesgo (Configuración) ── */
+function rebalanceSuggestions(stats) {
+  const cap = RISK_PROFILES[settingsState.riskProfile].maxPositionPct / 100;
+  const over = stats.rows.filter(r => r.weight != null && r.weight > cap && r.value != null && r.value > 0 && r.shares > 0);
+  const suggestions = over.map(r => {
+    const perUnitUsd = r.value / r.shares; // USD por unidad TAL COMO la tiene cargada (CEDEAR o acción)
+    const excessValue = (r.weight - cap) * stats.totalValue;
+    return { ticker: r.ticker, from: r.weight, to: cap, excessValue, units: excessValue / perUnitUsd };
+  }).sort((a, b) => b.excessValue - a.excessValue);
+  const candidates = stats.rows
+    .filter(r => r.weight != null && r.weight < cap && (r.d?.scoreLabel === 'Compra Fuerte' || r.d?.scoreLabel === 'Compra Moderada'))
+    .sort((a, b) => b.d.score - a.d.score).slice(0, 3);
+  return { cap, suggestions, candidates };
+}
+function rebalanceCardHTML(stats) {
+  const { cap, suggestions, candidates } = rebalanceSuggestions(stats);
+  if (!suggestions.length) return '';
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Rebalanceo sugerido — perfil ${esc(RISK_PROFILES[settingsState.riskProfile].label)}</div>
+      ${suggestions.map(s => `
+        <div class="port-note risk">⚠ <strong>${esc(s.ticker)}</strong>: pesa ${Math.round(s.from * 100)}% y tu perfil sugiere un tope de ${Math.round(cap * 100)}% — para volver al tope habría que vender ~${s.units >= 10 ? Math.round(s.units) : s.units.toFixed(2)} unidades (${pv(fmtUsd(s.excessValue))}).</div>`).join('')}
+      ${candidates.length ? `<div class="port-note" style="padding-top:6px;">Candidatos para reasignar (señal de compra y por debajo del tope): ${candidates.map(c => `<strong>${esc(c.ticker)}</strong> (score ${c.d.score}, pesa ${Math.round(c.weight * 100)}%)`).join(' · ')}.</div>` : ''}
+      <div class="port-note" style="padding-top:6px; color:var(--text-mute);">Sugerencia determinística basada en el tope por posición de tu perfil de riesgo (Configuración) y el score actual — no es asesoramiento financiero; revisá comisiones e impuestos antes de operar.</div>
+    </div>`;
+}
+
+/* ── asignador: "¿qué compro con AR$ X?" ── */
+function computeAllocation(amountArs, stats, ccl) {
+  if (!amountArs || amountArs <= 0) return null;
+  const cap = RISK_PROFILES[settingsState.riskProfile].maxPositionPct / 100;
+  const cclValue = ccl?.value ?? null;
+  const candidates = stats.rows
+    .filter(r => r.d && (r.d.scoreLabel === 'Compra Fuerte' || r.d.scoreLabel === 'Compra Moderada'))
+    .map(r => {
+      const unitArs = r.d.cedearArs ?? (cclValue && r.d.price ? r.d.price * cclValue : null);
+      if (!unitArs) return null;
+      const isCedear = r.d.cedearArs != null;
+      const units = isCedear ? Math.floor(amountArs / unitArs) : amountArs / unitArs;
+      if (units <= 0) return null;
+      const cost = units * unitArs;
+      // USD real gastado: CEDEARs valen precio/ratio en dólares; cripto se
+      // compra fraccionado al precio del subyacente.
+      const usdPerUnit = isCedear ? (r.d.ratio ? r.d.price / r.d.ratio : (cclValue ? unitArs / cclValue : null)) : r.d.price;
+      const usdSpent = usdPerUnit != null ? units * usdPerUnit : null;
+      const newValueUsd = usdSpent != null ? (r.value ?? 0) + usdSpent : null;
+      const newTotalUsd = usdSpent != null ? stats.totalValue + usdSpent : null;
+      const newWeight = newValueUsd != null && newTotalUsd > 0 ? newValueUsd / newTotalUsd : null;
+      return {
+        ticker: r.ticker, score: r.d.score, scoreLabel: r.d.scoreLabel, unitArs, units, cost,
+        leftover: amountArs - cost, isCedear, estimated: !isCedear || r.d.cedearSource !== 'live',
+        newWeight, overCap: newWeight != null && newWeight > cap,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+  return { amountArs, candidates, cap };
+}
+function allocatorCardHTML(stats) {
+  const res = portState.allocResult;
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">¿Qué compro con estos pesos?</div>
+      <div class="port-form" style="margin-bottom:${res ? '12px' : '0'};">
+        <input type="number" id="port-alloc-amount" class="port-input" placeholder="Monto en AR$ (ej. 100000)" aria-label="Monto en pesos a invertir" min="0" step="any" value="${esc(String(portState.allocAmount || ''))}" />
+        <button class="port-add-btn" id="port-alloc-run">Sugerir</button>
+      </div>
+      ${!res ? '' : !res.candidates.length ? `<div class="port-note">Con ${pv(fmtArs(res.amountArs))} no alcanza ninguna unidad de tus posiciones con señal de compra (o ninguna tiene señal de compra ahora). La sugerencia solo mira TUS tenencias actuales — para ideas nuevas está el Dashboard.</div>` : `
+        ${res.candidates.map((c, i) => `
+          <div class="port-note ${i === 0 ? 'ok' : ''}">
+            ${i === 0 ? '✓' : '·'} <strong>${esc(c.ticker)}</strong> (${esc(c.scoreLabel)} · ${c.score}): ${c.isCedear ? `${c.units} CEDEAR(s)` : `${c.units.toFixed(6)} unidades`} a ${pv(fmtArs(c.unitArs))}${c.estimated ? ' ≈' : ''} = ${pv(fmtArs(c.cost))}${c.isCedear && c.leftover > 0 ? ` (sobran ${pv(fmtArs(c.leftover))})` : ''}${c.overCap ? ` — ⚠ quedaría en ${Math.round(c.newWeight * 100)}%, sobre el tope de ${Math.round(res.cap * 100)}% de tu perfil` : ''}
+          </div>`).join('')}
+        <div class="port-note" style="padding-top:6px; color:var(--text-mute);">Ranking por score entre TUS posiciones con señal de compra, a la última cotización del CEDEAR (≈ = estimada vía CCL). No es asesoramiento financiero.</div>
+      `}
+    </div>`;
+}
+
+/* ── benchmarks argentinos: cartera en dólares CCL y vs inflación ── */
+function cclAtDate(items, dateStr) {
+  let best = null;
+  for (const it of items) { if (it.fecha <= dateStr) best = it; else break; }
+  return best?.venta ?? null;
+}
+function portfolioBenchmarks(stats) {
+  const hist = portState.cclHistory?.items;
+  if (!hist?.length) return null;
+  const cclNow = portState.ccl?.value ?? hist[hist.length - 1].venta;
+  const rows = [];
+  for (const r of stats.rows) {
+    if (!r.purchaseDate || r.gainPct == null) continue;
+    const cclThen = cclAtDate(hist, r.purchaseDate);
+    if (!cclThen) continue;
+    const cclReturn = cclNow / cclThen - 1;
+    // Retorno medido en dólares CCL: para costo en ARS se descuenta lo que
+    // subió el CCL; un costo en USD ya está en dólares (no se convierte).
+    const usdReturn = r.costCurrency === 'ARS' ? (1 + r.gainPct) / (1 + cclReturn) - 1 : r.gainPct;
+    rows.push({
+      ticker: r.ticker, purchaseDate: r.purchaseDate, currency: r.gainCurrency,
+      nominal: r.gainPct, cclReturn, usdReturn,
+      realGainPct: r.realGainPct ?? null, // ya calculado (IPC) solo para costo ARS con fecha
+    });
+  }
+  return rows.length ? { rows, cclNow } : null;
+}
+function benchmarksCardHTML(stats) {
+  const b = portfolioBenchmarks(stats);
+  if (!b) {
+    const anyDates = stats.rows.some(r => r.purchaseDate);
+    // Sin fechas de compra no hay nada que comparar; y si la serie del CCL ya
+    // se pidió y vino vacía (modo demo / fuente caída), se oculta la card en
+    // vez de fingir que "está cargando" para siempre.
+    if (!anyDates || portState.cclHistory != null) return '';
+    return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Tu cartera en dólares (CCL) y vs. inflación</div>
+      <div class="dash-loading-note">Cargando la serie histórica del CCL (argentinadatos.com)…</div>
+    </div>`;
+  }
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Tu cartera en dólares (CCL) y vs. inflación</div>
+      <div class="port-note" style="padding:0 0 10px;">Ganar en pesos no siempre es ganar: acá cada posición con fecha de compra se mide también en dólares CCL (¿le ganaste al dólar?) y en términos reales (¿le ganaste al IPC?). CCL hoy: ${pv(fmtArs(b.cclNow))}.</div>
+      <div class="port-table-wrap">
+        <table class="sim-table">
+          <thead><tr><th>Ticker</th><th>Desde</th><th>Nominal</th><th>Suba del CCL</th><th>En dólares (CCL)</th><th>Real (IPC)</th></tr></thead>
+          <tbody>
+            ${b.rows.map(r => `
+              <tr>
+                <td style="font-weight:700;">${esc(r.ticker)}</td>
+                <td>${esc(r.purchaseDate)}</td>
+                <td class="${r.nominal >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(r.nominal * 100)} <span class="port-pnl-abs">${r.currency}</span></td>
+                <td>${r.currency === 'ARS' ? fmtPct(r.cclReturn * 100) : '<span class="bt-nd">— (costo ya en USD)</span>'}</td>
+                <td class="${r.usdReturn >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(r.usdReturn * 100)}</td>
+                <td class="${r.realGainPct != null ? (r.realGainPct >= 0 ? 'bt-pos' : 'bt-neg') : 'bt-nd'}">${r.realGainPct != null ? fmtPct(r.realGainPct * 100) : '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="port-note" style="padding-top:8px; color:var(--text-mute);">CCL histórico: argentinadatos.com (cotización más cercana anterior a tu fecha de compra). Real (IPC): solo para costos en pesos con fecha, contra el IPC oficial — las posiciones sin fecha de compra no aparecen acá.</div>
+    </div>`;
+}
+
+/* ── dividendos agregados de la cartera ── */
+function portfolioDividendsCardHTML(stats) {
+  const cutoff = Date.now() - 365 * 86400000;
+  const perHolding = [];
+  let pending = 0;
+  for (const r of stats.rows) {
+    const div = portState.dividends[r.ticker];
+    if (div === undefined) { pending++; continue; }
+    const items = div?.items ?? [];
+    if (!items.length || r.d?.price == null) continue;
+    const ttm = items.filter(x => new Date(x.date + 'T00:00:00Z').getTime() >= cutoff).reduce((s, x) => s + x.amount, 0);
+    if (ttm <= 0) continue;
+    perHolding.push({
+      ticker: r.ticker, ttmPerShare: ttm, income: ttm * r.shares,
+      yieldPct: r.d.price > 0 ? (ttm / r.d.price) * 100 : null,
+      lastDate: items[0].date, lastAmount: items[0].amount,
+    });
+  }
+  if (!perHolding.length && pending) {
+    return `<div class="card port-notes-card"><div class="dash-radar-title">Dividendos de la cartera</div><div class="dash-loading-note">Cargando historial de dividendos…</div></div>`;
+  }
+  if (!perHolding.length) return '';
+  perHolding.sort((a, b) => b.income - a.income);
+  const totalIncome = perHolding.reduce((s, x) => s + x.income, 0);
+  const weightedYield = stats.totalValue > 0 ? (totalIncome / stats.totalValue) * 100 : null;
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Dividendos de la cartera</div>
+      <div class="port-ops-summary">
+        <div class="risk-metric">
+          <div class="risk-metric-label">Yield ponderado (TTM)</div>
+          <div class="risk-metric-value up">${weightedYield != null ? weightedYield.toFixed(2) + '%' : 'N/D'}</div>
+        </div>
+        <div class="risk-metric">
+          <div class="risk-metric-label">Ingreso anual estimado</div>
+          <div class="risk-metric-value">${pv(fmtUsd(totalIncome))}</div>
+          <div class="risk-metric-hint">lo pagado en los últimos 12 meses × tu tenencia actual</div>
+        </div>
+      </div>
+      ${perHolding.slice(0, 6).map(h => `
+        <div class="port-ops-row">
+          <span class="port-reco-ticker">${esc(h.ticker)}</span>
+          <span class="port-ops-detail">${pv(fmtUsd(h.income))}/año · yield ${h.yieldPct != null ? h.yieldPct.toFixed(2) + '%' : 'N/D'}</span>
+          <span class="alert-history-time">último: ${pv(fmtUsd(h.lastAmount))} el ${esc(h.lastDate)}</span>
+        </div>`).join('')}
+      <div class="port-note" style="padding-top:8px; color:var(--text-mute);">Historial real de pagos (Finnhub, últimos 2 años) — no se predicen fechas futuras porque la fuente gratuita no las garantiza. Recordá que los dividendos tributan Ganancias (ver Impacto fiscal).</div>
+    </div>`;
+}
+
+/* ── treemap de la cartera: cajas por peso, color por P&L ── */
+function portfolioTreemapSVG(rows) {
+  const items = rows.filter(r => r.value != null && r.value > 0).sort((a, b) => b.value - a.value);
+  if (items.length < 2) return '';
+  const W = 1000, H = 300, GAP = 3;
+  let x = 0, y = 0, w = W, h = H;
+  let remaining = items.reduce((s, r) => s + r.value, 0);
+  const rects = [];
+  for (let i = 0; i < items.length; i++) {
+    const r = items[i];
+    const frac = r.value / remaining;
+    let rx = x, ry = y, rw, rh;
+    if (i === items.length - 1) { rw = w; rh = h; }
+    else if (w >= h) { rw = w * frac; rh = h; x += rw; w -= rw; }
+    else { rh = h * frac; rw = w; y += rh; h -= rh; }
+    remaining -= r.value;
+    rects.push({ r, x: rx, y: ry, w: rw, h: rh });
+  }
+  const fillFor = (g) => {
+    if (g == null) return 'oklch(0.35 0.02 262)';
+    const mag = Math.min(1, Math.abs(g) / 0.4);
+    return g >= 0 ? `oklch(${0.32 + mag * 0.14} ${0.06 + mag * 0.09} 152)` : `oklch(${0.32 + mag * 0.12} ${0.06 + mag * 0.10} 23)`;
+  };
+  return `
+    <div class="card treemap-card">
+      <div class="dash-radar-title">Mapa de la cartera <span class="risk-days-note">— tamaño = peso, color = P&amp;L</span></div>
+      <svg class="treemap-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Treemap de la cartera">
+        ${rects.map(({ r, x, y, w, h }) => {
+          const big = w > 90 && h > 46;
+          const mid = w > 56 && h > 30;
+          return `
+          <g>
+            <rect x="${(x + GAP / 2).toFixed(1)}" y="${(y + GAP / 2).toFixed(1)}" width="${Math.max(1, w - GAP).toFixed(1)}" height="${Math.max(1, h - GAP).toFixed(1)}" rx="6" fill="${fillFor(r.gainPct)}" stroke="oklch(0.22 0.02 262)" stroke-width="1">
+              <title>${esc(r.ticker)} — ${Math.round((r.weight ?? 0) * 100)}% de la cartera${portState.privacy ? '' : ` · ${fmtUsd(r.value)}`}${r.gainPct != null ? ` · P&L ${fmtPct(r.gainPct * 100)}` : ''}</title>
+            </rect>
+            ${mid ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + (big ? -8 : 4)).toFixed(1)}" text-anchor="middle" class="treemap-ticker">${esc(r.ticker)}</text>` : ''}
+            ${big ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + 12).toFixed(1)}" text-anchor="middle" class="treemap-sub">${Math.round((r.weight ?? 0) * 100)}%${r.gainPct != null ? ` · ${fmtPct(r.gainPct * 100)}` : ''}</text>` : ''}
+          </g>`;
+        }).join('')}
+      </svg>
+    </div>`;
+}
+
 function portfolioHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
-  const risk = stats ? computePortfolioRiskMetrics(stats.rows, portState.macro) : null;
-  const notes = stats ? portfolioRiskNotes(stats) : [];
+  const risk = stats ? computePortfolioRiskMetrics(stats.rows, portState.macro, portState.spy) : null;
+  const health = stats ? computePortfolioHealth(stats, risk) : null;
+  const notes = stats ? portfolioRiskNotes(stats, risk) : [];
+  const recoHist = stats ? trackRecoChanges(stats.rows) : [];
   const loadingCount = holdings.filter(h => !portState.data[h.ticker]).length;
   const editingHolding = portState.editing ? holdings.find(h => h.ticker === portState.editing) : null;
 
   return `
     ${sectionTitleHTML('Portfolio Advisor', 'briefcase')}
-    <div class="dash-intro">Cargá tus tenencias (ticker, cantidad, costo promedio y fecha de compra, todo opcional salvo ticker y cantidad) para ver diversificación, concentración y señal de cada posición con datos reales. Si compraste CEDEARs en pesos, elegí "ARS (CEDEAR)" — el P&amp;L se compara contra el precio del CEDEAR en pesos (vía CCL), no contra el precio en dólares del subyacente. Cargar la fecha de compra habilita el retorno REAL, ajustado por inflación (IPC Argentina). Se guarda solo en este navegador.</div>
+    <div class="dash-intro">Cargá tus tenencias (ticker, cantidad, costo promedio y fecha de compra, todo opcional salvo ticker y cantidad) para ver diversificación, concentración y señal de cada posición con datos reales. Si compraste CEDEARs en pesos, elegí "ARS (CEDEAR)": ahí la <strong>cantidad son CEDEARs</strong> y el P&amp;L se compara contra el precio del CEDEAR en pesos; con costo en USD, la <strong>cantidad son acciones del subyacente</strong>. Cargar la fecha de compra habilita el retorno REAL (ajustado por IPC) y los benchmarks vs. CCL. Se guarda solo en este navegador.</div>
 
     <div class="card port-form-card">
       ${editingHolding ? `<div class="port-editing-banner">Editando ${esc(editingHolding.ticker)} — <a href="#" id="port-edit-cancel">cancelar</a></div>` : ''}
@@ -3037,16 +3560,18 @@ function portfolioHTML() {
       <button class="port-csv-btn" id="port-export">Exportar CSV</button>
       <button class="port-csv-btn" id="port-import">Importar CSV</button>
       <input type="file" id="port-import-file" accept=".csv,text/csv" style="display:none;" aria-label="Seleccionar archivo CSV de tenencias" />
+      <button class="port-csv-btn" id="port-compact-toggle" aria-pressed="${portState.compact}">${portState.compact ? 'Vista completa' : 'Vista compacta'}</button>
+      <button class="port-csv-btn" id="port-privacy-toggle" aria-pressed="${portState.privacy}" title="Oculta los montos absolutos (los porcentajes siguen visibles) para mostrar la pantalla sin exponer cuánto tenés">${portState.privacy ? '👁 Mostrar montos' : '🙈 Ocultar montos'}</button>
     </div>
 
     ${!holdings.length ? emptyStateHTML('briefcase', `Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}). Podés empezar cargando una a la vez arriba, o importar un CSV (columnas: ticker,shares,avgCost,costCurrency).`) : `
     <div class="port-summary-grid">
       <div class="card port-summary-card">
         <div class="dash-radar-title">Valor total</div>
-        <div class="port-summary-value">${fmtUsd(stats.totalValue)}</div>
-        ${stats.totalValueArs != null ? `<div class="port-summary-sub" title="${stats.arsEligibleCount === stats.rows.length ? 'Suma de todas las posiciones, a la última cotización real del CEDEAR' : `Solo ${stats.arsEligibleCount} de ${stats.rows.length} posiciones tienen CEDEAR — no incluye cripto ni activos sin ratio ARS`}">${fmtArs(stats.totalValueArs)}${stats.arsEligibleCount < stats.rows.length ? ' (posiciones con CEDEAR)' : ''}</div>` : ''}
-        ${stats.totalGainUsd != null ? `<div class="port-summary-sub ${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${fmtUsd(stats.totalGainUsd)} (${fmtPct(stats.totalCostUsd > 0 ? (stats.totalGainUsd / stats.totalCostUsd) * 100 : 0)}) en posiciones con costo en USD</div>` : ''}
-        ${stats.totalGainArs != null ? `<div class="port-summary-sub ${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${fmtArs(stats.totalGainArs)} (${fmtPct(stats.totalCostArs > 0 ? (stats.totalGainArs / stats.totalCostArs) * 100 : 0)}) en posiciones con costo en ARS</div>` : ''}
+        <div class="port-summary-value">${pv(fmtUsd(stats.totalValue))}</div>
+        ${stats.totalValueArs != null ? `<div class="port-summary-sub" title="${stats.arsEligibleCount === stats.rows.length ? 'Suma de todas las posiciones, a la última cotización real del CEDEAR' : `Solo ${stats.arsEligibleCount} de ${stats.rows.length} posiciones tienen CEDEAR — no incluye cripto ni activos sin ratio ARS`}">${pv(fmtArs(stats.totalValueArs))}${stats.arsEligibleCount < stats.rows.length ? ' (posiciones con CEDEAR)' : ''}</div>` : ''}
+        ${stats.totalGainUsd != null ? `<div class="port-summary-sub ${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${pv(fmtUsd(stats.totalGainUsd))} (${fmtPct(stats.totalCostUsd > 0 ? (stats.totalGainUsd / stats.totalCostUsd) * 100 : 0)}) en posiciones con costo en USD</div>` : ''}
+        ${stats.totalGainArs != null ? `<div class="port-summary-sub ${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${pv(fmtArs(stats.totalGainArs))} (${fmtPct(stats.totalCostArs > 0 ? (stats.totalGainArs / stats.totalCostArs) * 100 : 0)}) en posiciones con costo en ARS</div>` : ''}
         ${stats.totalRealGainArs != null ? `<div class="port-summary-sub port-real-sub ${stats.totalRealGainArs >= 0 ? 'up' : 'down'}">retorno real: ${fmtPct(stats.totalRealCostArs > 0 ? (stats.totalRealGainArs / stats.totalRealCostArs) * 100 : 0)} ajustado por inflación (IPC)</div>` : ''}
       </div>
       <div class="card port-summary-card">
@@ -3061,8 +3586,15 @@ function portfolioHTML() {
       </div>
     </div>
 
+    ${portfolioTreemapSVG(stats.rows)}
     ${riskMetricsCardHTML(risk, holdings.length)}
+    ${portfolioHealthCardHTML(health)}
+    ${riskContributionCardHTML(risk)}
     ${taxImpactCardHTML(stats.totalValue, portState.ccl)}
+    ${rebalanceCardHTML(stats)}
+    ${allocatorCardHTML(stats)}
+    ${benchmarksCardHTML(stats)}
+    ${portfolioDividendsCardHTML(stats)}
 
     <div class="card port-notes-card">
       <div class="dash-radar-title">Recomendación por posición</div>
@@ -3079,10 +3611,14 @@ function portfolioHTML() {
       }).join('') || '<div class="dash-loading-note">Cargando análisis de cada posición…</div>'}
     </div>
 
+    ${recoHistoryCardHTML(recoHist)}
+
     <div class="card port-notes-card">
       <div class="dash-radar-title">Lectura de diversificación</div>
       ${notes.map(n => `<div class="port-note ${n.type}">${n.type === 'risk' ? '⚠' : '✓'} ${esc(n.text)}</div>`).join('')}
     </div>
+
+    ${opsCardHTML(stats)}
 
     ${stats.sectorRows.length ? `
     <div class="card port-notes-card">
@@ -3103,18 +3639,35 @@ function portfolioHTML() {
 
     <div class="port-table-wrap">
       <table class="port-table">
-        <thead><tr><th>Ticker</th><th>Cantidad</th><th>Precio</th><th>Valor</th><th>Peso</th><th>P&amp;L</th><th>Señal</th><th>Recomendación</th><th></th></tr></thead>
+        <thead><tr>${portState.compact
+          ? '<th>Ticker</th><th>Valor</th><th>P&amp;L</th><th>Señal</th><th>Recomendación</th><th></th>'
+          : '<th>Ticker</th><th>Cantidad</th><th>Precio</th><th>Valor</th><th>Peso</th><th>P&amp;L</th><th>Stop / Objetivo</th><th>Señal</th><th>Recomendación</th><th></th>'}</tr></thead>
         <tbody>
           ${sortPortfolioRows(stats.rows).map(r => portfolioRowHTML(r)).join('')}
         </tbody>
+        ${portfolioTotalsRowHTML(stats)}
       </table>
     </div>`}
   `;
 }
 
+function portfolioTotalsRowHTML(stats) {
+  const pnlParts = [
+    stats.totalGainUsd != null ? `<span class="${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${pv(fmtUsd(stats.totalGainUsd))}</span>` : '',
+    stats.totalGainArs != null ? `<span class="${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${pv(fmtArs(stats.totalGainArs))}</span>` : '',
+  ].filter(Boolean).join('<br>') || '—';
+  const valueCell = `${pv(fmtUsd(stats.totalValue))}${stats.totalValueArs != null ? `<br><span class="port-pnl-abs">${pv(fmtArs(stats.totalValueArs))}</span>` : ''}`;
+  return `<tfoot><tr class="port-totals-row">
+    ${portState.compact
+      ? `<td>TOTAL</td><td>${valueCell}</td><td>${pnlParts}</td><td colspan="3"></td>`
+      : `<td>TOTAL</td><td></td><td></td><td>${valueCell}</td><td>100%</td><td>${pnlParts}</td><td colspan="4"></td>`}
+  </tr></tfoot>`;
+}
+
 function portfolioRowHTML(r) {
   if (!r.d) {
-    return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td>${r.shares}</td><td colspan="5"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button></td></tr>`;
+    const skelCols = portState.compact ? 3 : 7;
+    return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td colspan="${skelCols}"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button></td></tr>`;
   }
   const sig = scoreLabelColor(r.d.scoreLabel);
   const fmtGain = r.gainCurrency === 'ARS' ? fmtArs : fmtUsd;
@@ -3123,29 +3676,53 @@ function portfolioRowHTML(r) {
     const realLine = r.realGainPct != null
       ? `<br><span class="port-pnl-real ${r.realGainPct >= 0 ? 'up' : 'down'}" title="Ajustado por inflación (IPC Argentina) desde ${esc(r.purchaseDate)} — ${r.inflationMonths} mes(es) de datos reales">real: ${fmtPct(r.realGainPct * 100)}</span>`
       : '';
-    pnlCell = `${fmtPct(r.gainPct * 100)}<br><span class="port-pnl-abs">${r.gainAbs >= 0 ? '+' : ''}${fmtGain(r.gainAbs)}</span>${realLine}`;
+    pnlCell = `${fmtPct(r.gainPct * 100)}<br><span class="port-pnl-abs">${r.gainAbs >= 0 ? '+' : ''}${pv(fmtGain(r.gainAbs))}</span>${realLine}`;
   } else if (r.gainUnavailableReason) {
     pnlCell = `<span title="${esc(r.gainUnavailableReason)}">N/D ⓘ</span>`;
   }
   const reco = portfolioRecommendation(r);
   const recoTone = reco ? RECO_TONE[reco.tone] : null;
-  return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">
-    <td class="port-ticker-cell">${esc(r.ticker)}${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}${r.costCurrency === 'ARS' ? ' <span class="watch-stale">ARS</span>' : ''}</td>
-    <td>${r.shares}</td>
-    <td>${r.d.cedearArs != null
-      ? `${fmtArs(r.d.cedearArs)} <span title="${r.d.cedearSource === 'live' ? 'Precio real operado hoy en BYMA' : 'Estimado vía CCL — sin cotización real disponible para este símbolo'}">${r.d.cedearSource === 'live' ? '●' : '≈'}</span><br><span class="port-pnl-abs">subyacente ${fmtUsd(r.d.price)}</span>`
-      : fmtUsd(r.d.price)}</td>
-    <td>${r.valueArs != null
-      ? `${fmtArs(r.valueArs)}<br><span class="port-pnl-abs">${fmtUsd(r.value)}</span>`
-      : (r.value != null ? fmtUsd(r.value) : 'N/D')}</td>
-    <td>${r.weight != null ? `${Math.round(r.weight * 100)}%` : 'N/D'}</td>
-    <td class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${pnlCell}</td>
-    <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>
-    <td>${reco ? `<span class="watch-signal" style="background:${recoTone.bg}; color:${recoTone.color};" title="${esc(reco.detail)}">${esc(reco.label)}</span>` : 'N/D'}</td>
-    <td>
+
+  // Stop sugerido y distancia al stop (Plan Operativo de este activo, en USD
+  // del subyacente): en rojo cuando el precio está a ≤3% del stop — ahí la
+  // decisión es inminente, no un dato de fondo.
+  let stopCell = '—';
+  const pr = r.d.planRaw;
+  if (pr?.stopLoss != null && r.d.price > 0) {
+    const distPct = ((r.d.price - pr.stopLoss) / r.d.price) * 100;
+    const near = distPct <= 3;
+    stopCell = `${fmtUsd(pr.stopLoss)} <span class="port-stop-dist ${near ? 'near' : ''}" title="Distancia entre el precio actual y el stop sugerido">${distPct <= 0 ? 'stop superado' : `a ${distPct.toFixed(1)}%`}</span><br><span class="port-pnl-abs">obj ${fmtUsd(pr.tp1)}</span>`;
+  }
+
+  const tickerCell = `<td class="port-ticker-cell">${esc(r.ticker)}${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}${r.costCurrency === 'ARS' ? ' <span class="watch-stale">ARS</span>' : ''}${r.d.alert && !r.d.alert.pending ? `<br><span class="port-row-alert" style="color:${ALERT_META[r.d.alert.type]?.color};"${alertTitleAttr(r.d.alert)}>⚡ ${esc(ALERT_META[r.d.alert.type]?.label ?? '')}</span>` : ''}</td>`;
+  const valueCell = `<td>${r.valueArs != null
+    ? `${pv(fmtArs(r.valueArs))}<br><span class="port-pnl-abs">${pv(fmtUsd(r.value))}</span>`
+    : (r.value != null ? pv(fmtUsd(r.value)) : 'N/D')}</td>`;
+  const pnlTd = `<td class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${pnlCell}</td>`;
+  const signalTd = `<td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>`;
+  const recoTd = `<td>${reco ? `<span class="watch-signal" style="background:${recoTone.bg}; color:${recoTone.color};" title="${esc(reco.detail)}">${esc(reco.label)}</span>` : 'N/D'}</td>`;
+  const actionsTd = `<td class="port-actions-cell">
+      <button class="port-sell" data-port-sell="${esc(r.ticker)}" title="Registrar venta" aria-label="Registrar venta de ${esc(r.ticker)}">⤓</button>
       <button class="port-edit" data-port-edit="${esc(r.ticker)}" title="Editar" aria-label="Editar tenencia de ${esc(r.ticker)}">✎</button>
       <button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button>
-    </td>
+    </td>`;
+
+  if (portState.compact) {
+    return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">${tickerCell}${valueCell}${pnlTd}${signalTd}${recoTd}${actionsTd}</tr>`;
+  }
+  return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">
+    ${tickerCell}
+    <td>${r.shares}</td>
+    <td>${r.d.cedearArs != null
+      ? `${pv(fmtArs(r.d.cedearArs))} <span title="${r.d.cedearSource === 'live' ? 'Precio real operado hoy en BYMA' : 'Estimado vía CCL — sin cotización real disponible para este símbolo'}">${r.d.cedearSource === 'live' ? '●' : '≈'}</span><br><span class="port-pnl-abs">subyacente ${pv(fmtUsd(r.d.price))}</span>`
+      : pv(fmtUsd(r.d.price))}</td>
+    ${valueCell}
+    <td>${r.weight != null ? `${Math.round(r.weight * 100)}%` : 'N/D'}</td>
+    ${pnlTd}
+    <td>${stopCell}</td>
+    ${signalTd}
+    ${recoTd}
+    ${actionsTd}
   </tr>`;
 }
 
@@ -3167,7 +3744,7 @@ function wirePortfolioEvents() {
   });
   els.report.querySelectorAll('[data-port-ticker]').forEach(el => {
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.port-remove') || e.target.closest('.port-edit')) return;
+      if (e.target.closest('.port-remove') || e.target.closest('.port-edit') || e.target.closest('.port-sell')) return;
       selectTicker(el.dataset.portTicker);
     });
   });
@@ -3209,6 +3786,12 @@ function wirePortfolioEvents() {
     const purchaseDate = dateEl?.value || null;
     if (!ticker || !shares || shares <= 0) return;
     const wasEditing = portState.editing != null;
+    // Registro de operaciones: solo el alta de una posición NUEVA con costo
+    // se loguea como compra (una edición cambia el estado final, no dice qué
+    // operación hubo en el medio — no se inventa).
+    if (!wasEditing && !getPortfolio().some(h => h.ticker === ticker) && cost != null) {
+      logPortOp({ type: 'buy', ticker, shares, price: cost, currency, realized: null });
+    }
     addHolding(ticker, shares, cost, currency, purchaseDate);
     portState.editing = null;
     tickerEl.value = ''; sharesEl.value = ''; costEl.value = ''; if (dateEl) dateEl.value = '';
@@ -3241,6 +3824,61 @@ function wirePortfolioEvents() {
       renderReport();
     });
   }
+
+  // Vista compacta / modo privacidad
+  document.getElementById('port-compact-toggle')?.addEventListener('click', () => {
+    portState.compact = !portState.compact;
+    lsSetSafe('icp_port_compact', portState.compact ? '1' : '0');
+    renderReport();
+  });
+  document.getElementById('port-privacy-toggle')?.addEventListener('click', () => {
+    portState.privacy = !portState.privacy;
+    lsSetSafe('icp_port_privacy', portState.privacy ? '1' : '0');
+    renderReport();
+  });
+
+  // Asignador "¿qué compro con AR$ X?"
+  const allocBtn = document.getElementById('port-alloc-run');
+  const allocInput = document.getElementById('port-alloc-amount');
+  if (allocBtn && allocInput) {
+    const run = () => {
+      portState.allocAmount = allocInput.value;
+      const amount = parseFloat(allocInput.value);
+      const holdingsNow = getPortfolio();
+      const statsNow = holdingsNow.length ? computePortfolioStats(holdingsNow) : null;
+      portState.allocResult = statsNow ? computeAllocation(amount, statsNow, portState.ccl) : null;
+      renderReport();
+    };
+    allocBtn.addEventListener('click', run);
+    allocInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+  }
+
+  // Registrar venta: reduce (o cierra) la posición y loguea el P&L realizado
+  // contra el costo promedio cargado. Solo en este navegador.
+  els.report.querySelectorAll('.port-sell').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ticker = btn.dataset.portSell;
+      const h = getPortfolio().find(x => x.ticker === ticker);
+      if (!h) return;
+      const qtyStr = window.prompt(`¿Cuántas unidades de ${ticker} vendiste? (tenés ${h.shares})`);
+      if (qtyStr == null) return;
+      const qty = parseFloat(qtyStr);
+      if (!qty || qty <= 0 || qty > h.shares) { showToast('Cantidad inválida — tiene que ser mayor a 0 y no superar lo que tenés.', 'info'); return; }
+      const curLabel = h.costCurrency === 'ARS' ? 'AR$ por CEDEAR' : 'US$ por unidad';
+      const priceStr = window.prompt(`¿A qué precio vendiste? (${curLabel})`);
+      if (priceStr == null) return;
+      const price = parseFloat(priceStr);
+      if (!price || price <= 0) { showToast('Precio inválido.', 'info'); return; }
+      const realized = h.avgCost != null ? (price - h.avgCost) * qty : null;
+      logPortOp({ type: 'sell', ticker, shares: qty, price, currency: h.costCurrency === 'ARS' ? 'ARS' : 'USD', realized });
+      const left = h.shares - qty;
+      if (left > 1e-9) addHolding(ticker, left, h.avgCost, h.costCurrency, h.purchaseDate);
+      else { removeHolding(ticker); delete portState.data[ticker]; }
+      showToast(`Venta de ${qty} ${ticker} registrada${realized != null ? ` — P&L ${realized >= 0 ? '+' : ''}${(h.costCurrency === 'ARS' ? fmtArs : fmtUsd)(realized)}` : ''}`, 'success');
+      renderReport();
+    });
+  });
 }
 
 // Solo pide lo que todavía no tiene: renderReport() dispara esto en cada
@@ -3259,12 +3897,42 @@ async function loadPortfolioData() {
     try { portState.ccl = await getCCL(); }
     catch (e) { console.warn('[portfolio] no se pudo cargar CCL', e.message); }
   }
+  // Piezas nuevas de contexto — cada una con guarda de "una sola vez" y su
+  // propio refresh, para no bloquear la carga de señales si alguna falla.
+  let contextLoaded = false;
+  if (!portState.spy && holdings.length) {
+    try { portState.spy = (await getCandles('SPY', '1day', 220)).c; contextLoaded = true; }
+    catch (e) { console.warn('[portfolio] no se pudo cargar SPY', e.message); }
+  }
+  if (!portState.cclHistory && holdings.some(h => h.purchaseDate)) {
+    try { portState.cclHistory = await getCCLHistory(); contextLoaded = true; }
+    catch (e) { console.warn('[portfolio] no se pudo cargar historial CCL', e.message); }
+  }
+  const needDividends = holdings.filter(h => !(h.ticker in portState.dividends));
+  if (needDividends.length) {
+    await Promise.all(needDividends.map(async (h) => {
+      try { portState.dividends[h.ticker] = await getDividends(h.ticker); }
+      catch (e) { portState.dividends[h.ticker] = { items: [] }; }
+    }));
+    contextLoaded = true;
+  }
+  syncPortfolioToTelegram(); // fire-and-forget: alimenta el resumen diario del bot
+
   const missing = holdings.filter(h => !portState.data[h.ticker] && !portState.loading.has(h.ticker));
-  if (!missing.length) return;
+  if (!missing.length) {
+    if (contextLoaded && !state.asset && state.view === 'portfolio') renderReport();
+    return;
+  }
   await Promise.all(missing.map(async (h) => {
     portState.loading.add(h.ticker);
     try {
-      portState.data[h.ticker] = await computeLightSignal(h.ticker, macro);
+      const signal = await computeLightSignal(h.ticker, macro);
+      portState.data[h.ticker] = signal;
+      // Alertas sobre TU plata: mismas notificaciones de transición que la
+      // Watchlist, pero para las tenencias — el mapa de estado compartido
+      // (lastAlertByTicker) evita avisos duplicados si el ticker está en ambas.
+      notifyIfNewAlert(h.ticker, signal.alert);
+      notifyStructureChange(h.ticker, signal.structure);
     } catch (e) {
       console.warn('[portfolio] no se pudo cargar', h.ticker, e.message);
     } finally {
@@ -3272,6 +3940,25 @@ async function loadPortfolioData() {
       if (!state.asset && (state.view === 'portfolio' || state.view === 'dashboard' || state.view === 'simulator')) renderReport();
     }
   }));
+}
+
+/** Sincroniza (ticker, cantidad) de la cartera con el servidor de alertas,
+ *  para que el cron pueda mandar el resumen diario por Telegram. Solo si hay
+ *  Telegram vinculado; con hash local para no repetir el POST en cada render. */
+async function syncPortfolioToTelegram() {
+  if (!telegramState.chatId || !isLive()) return;
+  // unit: la "cantidad" son CEDEARs si el costo se cargó en ARS, acciones si
+  // se cargó en USD — el servidor lo necesita para valuar bien el resumen.
+  const holdings = getPortfolio().map(h => ({ ticker: h.ticker, shares: h.shares, unit: h.costCurrency === 'ARS' ? 'cedear' : 'share' }));
+  const hash = JSON.stringify(holdings);
+  if (lsGetSafe('icp_tg_port_sync', '') === hash) return;
+  try {
+    const r = await fetch('/api/alerts?action=sync-portfolio', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId: telegramState.chatId, holdings }),
+    });
+    if (r.ok) lsSetSafe('icp_tg_port_sync', hash);
+  } catch (e) { console.warn('[portfolio] sync a Telegram falló', e.message); }
 }
 
 /* ───────────────────────── simulador "¿y si...?" + rebalanceo sugerido ───────────────────────── */
@@ -4131,11 +4818,16 @@ async function computeLightSignal(ticker, macro) {
     newsSentiment: null, candles,
   });
   const priceAlert = detectPriceAlert(quote.usd, technical, { recentCloses: candles.c.slice(-3) });
+  // Plan operativo numérico (stop, objetivos) — computePlan es puro cálculo
+  // sobre lo ya pedido, sin requests extra; lo usa la tabla del Portfolio
+  // para stop sugerido y distancia al stop de cada tenencia.
+  const planRaw = computePlan(technical, scoreResult.score).raw;
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
     price: quote.usd, changePct: quote.changePct,
     cedearArs: quote.cedearArs ?? null, // precio del CEDEAR en pesos — null para cripto, que no tiene CEDEAR
     cedearSource: quote.cedearSource ?? null, // 'live' (precio real BYMA) | 'estimated' (vía CCL) | null
+    ratio: asset?.ratio ?? null, // CEDEARs por acción subyacente — para convertir unidades sin pasar por el CCL
     score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, isReal: quote.isReal && candles.isReal,
     alert: priceAlert,
     structure: technical.structure, // BOS/CHoCH — ya calculado acá, sin pedidos extra
@@ -4143,6 +4835,7 @@ async function computeLightSignal(ticker, macro) {
     sparkline: candles.c.slice(-30), // últimos cierres reales, ya obtenidos acá — sin pedidos extra
     closes: candles.c, // serie completa (~220 ruedas) — reusada para volatilidad/drawdown de la cartera, sin pedidos extra
     highlight: technicalHighlight(technical),
+    planRaw, // stop/objetivos numéricos (USD) — para la columna de stop del Portfolio
   };
 }
 
