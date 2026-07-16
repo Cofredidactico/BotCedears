@@ -19,7 +19,8 @@ export default async function handler(req, res) {
     const epsGrowth = has(m.epsGrowthTTMYoy) ? m.epsGrowthTTMYoy : (has(m.epsGrowth3Y) ? m.epsGrowth3Y : null);
     const peTTM = has(m.peTTM) ? m.peTTM : (has(m.peAnnual) ? m.peAnnual : null);
     const peForward = has(m.forwardPE) ? m.forwardPE : null;
-    const peg = has(m.pegRatio) ? m.pegRatio : null;
+    let peg = has(m.pegRatio) ? m.pegRatio : null;
+    let pegComputed = false;
     const pb = has(m.pbAnnual) ? m.pbAnnual : (has(m.pbQuarterly) ? m.pbQuarterly : null);
     const ps = has(m.psTTM) ? m.psTTM : (has(m.psAnnual) ? m.psAnnual : null);
     const evEbitda = has(m['evEbitdaTTM']) ? m['evEbitdaTTM'] : (has(m['evEbitdaAnnual']) ? m['evEbitdaAnnual'] : null);
@@ -31,11 +32,21 @@ export default async function handler(req, res) {
     const debtEquity = has(m['totalDebt/totalEquityAnnual']) ? m['totalDebt/totalEquityAnnual'] : (has(m['totalDebt/totalEquityQuarterly']) ? m['totalDebt/totalEquityQuarterly'] : null);
     const dividendYield = has(m.dividendYieldIndicatedAnnual) ? m.dividendYieldIndicatedAnnual : (has(m.currentDividendYieldTTM) ? m.currentDividendYieldTTM : null);
 
+    // PEG calculado como respaldo: el free tier de Finnhub no trae pegRatio,
+    // pero PEG = PE / crecimiento de EPS es la definición estándar y ambos
+    // insumos sí vienen. Se calcula solo con crecimiento positivo (un PEG
+    // sobre EPS decreciente no tiene interpretación útil) y se marca como
+    // derivado para no presentarlo como un dato de la fuente.
+    if (peg == null && peTTM != null && has(epsGrowth) && epsGrowth > 0) {
+      peg = peTTM / epsGrowth;
+      pegComputed = true;
+    }
+
     const hasData = revenueGrowth != null || epsGrowth != null || peTTM != null || roe != null;
 
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=7200');
     return res.status(200).json({
-      hasData, revenueGrowth, epsGrowth, peTTM, peForward, peg, pb, ps, evEbitda,
+      hasData, revenueGrowth, epsGrowth, peTTM, peForward, peg, pegComputed, pb, ps, evEbitda,
       roe, roi, grossMargin, netMargin, fcfPerShare, debtEquity, dividendYield,
     });
   } catch (e) {
