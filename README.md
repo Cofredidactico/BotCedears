@@ -381,6 +381,38 @@ La ficha del activo suma la fila **"Próximo ex-dividend (est.)"** y frecuencia
 en el último dividendo; la card de dividendos del Portfolio ahora muestra el
 próximo ex-dividend por tenencia.
 
+## Dividendos Pro (segunda tanda)
+
+Sobre el apartado de Dividendos ya existente se sumó:
+- **Proyección de ingresos de tu cartera a 12 meses**, mes a mes (gráfico de
+  barras): proyecta las fechas ex-dividend de cada tenencia y su monto ×
+  unidades subyacentes (ratio-aware para CEDEARs), con ingreso total y
+  promedio mensual.
+- **Ranking de consistencia de pago** (hasta 5 años de historial): años que
+  pagó, crecimiento anual y recortes — no la lista de "aristócratas" de 25
+  años (no hay dato gratuito de esa profundidad), sino la consistencia real
+  en la ventana disponible.
+- **DRIP / reinversión** en el detalle: cuánto rinde reinvertir los dividendos
+  vs. cobrarlos sobre 10 años (supuestos explícitos, antes de impuestos).
+- **Backtest de captura de dividendo**: para cada ex-dividend histórico simula
+  comprar el día previo y mide el resultado neto (precio + dividendo) a varios
+  horizontes, más las ruedas que tardó el precio en recuperar la caída del
+  ex-date.
+- **Dividendo neto por CEDEAR en pesos**: convierte el pago por CEDEAR vía CCL
+  y descuenta una comisión de custodia típica (~0.5%) para mostrar el neto
+  estimado en pesos.
+- **Alertas de ex-dividend**: aviso por navegador y en el resumen diario de
+  Telegram cuando una tenencia está por entrar en ex-date (≤4-5 días).
+- **PEG calculado** como respaldo (audit de datos): el free tier de Finnhub no
+  trae `pegRatio`, pero PE / crecimiento de EPS sí se puede derivar — se
+  calcula y se marca "(calc.)" en la ficha.
+
+**Sobre fechas ex-dividend confirmadas**: las fuentes que dan el ex-date
+oficial futuro (Nasdaq, FMP) o bloquean IPs de datacenter (Vercel) o requieren
+API key, así que la plataforma proyecta la próxima fecha de la cadencia
+histórica y la marca como estimada — para pagadores regulares (trimestrales/
+mensuales) cae dentro de pocos días de la real. Confirmá siempre con tu bróker.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

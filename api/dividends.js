@@ -80,7 +80,7 @@ function enrich(rawRows) {
 }
 
 async function fromYahoo(symbol) {
-  const r = await fetch(`${YF}/${encodeURIComponent(symbol)}?interval=1d&range=3y&events=div`, { headers: { 'User-Agent': BROWSER_UA } });
+  const r = await fetch(`${YF}/${encodeURIComponent(symbol)}?interval=1d&range=5y&events=div`, { headers: { 'User-Agent': BROWSER_UA } });
   if (!r.ok) throw new Error('yahoo ' + r.status);
   const d = await r.json();
   const res = d?.chart?.result?.[0];

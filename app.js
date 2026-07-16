@@ -5,7 +5,7 @@ import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverl
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
 
-const GREEN = 'oklch(0.76 0.18 152)', AMBER = 'oklch(0.75 0.15 70)', RED = 'oklch(0.70 0.21 23)', BLUE = 'oklch(0.72 0.15 250)';
+const GREEN = 'oklch(0.76 0.18 152)', AMBER = 'oklch(0.75 0.15 70)', RED = 'oklch(0.70 0.21 23)', BLUE = 'oklch(0.72 0.15 250)', GOLD = 'oklch(0.82 0.14 85)';
 
 const els = {
   datebadge: document.getElementById('datebadge'),
@@ -245,6 +245,7 @@ const ALERT_META = {
   sell: { label: 'En zona de venta', color: AMBER },
   stop: { label: 'Tocó el stop loss', color: RED },
   structure: { label: 'Cambio de estructura', color: BLUE },
+  exdiv: { label: 'Ex-dividend próximo', color: GOLD },
 };
 const ALERT_CONFIDENCE_LABEL = { alta: 'confianza alta', media: 'confianza media', baja: 'confianza baja' };
 // El stop es gestión de riesgo incondicional (no pasa por el filtro de
@@ -323,6 +324,26 @@ function notifyStructureChange(ticker, structure) {
   logAlertHistory(ticker, 'structure', null, [structure.label]);
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   new Notification(`${ticker}: cambio de estructura`, { body: structure.label, tag: `icp-structure-${ticker}` });
+}
+
+// Aviso de ex-dividend próximo (≤ EXDIV_ALERT_DAYS) para una tenencia, una
+// sola vez por combinación (ticker, fecha ex) — se recuerda en localStorage
+// para no repetir el aviso en cada refresco.
+const EXDIV_ALERT_DAYS = 4;
+const EXDIV_NOTIFIED_KEY = 'icp_exdiv_notified';
+function notifyExDividend(ticker, div) {
+  if (!alertsEnabled || !div?.nextExDate) return;
+  const days = daysUntil(div.nextExDate);
+  if (days == null || days < 0 || days > EXDIV_ALERT_DAYS) return;
+  let seen;
+  try { seen = JSON.parse(localStorage.getItem(EXDIV_NOTIFIED_KEY) || '{}'); } catch { seen = {}; }
+  const key = `${ticker}:${div.nextExDate}`;
+  if (seen[key]) return;
+  seen[key] = Date.now();
+  lsSetSafe(EXDIV_NOTIFIED_KEY, JSON.stringify(seen));
+  logAlertHistory(ticker, 'exdiv', null, [`Ex-dividend estimado ${div.nextExDate}${div.lastAmount != null ? ` · ${fmtUsd(div.lastAmount)}` : ''}`]);
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  new Notification(`${ticker}: ex-dividend en ${days === 0 ? 'hoy' : days + ' día(s)'}`, { body: `Para cobrar el dividendo tenés que tener ${ticker} antes del ${div.nextExDate} (estimado)`, tag: `icp-exdiv-${ticker}` });
 }
 
 async function toggleAlerts() {
@@ -1957,7 +1978,7 @@ function fundamentalMetricRows(f, earnings, daysToEarnings, dividends) {
     { label: 'Revenue Growth (YoY)', value: pct(f.revenueGrowth) },
     { label: 'EPS Growth (YoY)', value: pct(f.epsGrowth) },
     { label: 'PE / Forward PE', value: `${f.peTTM != null ? f.peTTM.toFixed(1) + 'x' : 'N/D'} / ${f.peForward != null ? f.peForward.toFixed(1) + 'x' : 'N/D'}` },
-    { label: 'PEG', value: x(f.peg) },
+    { label: 'PEG', value: f.peg == null ? 'N/D' : `${f.peg.toFixed(1)}x${f.pegComputed ? ' (calc.)' : ''}` },
     { label: 'PB / PS', value: `${x(f.pb)} / ${x(f.ps)}` },
     { label: 'EV/EBITDA', value: x(f.evEbitda) },
     { label: 'ROE / ROIC', value: `${pct(f.roe)} / ${pct(f.roi)}` },
@@ -2621,11 +2642,116 @@ function fmtShortDate(iso) {
   const d = new Date(iso + 'T00:00:00Z');
   return `${d.getUTCDate()} ${M[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}`;
 }
+const MONTHS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+/** Consistencia de dividendos sobre el historial disponible (hasta 5 años):
+ *  cuántos años pagó, si el total anual viene creciendo (o al menos no cae) y
+ *  si hubo recortes. Devuelve un score 0-100 determinístico y sus partes.
+ *  No pretende identificar "aristócratas" de 25 años (no hay dato gratuito de
+ *  esa profundidad) — mide la consistencia en la ventana real disponible. */
+function dividendConsistency(items) {
+  if (!items?.length) return null;
+  const byYear = {};
+  for (const x of items) { const y = x.date.slice(0, 4); byYear[y] = (byYear[y] || 0) + x.amount; }
+  // Solo años completos: se descarta el año en curso (parcial) para no
+  // contar un año a medias como "recorte".
+  const thisYear = String(new Date().getUTCFullYear());
+  const years = Object.keys(byYear).filter(y => y !== thisYear).sort();
+  if (years.length < 2) return { score: null, years: years.length, insufficient: true };
+  const totals = years.map(y => byYear[y]);
+  let ups = 0, cuts = 0;
+  for (let i = 1; i < totals.length; i++) {
+    if (totals[i] >= totals[i - 1] * 0.999) ups++;
+    if (totals[i] < totals[i - 1] * 0.9) cuts++;
+  }
+  const growthFrac = ups / (totals.length - 1);
+  const yearsScore = Math.min(1, years.length / 5);
+  const cagr = totals[0] > 0 ? Math.pow(totals[totals.length - 1] / totals[0], 1 / (totals.length - 1)) - 1 : 0;
+  const score = Math.round((yearsScore * 0.35 + growthFrac * 0.45 + (cuts === 0 ? 0.2 : 0)) * 100);
+  return { score, years: years.length, growthFrac, cuts, cagr: cagr * 100, annualTotals: years.map((y, i) => ({ year: y, total: totals[i] })) };
+}
+
+/** Cuántas unidades del activo SUBYACENTE representa una tenencia: si se cargó
+ *  en CEDEARs (costo ARS), se divide por el ratio; si son acciones (USD), es
+ *  la cantidad tal cual. */
+function underlyingShares(r) {
+  const isCedearUnits = r.costCurrency === 'ARS';
+  return isCedearUnits && r.d?.ratio ? r.shares / r.d.ratio : r.shares;
+}
+
+/** Proyección de ingresos por dividendos de la cartera para los próximos 12
+ *  meses, mes a mes: para cada tenencia con datos de dividendos se proyectan
+ *  las fechas ex-dividend (desde la próxima estimada, por la cadencia) y se
+ *  imputa monto × unidades subyacentes al mes correspondiente. */
+function projectDividendIncome(holdings) {
+  const now = new Date();
+  const buckets = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    return { key: `${d.getFullYear()}-${d.getMonth()}`, label: MONTHS_ES[d.getMonth()], year: d.getFullYear(), amount: 0, byTicker: {} };
+  });
+  const bucketIndex = (dt) => (dt.getFullYear() - now.getFullYear()) * 12 + (dt.getMonth() - now.getMonth());
+  let total = 0, covered = 0, uncovered = [];
+  for (const h of holdings) {
+    const div = divState.data[h.ticker] ?? portState.dividends?.[h.ticker];
+    const d = h.d ?? dashState.data[h.ticker] ?? portState.data[h.ticker];
+    if (!div?.items?.length || !div.nextExDate || !div.medianIntervalDays || div.lastAmount == null) { uncovered.push(h.ticker); continue; }
+    const units = underlyingShares({ ...h, d });
+    if (!(units > 0)) continue;
+    covered++;
+    let t = new Date(div.nextExDate + 'T00:00:00Z');
+    const horizon = new Date(now.getFullYear(), now.getMonth() + 12, 1);
+    let guard = 0;
+    while (t < horizon && guard < 15) {
+      const idx = bucketIndex(t);
+      if (idx >= 0 && idx < 12) {
+        const inc = div.lastAmount * units;
+        buckets[idx].amount += inc;
+        buckets[idx].byTicker[h.ticker] = (buckets[idx].byTicker[h.ticker] || 0) + inc;
+        total += inc;
+      }
+      t = new Date(t.getTime() + div.medianIntervalDays * 86400000);
+      guard++;
+    }
+  }
+  return { buckets, total, covered, uncovered };
+}
+
+/** DRIP: proyección simple de la diferencia entre reinvertir los dividendos y
+ *  cobrarlos, sobre N años, a yield y crecimiento constantes (supuestos
+ *  explícitos: precio estable, reinversión al mismo precio, antes de
+ *  impuestos). No es una promesa de retorno — es el efecto del interés
+ *  compuesto del dividendo, aislado. */
+function dripProjection(value, yieldPct, growthPct, years) {
+  if (!value || !yieldPct) return null;
+  const y = yieldPct / 100, g = (growthPct ?? 0) / 100;
+  let reinvested = value, cashPile = 0, base = value;
+  for (let k = 0; k < years; k++) {
+    const yld = y * Math.pow(1 + g, k);
+    reinvested *= (1 + yld);           // dividendo reinvertido compone
+    cashPile += base * yld * Math.pow(1 + g, k); // dividendo cobrado, se acumula sin componer
+  }
+  const reinvestedGain = reinvested - value;
+  return { reinvestedGain, cashGain: cashPile, extra: reinvestedGain - cashPile, finalValue: reinvested };
+}
+
+// Comisión de custodia típica que cobran los agentes locales sobre el
+// dividendo acreditado de un CEDEAR (aproximada — varía por bróker).
+const CEDEAR_DIVIDEND_FEE = 0.005;
+function netCedearPesoDividend(amountUsdPerShare, ratio, cclValue) {
+  if (amountUsdPerShare == null || !ratio || !cclValue) return null;
+  const perCedearUsd = amountUsdPerShare / ratio;
+  const grossArs = perCedearUsd * cclValue;
+  return { grossArs, netArs: grossArs * (1 - CEDEAR_DIVIDEND_FEE), perCedearUsd };
+}
 
 async function loadDividendsData() {
   divState.started = true;
   if (!dashState.started) loadDashboardData(); // precios para calcular el yield
-  const pending = DIVIDEND_UNIVERSE.filter((t, i) => DIVIDEND_UNIVERSE.indexOf(t) === i && !(t in divState.data) && !divState.loading.has(t));
+  if (!portState.ccl) { try { portState.ccl = await getCCL(); } catch (_) {} } // para el neto por CEDEAR en pesos
+  // Universo de pagadores + las tenencias de la cartera del usuario (para la
+  // proyección de ingresos), sin duplicar.
+  const wanted = [...new Set([...DIVIDEND_UNIVERSE, ...getPortfolio().map(h => h.ticker)])];
+  const pending = wanted.filter(t => !(t in divState.data) && !divState.loading.has(t));
   for (let i = 0; i < pending.length; i += 6) {
     const batch = pending.slice(i, i + 6);
     await Promise.all(batch.map(async (ticker) => {
@@ -2648,20 +2774,118 @@ async function loadDividendsData() {
   }
 }
 
+/** Backtest de "captura de dividendo": para cada ex-dividend histórico simula
+ *  comprar al cierre del día previo al ex-date y medir el resultado neto
+ *  (variación del precio + dividendo cobrado) a distintos horizontes, más
+ *  cuántas ruedas tardó el precio en recuperar la caída del ex-date. Todo con
+ *  velas reales, sin look-ahead más allá del horizonte medido. */
+function dividendCaptureStats(candles, items) {
+  const idxByDate = {};
+  for (let i = 0; i < candles.t.length; i++) idxByDate[candles.t[i]] = i;
+  const HORIZONS = [1, 5, 10];
+  const results = HORIZONS.map(h => ({ h, nets: [] }));
+  let recoveryDays = [];
+  let events = 0;
+  for (const x of items) {
+    let exIdx = idxByDate[x.date];
+    if (exIdx == null) { // buscar la primera rueda >= ex-date
+      for (let i = 0; i < candles.t.length; i++) if (candles.t[i] >= x.date) { exIdx = i; break; }
+    }
+    if (exIdx == null || exIdx < 1) continue;
+    const entry = candles.c[exIdx - 1];
+    if (!(entry > 0)) continue;
+    events++;
+    for (const r of results) {
+      const out = candles.c[exIdx + r.h];
+      if (out == null) continue;
+      r.nets.push((out - entry + x.amount) / entry);
+    }
+    // recuperación: ruedas hasta volver al precio de entrada (máx 40)
+    for (let k = exIdx; k < Math.min(candles.c.length, exIdx + 40); k++) {
+      if (candles.c[k] >= entry) { recoveryDays.push(k - exIdx); break; }
+    }
+  }
+  if (!events) return null;
+  const rows = results.filter(r => r.nets.length).map(r => {
+    const avg = r.nets.reduce((s, v) => s + v, 0) / r.nets.length;
+    const wins = r.nets.filter(v => v > 0).length;
+    return { h: r.h, n: r.nets.length, avgPct: avg * 100, winRate: Math.round((wins / r.nets.length) * 100) };
+  });
+  const avgRecovery = recoveryDays.length ? Math.round(recoveryDays.reduce((s, v) => s + v, 0) / recoveryDays.length) : null;
+  return { events, rows, avgRecovery, recoveredFrac: events ? recoveryDays.length / events : 0 };
+}
+
 async function loadDividendDetail(ticker) {
   divState.detailTicker = ticker;
   divState.detail = null;
   divState.detailLoading = true;
   renderReport();
   try {
-    const [div, quote, asset] = await Promise.all([getDividends(ticker), getQuote(ticker), getAsset(ticker)]);
-    divState.detail = { ticker, div, price: quote?.usd ?? null, cedearArs: quote?.cedearArs ?? null, ratio: quote?.ratio ?? asset?.ratio ?? null, name: asset?.name ?? ticker };
+    const [div, quote, asset, candles] = await Promise.all([getDividends(ticker), getQuote(ticker), getAsset(ticker), getCandles(ticker, '1day', 500).catch(() => null)]);
+    const capture = candles?.c?.length && div?.items?.length ? dividendCaptureStats(candles, div.items) : null;
+    divState.detail = { ticker, div, price: quote?.usd ?? null, cedearArs: quote?.cedearArs ?? null, ratio: quote?.ratio ?? asset?.ratio ?? null, name: asset?.name ?? ticker, capture };
   } catch (e) {
     divState.detail = { ticker, error: String(e) };
   } finally {
     divState.detailLoading = false;
     if (state.view === 'dividends') renderReport();
   }
+}
+
+/** Proyección de ingresos por dividendos de la cartera real, 12 meses. */
+function dividendIncomeCardHTML() {
+  const holdings = getPortfolio();
+  if (!holdings.length) return '';
+  const rows = holdings.map(h => ({ ...h, d: portState.data[h.ticker] ?? dashState.data[h.ticker] }));
+  const proj = projectDividendIncome(rows);
+  if (proj.total <= 0) {
+    const anyLoading = holdings.some(h => !(h.ticker in divState.data) && !(portState.dividends && h.ticker in portState.dividends));
+    return `
+    ${sectionTitleHTML('Ingresos por Dividendos — tu Cartera (12 meses)', 'coins')}
+    <div class="card watch-empty">${anyLoading ? 'Cargando dividendos de tu cartera…' : 'Ninguna de tus tenencias paga dividendos (o todavía no hay historial). Cargá pagadores en Portfolio Advisor para ver la proyección.'}</div>`;
+  }
+  const maxM = Math.max(...proj.buckets.map(b => b.amount));
+  return `
+    ${sectionTitleHTML('Ingresos por Dividendos — tu Cartera (12 meses)', 'coins')}
+    <div class="card port-notes-card">
+      <div class="port-ops-summary" style="margin-bottom:16px;">
+        <div class="risk-metric"><div class="risk-metric-label">Ingreso proyectado (12 meses)</div><div class="risk-metric-value up">${fmtUsd(proj.total)}</div><div class="risk-metric-hint">${proj.covered} tenencia(s) pagadora(s)</div></div>
+        <div class="risk-metric"><div class="risk-metric-label">Promedio mensual</div><div class="risk-metric-value">${fmtUsd(proj.total / 12)}</div></div>
+      </div>
+      <div class="div-bars" style="height:130px;">
+        ${proj.buckets.map(b => `<div class="div-bar-col" title="${b.label} ${b.year}: ${fmtUsd(b.amount)}${Object.keys(b.byTicker).length ? ' · ' + Object.entries(b.byTicker).map(([t, v]) => `${t} ${fmtUsd(v)}`).join(', ') : ''}"><div class="div-bar" style="height:${maxM > 0 ? Math.max(2, Math.round((b.amount / maxM) * 100)) : 2}px;"></div><div class="div-bar-label">${b.label}</div></div>`).join('')}
+      </div>
+      <div class="bt-disclaimer">Proyección sobre las fechas ex-dividend estimadas y el último monto por pago × tus unidades — antes de comisiones y retenciones. ${proj.uncovered.length ? `Sin datos de dividendos para: ${proj.uncovered.slice(0, 8).join(', ')}.` : ''}</div>
+    </div>`;
+}
+
+/** Ranking de consistencia de pago sobre el historial disponible (hasta 5a). */
+function dividendConsistencyCardHTML(loaded) {
+  const rows = loaded.map(({ t, d }) => {
+    const c = dividendConsistency(d.items);
+    return c && c.score != null ? { ticker: t, name: universe.find(a => a.ticker === t)?.name ?? t, ...c, isAr: AR_TICKERS.has(t) } : null;
+  }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 12);
+  if (!rows.length) return '';
+  return `
+    ${sectionTitleHTML('Consistencia de Dividendos', 'check')}
+    <div class="dash-intro" style="margin-bottom:14px;">Qué tan consistente fue cada pagador en el historial disponible (hasta 5 años): años que pagó, si el total anual viene creciendo y si hubo recortes. No es la lista de "aristócratas" de 25 años (no hay dato gratuito de esa profundidad) — es la consistencia en la ventana real.</div>
+    <div class="card bt-table-card">
+      <div class="bt-table-wrap">
+        <table class="bt-table">
+          <thead><tr><th>Activo</th><th>Consistencia</th><th>Años</th><th>Crecimiento anual</th><th>Recortes</th></tr></thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr class="port-row" data-div-ticker="${esc(r.ticker)}">
+                <td class="bt-label-cell" style="font-weight:700;">${esc(r.ticker)}${r.isAr ? ' 🇦🇷' : ''} <span class="port-pnl-abs">${esc(r.name)}</span></td>
+                <td><span class="bt-label-dot" style="background:${r.score >= 70 ? 'var(--up-text)' : r.score >= 45 ? 'var(--gold-text)' : 'var(--down-text)'};"></span>${r.score}/100</td>
+                <td>${r.years}</td>
+                <td class="${r.cagr >= 0 ? 'bt-pos' : 'bt-neg'}">${r.cagr >= 0 ? '+' : ''}${r.cagr.toFixed(1)}%/año</td>
+                <td class="${r.cuts === 0 ? 'bt-pos' : 'bt-neg'}">${r.cuts === 0 ? 'ninguno' : `${r.cuts}`}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 function dividendsPageHTML() {
@@ -2708,6 +2932,8 @@ function dividendsPageHTML() {
       <div class="bt-disclaimer">Fechas estimadas proyectando la cadencia histórica real de cada activo — confirmá el ex-date oficial con tu bróker antes de operar por el dividendo.</div>
     </div>`}
 
+    ${dividendIncomeCardHTML()}
+
     ${sectionTitleHTML('Mejores Pagadores (Yield TTM)', 'trend')}
     ${!byYield.length ? `<div class="card watch-empty">Cargando ranking de dividendos…</div>` : `
     <div class="card bt-table-card">
@@ -2728,6 +2954,8 @@ function dividendsPageHTML() {
         </table>
       </div>
     </div>`}
+
+    ${dividendConsistencyCardHTML(loaded)}
 
     ${sectionTitleHTML('Detalle por Activo', 'chart')}
     <div class="card port-form-card">
@@ -2750,11 +2978,14 @@ function dividendDetailHTML() {
   }
   const d = dt.div;
   const yld = dt.price && d.ttm > 0 ? (d.ttm / dt.price) * 100 : null;
-  const perCedear = d.lastAmount != null && dt.ratio ? d.lastAmount / dt.ratio : null;
+  const net = dt.ratio ? netCedearPesoDividend(d.lastAmount, dt.ratio, portState.ccl?.value ?? null) : null;
+  const cons = dividendConsistency(d.items);
   const stat = (label, value, sub) => `<div class="risk-metric"><div class="risk-metric-label">${label}</div><div class="risk-metric-value">${value}</div>${sub ? `<div class="risk-metric-hint">${sub}</div>` : ''}</div>`;
   // Mini-gráfico de barras del monto por pago (últimos ~12).
   const recent = d.items.slice(0, 12).reverse();
   const maxAmt = Math.max(...recent.map(x => x.amount));
+  // DRIP: sobre una posición de referencia de US$10.000 al yield y crecimiento actuales.
+  const drip = yld != null ? dripProjection(10000, yld, d.cagr3y, 10) : null;
   return `
     <div class="card port-notes-card">
       <div class="dash-radar-title">${esc(dt.name)} (${esc(dt.ticker)}) — dividendos</div>
@@ -2762,12 +2993,24 @@ function dividendDetailHTML() {
         ${stat('Yield (TTM)', yld != null ? `${yld.toFixed(2)}%` : 'N/D', d.ttm > 0 ? `${fmtUsd(d.ttm)}/acción al año` : '')}
         ${stat('Frecuencia', esc(d.frequency ?? 'N/D'), d.medianIntervalDays ? `cada ~${d.medianIntervalDays} días` : '')}
         ${stat('Próx. ex-dividend', fmtShortDate(d.nextExDate), 'estimado por cadencia')}
-        ${stat('Crecimiento 3a', d.cagr3y != null ? `${d.cagr3y >= 0 ? '+' : ''}${d.cagr3y.toFixed(1)}%/año` : 'N/D', 'CAGR del pago')}
+        ${stat('Consistencia', cons?.score != null ? `${cons.score}/100` : 'N/D', cons?.years ? `${cons.years} años, ${cons.cuts === 0 ? 'sin recortes' : cons.cuts + ' recorte(s)'}` : '')}
       </div>
-      ${perCedear != null ? `<div class="port-note" style="padding-bottom:12px;">Equivalente por CEDEAR (ratio 1:${dt.ratio}): ~${fmtUsd(perCedear)} por el último pago, antes de comisiones y retenciones.</div>` : ''}
+      ${net != null ? `<div class="port-note" style="padding-bottom:12px;">Por CEDEAR (ratio 1:${dt.ratio}) el último pago fue ~${fmtUsd(net.perCedearUsd)}${portState.ccl?.value ? ` ≈ ${fmtArs(net.grossArs)} bruto · <strong>${fmtArs(net.netArs)} neto</strong> (estimado, tras ~${(CEDEAR_DIVIDEND_FEE * 100).toFixed(1)}% de comisión de custodia, antes de retención impositiva)` : ' (esperando CCL para el neto en pesos)'}.</div>` : ''}
       <div class="div-bars">
         ${recent.map(x => `<div class="div-bar-col" title="${esc(x.date)}: ${fmtUsd(x.amount)}"><div class="div-bar" style="height:${Math.max(4, Math.round((x.amount / maxAmt) * 90))}px;"></div><div class="div-bar-label">${x.date.slice(2, 7)}</div></div>`).join('')}
       </div>
+      ${drip ? `<div class="port-note" style="padding:12px 0 4px;"><strong>DRIP (reinversión):</strong> US$10.000 en ${esc(dt.ticker)}, reinvirtiendo los dividendos 10 años al yield actual (${yld.toFixed(2)}%)${d.cagr3y != null ? ` y crecimiento ${d.cagr3y >= 0 ? '+' : ''}${d.cagr3y.toFixed(1)}%/año` : ''}, generaría <strong class="up">${fmtUsd(drip.reinvestedGain)}</strong> en dividendos compuestos vs ${fmtUsd(drip.cashGain)} cobrándolos — <strong>${fmtUsd(drip.extra)}</strong> extra por reinvertir. Supone precio estable y es antes de impuestos; aísla el efecto del interés compuesto del dividendo.</div>` : ''}
+      ${dt.capture ? `
+      <div class="port-note" style="padding:10px 0 4px;"><strong>Backtest de captura de dividendo</strong> (${dt.capture.events} ex-dividends históricos): comprar al cierre previo al ex-date y medir el resultado neto (precio + dividendo) después.</div>
+      <div class="bt-table-wrap" style="margin-bottom:10px;">
+        <table class="bt-table">
+          <thead><tr><th>Horizonte</th><th>Resultado neto prom.</th><th>Positivos</th></tr></thead>
+          <tbody>
+            ${dt.capture.rows.map(r => `<tr><td>${r.h} rueda${r.h === 1 ? '' : 's'} post ex</td><td class="${r.avgPct >= 0 ? 'bt-pos' : 'bt-neg'}">${r.avgPct >= 0 ? '+' : ''}${r.avgPct.toFixed(2)}%</td><td>${r.winRate}%</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="bt-disclaimer">${dt.capture.avgRecovery != null ? `El precio recuperó la caída del ex-date en ~${dt.capture.avgRecovery} ruedas en promedio (${Math.round(dt.capture.recoveredFrac * 100)}% de las veces dentro de 40 ruedas). ` : ''}La captura de dividendo rara vez es "gratis": el precio suele caer cerca del monto del dividendo en el ex-date. Resultado histórico, no garantía.</div>` : ''}
       <div class="div-history-list">
         ${d.items.slice(0, 10).map(x => `<div class="port-ops-row"><span class="port-reco-ticker">${fmtShortDate(x.date)}</span><span class="port-ops-detail">ex-dividend</span><span class="port-ops-realized">${fmtUsd(x.amount)}</span></div>`).join('')}
       </div>
@@ -3762,7 +4005,7 @@ function portfolioDividendsCardHTML(stats) {
     const ttm = items.filter(x => new Date(x.date + 'T00:00:00Z').getTime() >= cutoff).reduce((s, x) => s + x.amount, 0);
     if (ttm <= 0) continue;
     perHolding.push({
-      ticker: r.ticker, ttmPerShare: ttm, income: ttm * r.shares,
+      ticker: r.ticker, ttmPerShare: ttm, income: ttm * underlyingShares(r),
       yieldPct: r.d.price > 0 ? (ttm / r.d.price) * 100 : null,
       lastDate: items[0].date, lastAmount: items[0].amount, nextEx: div.nextExDate ?? null,
     });
@@ -4231,6 +4474,8 @@ async function loadPortfolioData() {
     }));
     contextLoaded = true;
   }
+  // Aviso de ex-dividend próximo por cada tenencia (una sola vez por fecha).
+  for (const h of holdings) notifyExDividend(h.ticker, portState.dividends[h.ticker]);
   syncPortfolioToTelegram(); // fire-and-forget: alimenta el resumen diario del bot
 
   const missing = holdings.filter(h => !portState.data[h.ticker] && !portState.loading.has(h.ticker));

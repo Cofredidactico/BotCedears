@@ -227,12 +227,27 @@ async function handleCheck(req, res) {
         const fmtU = (n) => 'US$' + Math.round(n).toLocaleString('en-US');
         const fmtA = (n) => 'AR$' + Math.round(n).toLocaleString('es-AR');
         const sign = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
+
+        // Heads-up de ex-dividends próximos (≤5 días) entre las tenencias —
+        // usa el mismo /api/dividends (cacheado 6h) que la web.
+        const exdivLines = [];
+        const nowMs = Date.now();
+        for (const h of holdings.slice(0, 25)) {
+          try {
+            const dv = await fetch(`${baseUrl}/api/dividends?symbol=${h.ticker}`).then(r => r.json()).catch(() => null);
+            if (!dv?.nextExDate) continue;
+            const days = Math.round((new Date(dv.nextExDate + 'T00:00:00Z') - nowMs) / 86400000);
+            if (days >= 0 && days <= 5) exdivLines.push(`📅 <b>${h.ticker}</b> ex-dividend en ${days === 0 ? 'hoy' : days + 'd'} (est. ${dv.nextExDate})`);
+          } catch (_) {}
+        }
+
         const msg = [
           '📊 <b>Resumen diario de tu cartera</b> — Investment Copilot AI',
           `Valor: ${fmtU(totalUsd)}${allHaveArs && totalArs > 0 ? ` · ${fmtA(totalArs)} (CEDEAR)` : ''}`,
           `Variación del día (ponderada): ${sign(weightedDay)}`,
           '',
           ...lines.map(l => `${l.changePct >= 0 ? '🟢' : '🔴'} <b>${l.ticker}</b> ${fmtU(l.val)} · ${sign(l.changePct)} hoy`),
+          ...(exdivLines.length ? ['', '<b>Ex-dividends próximos:</b>', ...exdivLines] : []),
         ].join('\n');
         await sendTelegramMessage(chatId, msg);
         await kvSet(`tg:digest:${chatId}`, today, 172800);
