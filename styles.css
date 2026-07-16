@@ -795,6 +795,15 @@ select.port-input { cursor: pointer; }
 }
 .screener-quick-chip:hover { border-color: var(--border-strong); color: var(--text); }
 .screener-quick-chip.active { background: var(--gold-soft); border-color: oklch(0.80 0.15 85 / 0.5); color: var(--gold-text); }
+
+/* dividendos & ex-dividend */
+.div-soon td { background: oklch(0.32 0.09 152 / 0.18); }
+.div-today { color: var(--up-text); font-weight: 700; }
+.div-bars { display: flex; align-items: flex-end; gap: 6px; height: 110px; padding: 10px 0 4px; border-bottom: 1px solid var(--border-soft); margin-bottom: 12px; overflow-x: auto; }
+.div-bar-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 34px; }
+.div-bar { width: 22px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, var(--up-text, oklch(0.78 0.15 152)), oklch(0.45 0.10 152)); }
+.div-bar-label { font-size: 9px; color: var(--text-faint); font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
+.div-history-list { margin-top: 4px; }
 .screener-filter { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--text-mute); }
 .screener-row { cursor: pointer; transition: background 0.15s; }
 .screener-row:hover td { background: var(--bg-input); }
