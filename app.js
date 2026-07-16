@@ -630,6 +630,7 @@ const withAlpha = (oklchStr, alpha) => oklchStr.replace(/\)\s*$/, ` / ${alpha})`
 const ICON_ATTR = 'class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
 const ICONS = {
   flag: `<svg ${ICON_ATTR}><line x1="5" y1="3" x2="5" y2="21"/><path d="M5 4.5h13l-3 4 3 4H5"/></svg>`,
+  coins: `<svg ${ICON_ATTR}><ellipse cx="8" cy="6" rx="5.5" ry="2.6"/><path d="M2.5 6v5c0 1.4 2.5 2.6 5.5 2.6"/><path d="M2.5 11v5c0 1.4 2.5 2.6 5.5 2.6"/><ellipse cx="16" cy="14" rx="5.5" ry="2.6"/><path d="M10.5 14v5c0 1.4 2.5 2.6 5.5 2.6s5.5-1.2 5.5-2.6v-5"/></svg>`,
   zap: `<svg ${ICON_ATTR}><polygon points="13,2 4,14 11,14 10,22 20,9 13,9"/></svg>`,
   chart: `<svg ${ICON_ATTR}><polyline points="3,17 9,10 13,14 21,5"/><circle cx="21" cy="5" r="1.4" fill="currentColor" stroke="none"/></svg>`,
   briefcase: `<svg ${ICON_ATTR}><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`,
@@ -1354,6 +1355,7 @@ const VIEW_PAGES = {
   backtest: { html: backtestPageHTML, wire: wireBacktestEvents, load: () => {} },
   calendar: { html: calendarPageHTML, wire: wireCalendarEvents, load: loadCalendarData },
   screener: { html: screenerPageHTML, wire: wireScreenerEvents, load: () => { if (!dashState.started) loadDashboardData(); } },
+  dividends: { html: dividendsPageHTML, wire: wireDividendsEvents, load: loadDividendsData },
   compare: { html: comparePageHTML, wire: wireCompareEvents, load: () => {} },
   settings: { html: settingsPageHTML, wire: wireSettingsEvents, load: () => {} },
   bonds: { html: bondsPageHTML, wire: wireBondsEvents, load: loadBondsData },
@@ -1935,9 +1937,10 @@ function technicalMetricRows(t, confluence, marketCorrelation, relativeStrength)
 
 function lastDividendLabel(dividends) {
   const items = dividends?.items ?? [];
-  if (!items.length) return 'Sin pagos registrados (últimos 2 años)';
+  if (!items.length) return 'Sin pagos registrados';
   const last = items[0];
-  return `${fmtUsd(last.amount)} el ${last.date}`;
+  const freq = dividends.frequency ? ` · ${dividends.frequency}` : '';
+  return `${fmtUsd(last.amount)} el ${last.date}${freq}`;
 }
 
 function fundamentalMetricRows(f, earnings, daysToEarnings, dividends) {
@@ -1962,6 +1965,7 @@ function fundamentalMetricRows(f, earnings, daysToEarnings, dividends) {
     { label: 'Debt/Equity', value: f.debtEquity != null ? f.debtEquity.toFixed(2) : 'N/D' },
     { label: 'Dividend Yield (TTM)', value: pct(f.dividendYield) },
     { label: 'Último dividendo pagado', value: lastDividendLabel(dividends) },
+    { label: 'Próximo ex-dividend (est.)', value: dividends?.items?.length && dividends.nextExDate ? `${dividends.nextExDate} (estimado por cadencia)` : 'N/D' },
   ];
 }
 
@@ -2028,6 +2032,7 @@ const SIDEBAR_NAV = [
   { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
   { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
   { view: 'screener', label: 'Screener', icon: 'filter' },
+  { view: 'dividends', label: 'Dividendos', icon: 'coins' },
   { view: 'compare', label: 'Comparador', icon: 'compare' },
   { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
   { view: 'alerts', label: 'Alertas', icon: 'warning' },
@@ -2583,6 +2588,208 @@ function wireScreenerEvents() {
   els.report.querySelectorAll('.screener-row').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.ticker));
   });
+}
+
+/* ───────────────────────── dividendos + ex-dividend ─────────────────────────
+ * Universo curado de pagadores de dividendos conocidos. Se carga el historial
+ * real (Yahoo, vía /api/dividends) de cada uno para el calendario de próximos
+ * ex-dividends, el ranking por yield y el detalle por activo. Las acciones que
+ * no pagan dividendos (MELI, NVDA marginal, cripto) no van acá. */
+const DIVIDEND_UNIVERSE = [
+  'KO', 'JNJ', 'PG', 'PEP', 'MCD', 'WMT', 'HD', 'MMM', 'CL', 'KMB', 'GIS', 'MDLZ', 'MO', 'PM',
+  'XOM', 'CVX', 'COP', 'KMI', 'VZ', 'T', 'IBM', 'CSCO', 'TXN', 'AVGO', 'QCOM', 'AAPL', 'MSFT',
+  'JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'AXP', 'BLK', 'PFE', 'MRK', 'ABBV', 'AMGN', 'JNJ',
+  'CAT', 'DE', 'LMT', 'RTX', 'HON', 'UPS', 'NKE', 'SBUX', 'LOW', 'TGT', 'GGAL', 'BMA', 'SPY', 'DIA',
+];
+const divState = { data: {}, prices: {}, loading: new Set(), started: false, sortBy: 'nextEx', detailTicker: '', detail: null, detailLoading: false };
+
+function dividendPrice(ticker) {
+  return dashState.data[ticker]?.price ?? watchState.data[ticker]?.price ?? portState.data[ticker]?.price ?? divState.prices[ticker] ?? null;
+}
+function dividendYield(ticker, ttm) {
+  const price = dividendPrice(ticker);
+  return price && ttm > 0 ? (ttm / price) * 100 : null;
+}
+function daysUntil(isoDate) {
+  if (!isoDate) return null;
+  const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+  return Math.round((new Date(isoDate + 'T00:00:00Z') - today) / 86400000);
+}
+function fmtShortDate(iso) {
+  if (!iso) return 'N/D';
+  const M = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const d = new Date(iso + 'T00:00:00Z');
+  return `${d.getUTCDate()} ${M[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}`;
+}
+
+async function loadDividendsData() {
+  divState.started = true;
+  if (!dashState.started) loadDashboardData(); // precios para calcular el yield
+  const pending = DIVIDEND_UNIVERSE.filter((t, i) => DIVIDEND_UNIVERSE.indexOf(t) === i && !(t in divState.data) && !divState.loading.has(t));
+  for (let i = 0; i < pending.length; i += 6) {
+    const batch = pending.slice(i, i + 6);
+    await Promise.all(batch.map(async (ticker) => {
+      divState.loading.add(ticker);
+      try {
+        divState.data[ticker] = await getDividends(ticker);
+        // Precio para el yield: si el ticker no está en el universo del
+        // Dashboard (no tiene precio cacheado), se pide su quote — cacheada
+        // 60s, sin multiplicar pedidos entre renders.
+        if (dividendPrice(ticker) == null) {
+          try { divState.prices[ticker] = (await getQuote(ticker))?.usd ?? null; } catch (_) {}
+        }
+      } catch (e) { divState.data[ticker] = { items: [], error: true }; }
+      finally {
+        divState.loading.delete(ticker);
+        if (!state.asset && state.view === 'dividends') renderReport();
+      }
+    }));
+    if (i + 6 < pending.length) await new Promise(res => setTimeout(res, 250));
+  }
+}
+
+async function loadDividendDetail(ticker) {
+  divState.detailTicker = ticker;
+  divState.detail = null;
+  divState.detailLoading = true;
+  renderReport();
+  try {
+    const [div, quote, asset] = await Promise.all([getDividends(ticker), getQuote(ticker), getAsset(ticker)]);
+    divState.detail = { ticker, div, price: quote?.usd ?? null, cedearArs: quote?.cedearArs ?? null, ratio: quote?.ratio ?? asset?.ratio ?? null, name: asset?.name ?? ticker };
+  } catch (e) {
+    divState.detail = { ticker, error: String(e) };
+  } finally {
+    divState.detailLoading = false;
+    if (state.view === 'dividends') renderReport();
+  }
+}
+
+function dividendsPageHTML() {
+  const loaded = DIVIDEND_UNIVERSE.filter((t, i) => DIVIDEND_UNIVERSE.indexOf(t) === i).map(t => ({ t, d: divState.data[t] })).filter(e => e.d && e.d.items?.length);
+  const loadingCount = new Set(DIVIDEND_UNIVERSE).size - loaded.length;
+
+  // Filas enriquecidas para las tablas.
+  const rows = loaded.map(({ t, d }) => ({
+    ticker: t, name: universe.find(a => a.ticker === t)?.name ?? t,
+    yield: dividendYield(t, d.ttm), ttm: d.ttm, frequency: d.frequency,
+    nextEx: d.nextExDate, daysTo: daysUntil(d.nextExDate), lastAmount: d.lastAmount, cagr: d.cagr3y,
+  }));
+
+  const upcoming = rows.filter(r => r.daysTo != null && r.daysTo >= -3).sort((a, b) => a.daysTo - b.daysTo).slice(0, 14);
+  const byYield = rows.filter(r => r.yield != null).sort((a, b) => b.yield - a.yield).slice(0, 12);
+
+  return `
+    ${sectionTitleHTML('Dividendos & Ex-Dividend', 'coins')}
+    <div class="dash-intro">Calendario de próximos ex-dividends, mejores pagadores y el historial real de pagos de cada activo (Yahoo Finance — fechas ex-dividend reales). <strong>Ex-dividend</strong>: para cobrar el próximo dividendo tenés que tener la acción <em>antes</em> de esa fecha; si comprás en el ex-date o después, el dividendo lo cobra el vendedor. Las fechas próximas son <strong>estimadas según la cadencia histórica</strong> (mediana de intervalos entre pagos) — no son una fecha confirmada por la empresa.${loadingCount > 0 ? ` Cargando ${loadingCount} activo(s) más…` : ''}</div>
+
+    <div class="cedear-note" style="margin-bottom:22px;">
+      <strong>CEDEARs y dividendos:</strong> el tenedor de un CEDEAR también cobra los dividendos del activo subyacente, ajustados por el ratio de conversión, acreditados en dólares/pesos por el agente — habitualmente con una pequeña comisión de custodia y la retención impositiva que corresponda. El yield mostrado es el del activo subyacente en USD.
+    </div>
+
+    ${sectionTitleHTML('Próximos Ex-Dividends', 'calendar')}
+    ${!upcoming.length ? `<div class="card watch-empty">${loadingCount > 0 ? 'Cargando calendario de dividendos…' : 'No hay ex-dividends próximos estimados en el universo cargado.'}</div>` : `
+    <div class="card bt-table-card">
+      <div class="bt-table-wrap">
+        <table class="bt-table">
+          <thead><tr><th>Activo</th><th>Próx. ex-dividend (est.)</th><th>Falta</th><th>Monto</th><th>Frecuencia</th><th>Yield (TTM)</th></tr></thead>
+          <tbody>
+            ${upcoming.map(r => `
+              <tr class="port-row ${r.daysTo >= 0 && r.daysTo <= 7 ? 'div-soon' : ''}" data-div-ticker="${esc(r.ticker)}">
+                <td class="bt-label-cell" style="font-weight:700;">${esc(r.ticker)} <span class="port-pnl-abs">${esc(r.name)}</span></td>
+                <td>${fmtShortDate(r.nextEx)}</td>
+                <td>${r.daysTo < 0 ? '<span class="bt-nd">pasó</span>' : r.daysTo === 0 ? '<span class="div-today">hoy</span>' : `${r.daysTo}d`}</td>
+                <td>${r.lastAmount != null ? fmtUsd(r.lastAmount) : 'N/D'}</td>
+                <td>${esc(r.frequency ?? 'N/D')}</td>
+                <td class="${r.yield != null && r.yield >= 4 ? 'bt-pos' : ''}">${r.yield != null ? r.yield.toFixed(2) + '%' : 'N/D'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="bt-disclaimer">Fechas estimadas proyectando la cadencia histórica real de cada activo — confirmá el ex-date oficial con tu bróker antes de operar por el dividendo.</div>
+    </div>`}
+
+    ${sectionTitleHTML('Mejores Pagadores (Yield TTM)', 'trend')}
+    ${!byYield.length ? `<div class="card watch-empty">Cargando ranking de dividendos…</div>` : `
+    <div class="card bt-table-card">
+      <div class="bt-table-wrap">
+        <table class="bt-table">
+          <thead><tr><th>Activo</th><th>Yield (TTM)</th><th>Pago anual</th><th>Frecuencia</th><th>Crec. 3a (CAGR)</th><th>Próx. ex (est.)</th></tr></thead>
+          <tbody>
+            ${byYield.map(r => `
+              <tr class="port-row" data-div-ticker="${esc(r.ticker)}">
+                <td class="bt-label-cell" style="font-weight:700;">${esc(r.ticker)} <span class="port-pnl-abs">${esc(r.name)}</span></td>
+                <td style="font-weight:700;" class="${r.yield >= 4 ? 'bt-pos' : ''}">${r.yield.toFixed(2)}%</td>
+                <td>${fmtUsd(r.ttm)}</td>
+                <td>${esc(r.frequency ?? 'N/D')}</td>
+                <td class="${r.cagr != null ? (r.cagr >= 0 ? 'bt-pos' : 'bt-neg') : 'bt-nd'}">${r.cagr != null ? `${r.cagr >= 0 ? '+' : ''}${r.cagr.toFixed(1)}%/año` : '—'}</td>
+                <td>${fmtShortDate(r.nextEx)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`}
+
+    ${sectionTitleHTML('Detalle por Activo', 'chart')}
+    <div class="card port-form-card">
+      <div class="port-form">
+        <input list="div-ticker-list" id="div-ticker" class="port-input" placeholder="Ticker (ej. KO)" aria-label="Ticker para ver dividendos" autocomplete="off" style="text-transform:uppercase;" value="${esc(divState.detailTicker)}" />
+        <datalist id="div-ticker-list">${universe.filter(a => a.category !== 'Cripto').map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
+        <button class="port-add-btn" id="div-detail-run">${divState.detailLoading ? 'Cargando…' : 'Ver dividendos'}</button>
+      </div>
+    </div>
+    ${dividendDetailHTML()}
+  `;
+}
+
+function dividendDetailHTML() {
+  if (divState.detailLoading) return `<div class="card watch-empty">Cargando historial de dividendos…</div>`;
+  const dt = divState.detail;
+  if (!dt) return '';
+  if (dt.error || !dt.div?.items?.length) {
+    return `<div class="card watch-empty">${esc(dt.ticker)} no registra pagos de dividendos en los últimos 3 años (o no hay datos disponibles).</div>`;
+  }
+  const d = dt.div;
+  const yld = dt.price && d.ttm > 0 ? (d.ttm / dt.price) * 100 : null;
+  const perCedear = d.lastAmount != null && dt.ratio ? d.lastAmount / dt.ratio : null;
+  const stat = (label, value, sub) => `<div class="risk-metric"><div class="risk-metric-label">${label}</div><div class="risk-metric-value">${value}</div>${sub ? `<div class="risk-metric-hint">${sub}</div>` : ''}</div>`;
+  // Mini-gráfico de barras del monto por pago (últimos ~12).
+  const recent = d.items.slice(0, 12).reverse();
+  const maxAmt = Math.max(...recent.map(x => x.amount));
+  return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">${esc(dt.name)} (${esc(dt.ticker)}) — dividendos</div>
+      <div class="risk-metrics-grid" style="margin-bottom:18px;">
+        ${stat('Yield (TTM)', yld != null ? `${yld.toFixed(2)}%` : 'N/D', d.ttm > 0 ? `${fmtUsd(d.ttm)}/acción al año` : '')}
+        ${stat('Frecuencia', esc(d.frequency ?? 'N/D'), d.medianIntervalDays ? `cada ~${d.medianIntervalDays} días` : '')}
+        ${stat('Próx. ex-dividend', fmtShortDate(d.nextExDate), 'estimado por cadencia')}
+        ${stat('Crecimiento 3a', d.cagr3y != null ? `${d.cagr3y >= 0 ? '+' : ''}${d.cagr3y.toFixed(1)}%/año` : 'N/D', 'CAGR del pago')}
+      </div>
+      ${perCedear != null ? `<div class="port-note" style="padding-bottom:12px;">Equivalente por CEDEAR (ratio 1:${dt.ratio}): ~${fmtUsd(perCedear)} por el último pago, antes de comisiones y retenciones.</div>` : ''}
+      <div class="div-bars">
+        ${recent.map(x => `<div class="div-bar-col" title="${esc(x.date)}: ${fmtUsd(x.amount)}"><div class="div-bar" style="height:${Math.max(4, Math.round((x.amount / maxAmt) * 90))}px;"></div><div class="div-bar-label">${x.date.slice(2, 7)}</div></div>`).join('')}
+      </div>
+      <div class="div-history-list">
+        ${d.items.slice(0, 10).map(x => `<div class="port-ops-row"><span class="port-reco-ticker">${fmtShortDate(x.date)}</span><span class="port-ops-detail">ex-dividend</span><span class="port-ops-realized">${fmtUsd(x.amount)}</span></div>`).join('')}
+      </div>
+      <div class="bt-disclaimer">Historial real de fechas ex-dividend (Yahoo Finance). El próximo ex-dividend es una estimación por la cadencia histórica, no una fecha confirmada.</div>
+    </div>`;
+}
+
+function wireDividendsEvents() {
+  els.report.querySelectorAll('[data-div-ticker]').forEach(el => {
+    el.addEventListener('click', () => loadDividendDetail(el.dataset.divTicker));
+  });
+  const runBtn = document.getElementById('div-detail-run');
+  const input = document.getElementById('div-ticker');
+  if (runBtn && input) {
+    const run = () => {
+      const t = input.value.trim().toUpperCase();
+      if (t && universe.some(a => a.ticker === t)) loadDividendDetail(t);
+      else showToast('Ticker desconocido — elegí uno de la lista.', 'info');
+    };
+    runBtn.addEventListener('click', run);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+  }
 }
 
 /** Página de Comparador: hasta 3 tickers elegidos por el usuario, con score
@@ -3557,7 +3764,7 @@ function portfolioDividendsCardHTML(stats) {
     perHolding.push({
       ticker: r.ticker, ttmPerShare: ttm, income: ttm * r.shares,
       yieldPct: r.d.price > 0 ? (ttm / r.d.price) * 100 : null,
-      lastDate: items[0].date, lastAmount: items[0].amount,
+      lastDate: items[0].date, lastAmount: items[0].amount, nextEx: div.nextExDate ?? null,
     });
   }
   if (!perHolding.length && pending) {
@@ -3584,10 +3791,10 @@ function portfolioDividendsCardHTML(stats) {
       ${perHolding.slice(0, 6).map(h => `
         <div class="port-ops-row">
           <span class="port-reco-ticker">${esc(h.ticker)}</span>
-          <span class="port-ops-detail">${pv(fmtUsd(h.income))}/año · yield ${h.yieldPct != null ? h.yieldPct.toFixed(2) + '%' : 'N/D'}</span>
+          <span class="port-ops-detail">${pv(fmtUsd(h.income))}/año · yield ${h.yieldPct != null ? h.yieldPct.toFixed(2) + '%' : 'N/D'}${h.nextEx ? ` · próx. ex ${esc(h.nextEx)}` : ''}</span>
           <span class="alert-history-time">último: ${pv(fmtUsd(h.lastAmount))} el ${esc(h.lastDate)}</span>
         </div>`).join('')}
-      <div class="port-note" style="padding-top:8px; color:var(--text-mute);">Historial real de pagos (Finnhub, últimos 2 años) — no se predicen fechas futuras porque la fuente gratuita no las garantiza. Recordá que los dividendos tributan Ganancias (ver Impacto fiscal).</div>
+      <div class="port-note" style="padding-top:8px; color:var(--text-mute);">Historial real de fechas ex-dividend (Yahoo Finance). El próximo ex-dividend es una estimación por la cadencia histórica, no una fecha confirmada. Recordá que los dividendos tributan Ganancias (ver Impacto fiscal).</div>
     </div>`;
 }
 

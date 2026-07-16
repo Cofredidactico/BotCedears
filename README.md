@@ -355,6 +355,32 @@ unidades.
   CEDEAR de la ficha (solo con precio real, no con la estimación vía CCL,
   que por construcción ya es igual al CCL).
 
+## Dividendos & Ex-Dividend (apartado nuevo) — y fix de datos
+
+**Bug de producción corregido**: el endpoint `stock/dividend` de Finnhub es
+premium; en el free tier devolvía siempre vacío, así que los dividendos NUNCA
+aparecían en producción (yield, último pago, card de dividendos del Portfolio,
+todo en blanco). `api/dividends` se migró a **Yahoo Finance** (chart con
+`events=div`, gratis y sin API key), que devuelve las **fechas ex-dividend
+reales** y el monto de cada pago. Finnhub queda como respaldo.
+
+Nueva página **Dividendos** (sidebar):
+- **Calendario de próximos ex-dividends** del universo de pagadores, ordenado
+  por fecha, resaltando los que caen dentro de 7 días. Las fechas próximas se
+  **proyectan de la cadencia histórica real** (mediana de intervalos entre
+  pagos) y se marcan como estimadas — no son fechas confirmadas por la empresa.
+- **Ranking de mejores pagadores** por yield TTM, con pago anual, frecuencia y
+  crecimiento del dividendo (CAGR 3 años).
+- **Detalle por activo**: historial real de fechas ex-dividend, mini-gráfico de
+  la evolución del pago, yield, frecuencia, próximo ex estimado y el
+  equivalente por CEDEAR (ajustado por ratio).
+- Nota sobre CEDEARs: el tenedor cobra el dividendo del subyacente ajustado por
+  ratio, con comisión de custodia y retención impositiva.
+
+La ficha del activo suma la fila **"Próximo ex-dividend (est.)"** y frecuencia
+en el último dividendo; la card de dividendos del Portfolio ahora muestra el
+próximo ex-dividend por tenencia.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

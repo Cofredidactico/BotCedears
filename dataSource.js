@@ -130,7 +130,38 @@ const Mock = {
   // Sin serie histórica real del CCL en modo mock — vacío en vez de inventar
   // cotizaciones pasadas (los benchmarks de cartera necesitan el dato real).
   async getCCLHistory() { return { items: [], isReal: false }; },
-  async getDividends() { return { items: [], isReal: false }; },
+  // En modo demo se sintetiza un historial plausible de dividendos para los
+  // pagadores conocidos (misma lógica de "datos de demostración" que las
+  // velas/quotes mock, con badges "demo" en toda la UI). En producción esto lo
+  // reemplaza Yahoo con las fechas ex-dividend reales.
+  async getDividends(ticker) {
+    const PROFILE = { // yield anual aprox + frecuencia por año
+      KO: [3.0, 4], JNJ: [3.0, 4], PG: [2.4, 4], VZ: [6.5, 4], T: [5.0, 4], XOM: [3.3, 4],
+      CVX: [4.2, 4], PFE: [6.0, 4], MO: [8.0, 4], PM: [5.0, 4], IBM: [4.0, 4], MMM: [5.5, 4],
+      KO_: [3, 4], MSFT: [0.8, 4], AAPL: [0.5, 4], JPM: [2.2, 4], HD: [2.4, 4], MCD: [2.3, 4],
+      PEP: [3.2, 4], KMB: [3.6, 4], GIS: [3.4, 4], O: [5.5, 12], MAIN: [6.5, 12],
+      NVDA: [0.03, 4], AVGO: [1.2, 4], TXN: [2.9, 4], CSCO: [2.8, 4], BAC: [2.4, 4],
+      WMT: [1.2, 4], GGAL: [1.5, 4], YPF: [0, 0], BMA: [3.0, 2],
+    };
+    const p = PROFILE[ticker];
+    if (!p || p[1] === 0) return { items: [], frequency: null, ttm: 0, nextExDate: null, isReal: false };
+    const [yld, perYear] = p;
+    const u = (await getAsset(ticker)) || { refPriceUsd: 100 };
+    const perPay = (u.refPriceUsd * yld / 100) / perYear;
+    const intervalDays = Math.round(365 / perYear);
+    const items = [];
+    const today = new Date();
+    for (let i = 0; i < perYear * 3; i++) {
+      const d = new Date(today); d.setDate(d.getDate() - i * intervalDays - 10);
+      // leve crecimiento del pago hacia el presente
+      const amt = perPay * (1 - i * 0.008);
+      items.push({ date: d.toISOString().slice(0, 10), amount: Math.round(amt * 1000) / 1000 });
+    }
+    const ttm = items.filter(x => (Date.now() - new Date(x.date).getTime()) < 365 * 86400000).reduce((s, x) => s + x.amount, 0);
+    const next = new Date(items[0].date); next.setDate(next.getDate() + intervalDays);
+    const freqLabel = perYear === 12 ? 'Mensual' : perYear === 4 ? 'Trimestral' : perYear === 2 ? 'Semestral' : 'Anual';
+    return { items, frequency: freqLabel, perYear, medianIntervalDays: intervalDays, ttm, nextExDate: next.toISOString().slice(0, 10), nextExEstimated: true, lastAmount: items[0].amount, lastExDate: items[0].date, cagr3y: 2.4, isReal: false };
+  },
   async getBonds() { return { items: [], isReal: false }; },
 };
 
