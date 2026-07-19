@@ -586,6 +586,39 @@ sobre los cierres reales ya pedidos (sin requests extra):
   anillos. Una cartera puede estar en verde pero apoyada en una o dos posiciones
   — la amplitud lo delata.
 
+## Dashboard más completo, didáctico y estético (9 mejoras)
+
+- **Clima del mercado**: tarjeta hero con un veredicto de un vistazo
+  (☀️ risk-on / ⛅ mixto / 🌧️ risk-off) que combina amplitud del universo, VIX,
+  tendencia del S&P 500 y Fear&Greed (`marketClimate`) — cada factor visible,
+  es sentimiento, no predicción.
+- **Amplitud del mercado (breadth)**: anillos con el % del universo en señal de
+  compra, sobre su media de 50 ruedas y con momentum positivo, más el conteo de
+  activos cerca de máximos/mínimos recientes (`marketBreadth`). Delata si el
+  mercado sube "con todos" o apoyado en pocos.
+- **Qué mirar hoy (agenda)**: feed accionable que junta entradas/salidas de
+  zona, gaps de apertura significativos y setups de trade corto del universo
+  (`marketAgenda`) — clic en cualquier fila abre el informe.
+- **Idea del día**: la mejor oportunidad del universo por convicción, con una
+  tesis en criollo y su plan operativo (`ideaOfTheDay`, reusa el motor de
+  convicción del Portfolio; excluye índices amplios tipo SPY/QQQ).
+- **Nuevos máximos/mínimos**: conteo de cuántos activos cotizan cerca de sus
+  máximos vs. mínimos recientes, dentro de la tarjeta de amplitud.
+- **Destacados del día (movers con contexto)**: mayores subas y bajas con
+  mini-sparkline y el motivo técnico de cada una (`moversWidget`), en vez de
+  solo el %.
+- **Glosario / tooltips didácticos**: íconos ⓘ que explican score, zona de
+  compra, clima, etc. para quien recién entra (`infoTip`).
+- **Hero renovado**: estado de la **sesión de mercado** en tiempo real
+  (abierto / pre-market / after-hours / cerrado, `marketSessionState`) y una
+  **cinta de índices** (S&P 500, Nasdaq, Bitcoin, dólar CCL).
+- **Badge de convicción** en cada tarjeta de oportunidad (alta/media), del
+  mismo motor que el Portfolio.
+
+Todo se calcula sobre el universo curado ya cargado, sin requests extra, y las
+cuatro secciones nuevas (Idea del Día, Qué Mirar Hoy, Amplitud, Destacados) se
+integran al sistema de personalización del Dashboard (mostrar/ocultar/reordenar).
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente
