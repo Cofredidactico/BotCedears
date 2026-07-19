@@ -601,6 +601,17 @@ select.port-input { cursor: pointer; }
 .chart-card svg { display: block; }
 .chart-svg-wrap { position: relative; }
 .chart-svg-wrap svg { cursor: crosshair; }
+/* línea de estado OHLC estilo terminal profesional (esquina sup. izq.) */
+.chart-statusline {
+  position: absolute; top: 4px; left: 6px; z-index: 4; pointer-events: none;
+  display: flex; flex-wrap: wrap; gap: 12px; font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; color: var(--text-mute); background: oklch(0.16 0.02 262 / 0.55);
+  padding: 3px 9px; border-radius: 6px; backdrop-filter: blur(2px);
+}
+.chart-statusline b { color: var(--text); font-weight: 600; }
+.chart-statusline .csl-up { color: var(--up-text); font-weight: 700; }
+.chart-statusline .csl-down { color: var(--down-text); font-weight: 700; }
+@media (max-width: 640px) { .chart-statusline { font-size: 10px; gap: 8px; } }
 .chart-hover-tooltip {
   display: none; position: absolute; z-index: 5; pointer-events: none;
   background: oklch(0.16 0.03 262 / 0.96); border: 1px solid var(--border-strong); border-radius: 8px;

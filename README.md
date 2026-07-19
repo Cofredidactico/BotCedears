@@ -433,6 +433,27 @@ mensuales) cae dentro de pocos días de la real. Confirmá siempre con tu bróke
   si la traducción falla se muestra el titular original — nunca se rompe la
   carga de noticias por esto.
 
+## Gráfico profesional (nivel terminal de trading)
+
+El gráfico de precio de la ficha (SVG puro, sin librerías externas) se rehízo
+para acercarlo a una plataforma profesional:
+- **Crosshair completo**: líneas vertical y horizontal que siguen el mouse,
+  con etiqueta de **precio flotante en el eje derecho** y de **fecha en el eje
+  inferior**, más el tooltip OHLC.
+- **Línea de estado OHLC** arriba a la izquierda (estilo TradingView) que
+  muestra Open/High/Low/Close y variación de la vela bajo el cursor.
+- **Panel MACD** nuevo (histograma coloreado por dirección + líneas MACD y
+  señal + línea cero), sumado a Volumen y RSI.
+- **RSI con zonas de sobrecompra/sobreventa sombreadas** y etiqueta del valor
+  actual; **volumen con media móvil** y máximo del rango.
+- **Velas alcistas huecas / bajistas llenas** (convención profesional),
+  **relleno de Bandas de Bollinger**, **grilla temporal** vertical, marcadores
+  **▲/▼ de máximo y mínimo** del rango visible, y **punto de último precio con
+  glow**.
+- La **leyenda muestra los valores actuales** de las EMAs (20/50/200).
+
+Todo sale del mismo OHLCV real que el resto del análisis — nada se simula.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

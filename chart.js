@@ -5,18 +5,20 @@
  * Volumen y RSI debajo, todo sobre el mismo OHLCV real que usa
  * indicators.js — nada se simula acá.
  */
-import { ema, bollinger, rsi } from './indicators.js';
+import { ema, bollinger, rsi, macd, sma } from './indicators.js';
 
 const W = 960;
-const PAD_L = 6, PAD_R = 76;
-const GAP = 16;
-const PRICE_H = 240, VOL_H = 56, RSI_H = 80;
+const PAD_L = 6, PAD_R = 82;
+const GAP = 14;
+const PRICE_H = 258, VOL_H = 48, MACD_H = 60, RSI_H = 68;
 const DATE_H = 24;
-const PRICE_TOP = 14;
+const PRICE_TOP = 16;
 const PRICE_BOTTOM = PRICE_TOP + PRICE_H;
 const VOL_TOP = PRICE_BOTTOM + GAP;
 const VOL_BOTTOM = VOL_TOP + VOL_H;
-const RSI_TOP = VOL_BOTTOM + GAP;
+const MACD_TOP = VOL_BOTTOM + GAP;
+const MACD_BOTTOM = MACD_TOP + MACD_H;
+const RSI_TOP = MACD_BOTTOM + GAP;
 const RSI_BOTTOM = RSI_TOP + RSI_H;
 const H = RSI_BOTTOM + DATE_H;
 
@@ -24,9 +26,10 @@ const GREEN = 'oklch(0.72 0.17 152)', RED = 'oklch(0.68 0.19 23)';
 const GOLD = 'oklch(0.80 0.15 85)', WHITE = 'oklch(0.90 0.012 260)';
 const BLUE = 'oklch(0.78 0.13 199)';
 const PURPLE = 'oklch(0.74 0.15 291)';
-const GRID = 'oklch(0.32 0.03 262)', AXIS_TEXT = 'oklch(0.58 0.018 260)', PANEL_LABEL = 'oklch(0.62 0.018 260)';
-const BUY_ZONE_FILL = 'oklch(0.72 0.17 152 / 0.16)', BUY_ZONE_LINE = 'oklch(0.76 0.18 152 / 0.55)';
-const SELL_ZONE_FILL = 'oklch(0.75 0.15 70 / 0.16)', SELL_ZONE_LINE = 'oklch(0.75 0.15 70 / 0.55)';
+const GRID = 'oklch(0.30 0.025 262)', GRID_SOFT = 'oklch(0.27 0.02 262)';
+const AXIS_TEXT = 'oklch(0.58 0.018 260)', PANEL_LABEL = 'oklch(0.66 0.02 260)';
+const BUY_ZONE_FILL = 'oklch(0.72 0.17 152 / 0.14)', BUY_ZONE_LINE = 'oklch(0.76 0.18 152 / 0.55)';
+const SELL_ZONE_FILL = 'oklch(0.75 0.15 70 / 0.14)', SELL_ZONE_LINE = 'oklch(0.75 0.15 70 / 0.55)';
 const STOP_COLOR = 'oklch(0.70 0.21 23)';
 const TP_COLOR = 'oklch(0.80 0.15 85)';
 
@@ -36,8 +39,10 @@ function scaleY(value, min, max, top, bottom) {
 }
 
 function niceFmt(v) {
+  if (v == null || isNaN(v)) return '—';
   return v >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 0 }) : v.toFixed(2);
 }
+function fmtVol(n) { return n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(0) + 'K' : String(n); }
 
 function polyline(series, x, y, color, opacity = 0.9, width = 1.5) {
   let d = '', started = false;
@@ -47,10 +52,33 @@ function polyline(series, x, y, color, opacity = 0.9, width = 1.5) {
     d += `${started ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)} `;
     started = true;
   }
-  return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" opacity="${opacity}"/>` : '';
+  return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" opacity="${opacity}" stroke-linejoin="round" stroke-linecap="round"/>` : '';
 }
 
-export function renderPriceChartSVG(candles, { support, resistance, plan } = {}, windowSize = 130) {
+// Extensión del eje de precio — compartida por el render y el crosshair para
+// que el mapeo mouse→precio coincida exactamente con lo dibujado.
+function priceExtent(candles, start, opts) {
+  const h = candles.h.slice(start), l = candles.l.slice(start);
+  const bb = bollinger(candles.c, 20, 2);
+  const bbU = bb.upper.slice(start).filter(x => !isNaN(x)), bbL = bb.lower.slice(start).filter(x => !isNaN(x));
+  let pMin = Math.min(...l), pMax = Math.max(...h);
+  if (bbU.length) pMax = Math.max(pMax, ...bbU);
+  if (bbL.length) pMin = Math.min(pMin, ...bbL);
+  const { support, resistance, plan } = opts || {};
+  if (support != null && isFinite(support)) pMin = Math.min(pMin, support);
+  if (resistance != null && isFinite(resistance)) pMax = Math.max(pMax, resistance);
+  if (plan) {
+    if (isFinite(plan.buyLow)) pMin = Math.min(pMin, plan.buyLow);
+    if (isFinite(plan.stopLoss)) pMin = Math.min(pMin, plan.stopLoss);
+    if (isFinite(plan.tp1)) pMax = Math.max(pMax, plan.tp1);
+    if (isFinite(plan.sellHigh)) pMax = Math.max(pMax, plan.sellHigh);
+  }
+  const pPad = (pMax - pMin) * 0.08 || pMax * 0.02 || 1;
+  return { pMin: pMin - pPad, pMax: pMax + pPad };
+}
+
+export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
+  const { support, resistance, plan } = opts;
   const nTotal = candles.c.length;
   if (nTotal < 5) return '<div class="chart-empty">Historial insuficiente para graficar.</div>';
 
@@ -66,38 +94,47 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
   const bb = bollinger(candles.c, 20, 2);
   const bbUpper = bb.upper.slice(start), bbLower = bb.lower.slice(start);
   const rsiFull = rsi(candles.c, 14).slice(start);
+  const { macdLine: macdF, signalLine: signalF, hist: histF } = macd(candles.c);
+  const macdLine = macdF.slice(start), signalLine = signalF.slice(start), macdHist = histF.slice(start);
+  const volMa = sma(v, 20);
   const hasVolume = v.some(x => x > 0);
 
   const plotW = W - PAD_L - PAD_R;
   const slot = plotW / count;
-  const candleW = Math.max(1.2, Math.min(8, slot * 0.62));
+  const candleW = Math.max(1.2, Math.min(9, slot * 0.66));
   const x = (i) => PAD_L + slot * i + slot / 2;
 
-  /* ── panel de precio ── */
-  let pMin = Math.min(...l), pMax = Math.max(...h);
-  const bbValsUpper = bbUpper.filter(x => !isNaN(x)), bbValsLower = bbLower.filter(x => !isNaN(x));
-  if (bbValsUpper.length) pMax = Math.max(pMax, ...bbValsUpper);
-  if (bbValsLower.length) pMin = Math.min(pMin, ...bbValsLower);
-  if (support != null && isFinite(support)) pMin = Math.min(pMin, support);
-  if (resistance != null && isFinite(resistance)) pMax = Math.max(pMax, resistance);
-  if (plan) {
-    if (isFinite(plan.buyLow)) pMin = Math.min(pMin, plan.buyLow);
-    if (isFinite(plan.stopLoss)) pMin = Math.min(pMin, plan.stopLoss);
-    if (isFinite(plan.tp1)) pMax = Math.max(pMax, plan.tp1);
-    if (isFinite(plan.sellHigh)) pMax = Math.max(pMax, plan.sellHigh);
-  }
-  const pPad = (pMax - pMin) * 0.08 || pMax * 0.02 || 1;
-  pMin -= pPad; pMax += pPad;
+  /* ── escala de precio ── */
+  const { pMin, pMax } = priceExtent(candles, start, opts);
   const yPrice = (val) => scaleY(val, pMin, pMax, PRICE_TOP, PRICE_BOTTOM);
 
-  /* ── zonas de compra/venta del plan operativo (señal visual del análisis) ── */
-  let zonesSvg = '';
+  const last = (arr) => { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null && !isNaN(arr[i])) return arr[i]; return null; };
+
+  /* ── grilla horizontal + etiquetas de precio a la derecha ── */
+  let priceGridSvg = '';
+  for (let i = 0; i <= 5; i++) {
+    const val = pMin + ((pMax - pMin) * i) / 5;
+    const yy = yPrice(val).toFixed(1);
+    priceGridSvg += `<line x1="${PAD_L}" y1="${yy}" x2="${W - PAD_R}" y2="${yy}" stroke="${GRID_SOFT}" stroke-width="1"/>`;
+    priceGridSvg += `<text x="${W - PAD_R + 6}" y="${yy}" fill="${AXIS_TEXT}" font-size="10" font-family="IBM Plex Mono, monospace" dominant-baseline="middle">${niceFmt(val)}</text>`;
+  }
+
+  /* ── grilla vertical temporal (tenue, alineada con los ticks de fecha) ── */
+  let vGridSvg = '';
+  const ticks = 6;
+  for (let k = 1; k < ticks; k++) {
+    const i = Math.min(count - 1, Math.round((k * (count - 1)) / ticks));
+    vGridSvg += `<line x1="${x(i).toFixed(1)}" y1="${PRICE_TOP}" x2="${x(i).toFixed(1)}" y2="${RSI_BOTTOM}" stroke="${GRID_SOFT}" stroke-width="1" stroke-dasharray="1 5" opacity="0.7"/>`;
+  }
+
+  /* ── zonas de compra/venta del plan operativo ── */
   const pillLabel = (xLeft, yCenter, label, bg, fg, anchor = 'start') => {
     const w = label.length * 6.3 + 12;
     const rectX = anchor === 'start' ? xLeft : xLeft - w;
     return `<rect x="${rectX.toFixed(1)}" y="${(yCenter - 8).toFixed(1)}" width="${w.toFixed(1)}" height="16" rx="3" fill="${bg}"/>
       <text x="${(anchor === 'start' ? xLeft + 5 : xLeft - 5).toFixed(1)}" y="${yCenter.toFixed(1)}" fill="${fg}" font-size="10" font-weight="700" font-family="IBM Plex Mono, monospace" letter-spacing="0.3" text-anchor="${anchor === 'start' ? 'start' : 'end'}" dominant-baseline="middle">${label}</text>`;
   };
+  let zonesSvg = '';
   const zoneBand = (lo, hi, fill, lineColor, label, pillBg, pillFg) => {
     if (lo == null || hi == null || !isFinite(lo) || !isFinite(hi)) return '';
     const yTop = yPrice(Math.max(lo, hi)), yBottom = yPrice(Math.min(lo, hi));
@@ -120,105 +157,162 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
     zonesSvg += zoneLine(plan.tp1, TP_COLOR, `TP1 ${niceFmt(plan.tp1)}`, 'oklch(0.18 0.03 85)');
   }
 
-  /* ── área degradada bajo el precio de cierre (glow sutil, detrás de las
-   *  velas) — puramente decorativa, misma serie de cierres reales ya usada
-   *  para las velas, sin datos extra. ── */
-  const closeLine = polyline(c, x, yPrice, WHITE, 0).replace(/^<path d="([^"]*)".*$/, '$1');
-  const areaFill = closeLine
-    ? `<path d="${closeLine} L${x(count - 1).toFixed(1)},${PRICE_BOTTOM} L${x(0).toFixed(1)},${PRICE_BOTTOM} Z" fill="url(#priceAreaGrad)" opacity="0.5"/>`
-    : '';
-  const areaDefsSvg = `<defs><linearGradient id="priceAreaGrad" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0%" stop-color="oklch(0.70 0.19 291)" stop-opacity="0.32"/>
-    <stop offset="100%" stop-color="oklch(0.70 0.19 291)" stop-opacity="0"/>
-  </linearGradient></defs>`;
+  /* ── relleno de Bandas de Bollinger (área tenue entre banda sup. e inf.) ── */
+  let bbFill = '';
+  {
+    const pts = [];
+    for (let i = 0; i < count; i++) if (!isNaN(bbUpper[i])) pts.push(`${i === 0 || isNaN(bbUpper[i - 1]) ? 'M' : 'L'}${x(i).toFixed(1)},${yPrice(bbUpper[i]).toFixed(1)}`);
+    for (let i = count - 1; i >= 0; i--) if (!isNaN(bbLower[i])) pts.push(`L${x(i).toFixed(1)},${yPrice(bbLower[i]).toFixed(1)}`);
+    if (pts.length > 3) bbFill = `<path d="${pts.join(' ')} Z" fill="${BLUE}" opacity="0.05"/>`;
+  }
 
+  /* ── área degradada bajo el cierre (glow sutil) ── */
+  const closePathD = (() => { let d = '', s = false; for (let i = 0; i < count; i++) { d += `${s ? 'L' : 'M'}${x(i).toFixed(1)},${yPrice(c[i]).toFixed(1)} `; s = true; } return d; })();
+  const areaFill = closePathD ? `<path d="${closePathD} L${x(count - 1).toFixed(1)},${PRICE_BOTTOM} L${x(0).toFixed(1)},${PRICE_BOTTOM} Z" fill="url(#priceAreaGrad)" opacity="0.6"/>` : '';
+  const defsSvg = `<defs>
+    <linearGradient id="priceAreaGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="oklch(0.70 0.19 291)" stop-opacity="0.26"/>
+      <stop offset="100%" stop-color="oklch(0.70 0.19 291)" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="lastGlow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>`;
+
+  /* ── velas ── */
   let candlesSvg = '';
   for (let i = 0; i < count; i++) {
     const up = c[i] >= o[i];
     const color = up ? GREEN : RED;
     const xc = x(i);
-    candlesSvg += `<line x1="${xc.toFixed(1)}" y1="${yPrice(h[i]).toFixed(1)}" x2="${xc.toFixed(1)}" y2="${yPrice(l[i]).toFixed(1)}" stroke="${color}" stroke-width="1"/>`;
+    candlesSvg += `<line x1="${xc.toFixed(1)}" y1="${yPrice(h[i]).toFixed(1)}" x2="${xc.toFixed(1)}" y2="${yPrice(l[i]).toFixed(1)}" stroke="${color}" stroke-width="1" opacity="0.9"/>`;
     const yOpen = yPrice(o[i]), yClose = yPrice(c[i]);
     const rectY = Math.min(yOpen, yClose), rectH = Math.max(1, Math.abs(yOpen - yClose));
-    candlesSvg += `<rect x="${(xc - candleW / 2).toFixed(1)}" y="${rectY.toFixed(1)}" width="${candleW.toFixed(1)}" height="${rectH.toFixed(1)}" fill="${color}"/>`;
+    // Cuerpo lleno para bajistas, hueco (contorno) para alcistas — convención
+    // de las plataformas profesionales, más limpio de leer de un vistazo.
+    if (up) candlesSvg += `<rect x="${(xc - candleW / 2).toFixed(1)}" y="${rectY.toFixed(1)}" width="${candleW.toFixed(1)}" height="${rectH.toFixed(1)}" fill="oklch(0.72 0.17 152 / 0.25)" stroke="${color}" stroke-width="1"/>`;
+    else candlesSvg += `<rect x="${(xc - candleW / 2).toFixed(1)}" y="${rectY.toFixed(1)}" width="${candleW.toFixed(1)}" height="${rectH.toFixed(1)}" fill="${color}"/>`;
   }
 
-  const bbSvg = polyline(bbUpper, x, yPrice, BLUE, 0.55) + polyline(bbLower, x, yPrice, BLUE, 0.55);
-  const emaSvg = polyline(ema20, x, yPrice, GOLD) + polyline(ema50, x, yPrice, WHITE) + polyline(ema200, x, yPrice, PURPLE, 0.85);
+  const bbSvg = polyline(bbUpper, x, yPrice, BLUE, 0.5, 1) + polyline(bbLower, x, yPrice, BLUE, 0.5, 1);
+  const emaSvg = polyline(ema20, x, yPrice, GOLD, 0.95, 1.5) + polyline(ema50, x, yPrice, WHITE, 0.9, 1.5) + polyline(ema200, x, yPrice, PURPLE, 0.85, 1.6);
 
-  /* ── línea de último precio (referencia rápida de dónde está parado hoy) ── */
+  /* ── marcadores de máximo/mínimo del rango visible ── */
+  let extremaSvg = '';
+  {
+    let hiIdx = 0, loIdx = 0;
+    for (let i = 1; i < count; i++) { if (h[i] > h[hiIdx]) hiIdx = i; if (l[i] < l[loIdx]) loIdx = i; }
+    const hiX = x(hiIdx), hiY = yPrice(h[hiIdx]), loX = x(loIdx), loY = yPrice(l[loIdx]);
+    extremaSvg = `
+      <text x="${hiX.toFixed(1)}" y="${(hiY - 6).toFixed(1)}" fill="${AXIS_TEXT}" font-size="9" font-family="IBM Plex Mono, monospace" text-anchor="middle">▲ ${niceFmt(h[hiIdx])}</text>
+      <text x="${loX.toFixed(1)}" y="${(loY + 13).toFixed(1)}" fill="${AXIS_TEXT}" font-size="9" font-family="IBM Plex Mono, monospace" text-anchor="middle">▼ ${niceFmt(l[loIdx])}</text>`;
+  }
+
+  /* ── último precio: línea + etiqueta + punto con glow ── */
   const lastPrice = c[count - 1];
   const lastUp = count > 1 ? lastPrice >= c[count - 2] : true;
   const lastColor = lastUp ? GREEN : RED;
   const lastY = yPrice(lastPrice);
-  const lastPriceSvg = `<line x1="${PAD_L}" y1="${lastY.toFixed(1)}" x2="${W - PAD_R}" y2="${lastY.toFixed(1)}" stroke="${lastColor}" stroke-width="1" stroke-dasharray="2 2" opacity="0.85"/>
+  const lastPriceSvg = `<line x1="${PAD_L}" y1="${lastY.toFixed(1)}" x2="${W - PAD_R}" y2="${lastY.toFixed(1)}" stroke="${lastColor}" stroke-width="1" stroke-dasharray="2 2" opacity="0.75"/>
+    <circle cx="${x(count - 1).toFixed(1)}" cy="${lastY.toFixed(1)}" r="3.2" fill="${lastColor}" filter="url(#lastGlow)"/>
     ${pillLabel(W - PAD_R + 6, lastY, niceFmt(lastPrice), lastColor, lastUp ? 'oklch(0.16 0.03 152)' : 'oklch(0.16 0.03 23)')}`;
 
-  // Soporte/resistencia ya no se dibujan como líneas propias: la zona de
-  // compra/venta del plan operativo (abajo) se construye a partir de ellos
-  // y muestra la misma información de forma más accionable, sin duplicar
-  // etiquetas superpuestas en el margen derecho.
-
-  let priceGridSvg = '';
-  for (let i = 0; i <= 4; i++) {
-    const val = pMin + ((pMax - pMin) * i) / 4;
-    const yy = yPrice(val).toFixed(1);
-    priceGridSvg += `<line x1="${PAD_L}" y1="${yy}" x2="${W - PAD_R}" y2="${yy}" stroke="${GRID}" stroke-width="1"/>`;
-    priceGridSvg += `<text x="${W - PAD_R + 6}" y="${yy}" fill="${AXIS_TEXT}" font-size="10" font-family="IBM Plex Mono, monospace" dominant-baseline="middle">${niceFmt(val)}</text>`;
-  }
-
-  /* ── panel de volumen ── */
-  let volSvg = `<text x="${PAD_L}" y="${VOL_TOP - 4}" fill="${PANEL_LABEL}" font-size="10" font-family="IBM Plex Mono, monospace">VOLUMEN</text>`;
+  /* ── panel de volumen (barras + media móvil) ── */
+  let volSvg = `<text x="${PAD_L}" y="${VOL_TOP - 4}" fill="${PANEL_LABEL}" font-size="10" font-weight="600" font-family="IBM Plex Mono, monospace">VOLUMEN</text>`;
   if (hasVolume) {
     const vMax = Math.max(...v) || 1;
+    volSvg += `<text x="${W - PAD_R + 6}" y="${VOL_TOP + 6}" fill="${AXIS_TEXT}" font-size="9" font-family="IBM Plex Mono, monospace" dominant-baseline="middle">${fmtVol(vMax)}</text>`;
     for (let i = 0; i < count; i++) {
       const up = c[i] >= o[i];
       const barH = (v[i] / vMax) * (VOL_H - 4);
       const xc = x(i);
-      volSvg += `<rect x="${(xc - candleW / 2).toFixed(1)}" y="${(VOL_BOTTOM - barH).toFixed(1)}" width="${candleW.toFixed(1)}" height="${barH.toFixed(1)}" fill="${up ? GREEN : RED}" opacity="0.6"/>`;
+      volSvg += `<rect x="${(xc - candleW / 2).toFixed(1)}" y="${(VOL_BOTTOM - barH).toFixed(1)}" width="${candleW.toFixed(1)}" height="${barH.toFixed(1)}" fill="${up ? GREEN : RED}" opacity="0.5"/>`;
     }
+    const yVol = (val) => VOL_BOTTOM - (val / vMax) * (VOL_H - 4);
+    volSvg += polyline(volMa.slice(start), x, yVol, GOLD, 0.85, 1.2);
   } else {
     volSvg += `<text x="${PAD_L}" y="${(VOL_TOP + VOL_BOTTOM) / 2}" fill="${AXIS_TEXT}" font-size="10" font-family="IBM Plex Mono, monospace">Sin datos de volumen para este activo/timeframe</text>`;
   }
 
-  /* ── panel de RSI ── */
+  /* ── panel MACD (histograma + línea MACD + señal) ── */
+  let macdSvg = `<text x="${PAD_L}" y="${MACD_TOP - 4}" fill="${PANEL_LABEL}" font-size="10" font-weight="600" font-family="IBM Plex Mono, monospace">MACD (12,26,9)</text>`;
+  {
+    const vals = [...macdLine, ...signalLine, ...macdHist].filter(x => x != null && !isNaN(x));
+    const maxAbs = Math.max(0.0001, ...vals.map(Math.abs));
+    const yMacd = (val) => scaleY(val, -maxAbs, maxAbs, MACD_TOP, MACD_BOTTOM);
+    const zeroY = yMacd(0);
+    macdSvg += `<line x1="${PAD_L}" y1="${zeroY.toFixed(1)}" x2="${W - PAD_R}" y2="${zeroY.toFixed(1)}" stroke="${GRID}" stroke-width="1"/>`;
+    for (let i = 0; i < count; i++) {
+      if (macdHist[i] == null || isNaN(macdHist[i])) continue;
+      const hy = yMacd(macdHist[i]);
+      const rising = i > 0 && macdHist[i - 1] != null && macdHist[i] >= macdHist[i - 1];
+      const col = macdHist[i] >= 0 ? (rising ? GREEN : 'oklch(0.55 0.12 152)') : (rising ? 'oklch(0.55 0.13 23)' : RED);
+      macdSvg += `<rect x="${(x(i) - candleW / 2).toFixed(1)}" y="${Math.min(hy, zeroY).toFixed(1)}" width="${candleW.toFixed(1)}" height="${Math.max(0.5, Math.abs(hy - zeroY)).toFixed(1)}" fill="${col}" opacity="0.7"/>`;
+    }
+    macdSvg += polyline(macdLine, x, yMacd, BLUE, 0.95, 1.3) + polyline(signalLine, x, yMacd, GOLD, 0.95, 1.3);
+  }
+
+  /* ── panel de RSI (con zonas de sobrecompra/sobreventa sombreadas) ── */
   const yRsi = (val) => scaleY(val, 0, 100, RSI_TOP, RSI_BOTTOM);
-  let rsiSvg = `<text x="${PAD_L}" y="${RSI_TOP - 4}" fill="${PANEL_LABEL}" font-size="10" font-family="IBM Plex Mono, monospace">RSI (14)</text>`;
+  let rsiSvg = `<text x="${PAD_L}" y="${RSI_TOP - 4}" fill="${PANEL_LABEL}" font-size="10" font-weight="600" font-family="IBM Plex Mono, monospace">RSI (14)</text>`;
+  rsiSvg += `<rect x="${PAD_L}" y="${yRsi(100).toFixed(1)}" width="${plotW}" height="${(yRsi(70) - yRsi(100)).toFixed(1)}" fill="${RED}" opacity="0.06"/>`;
+  rsiSvg += `<rect x="${PAD_L}" y="${yRsi(30).toFixed(1)}" width="${plotW}" height="${(yRsi(0) - yRsi(30)).toFixed(1)}" fill="${GREEN}" opacity="0.06"/>`;
   for (const level of [30, 50, 70]) {
     const yy = yRsi(level).toFixed(1);
-    rsiSvg += `<line x1="${PAD_L}" y1="${yy}" x2="${W - PAD_R}" y2="${yy}" stroke="${GRID}" stroke-width="1" stroke-dasharray="${level === 50 ? '2 3' : '0'}"/>`;
+    rsiSvg += `<line x1="${PAD_L}" y1="${yy}" x2="${W - PAD_R}" y2="${yy}" stroke="${GRID}" stroke-width="1" stroke-dasharray="${level === 50 ? '2 4' : '0'}"/>`;
     rsiSvg += `<text x="${W - PAD_R + 6}" y="${yy}" fill="${AXIS_TEXT}" font-size="9" font-family="IBM Plex Mono, monospace" dominant-baseline="middle">${level}</text>`;
   }
-  rsiSvg += polyline(rsiFull, x, yRsi, GOLD, 1);
+  rsiSvg += polyline(rsiFull, x, yRsi, PURPLE, 1, 1.5);
+  const rsiLast = last(rsiFull);
+  if (rsiLast != null) rsiSvg += pillLabel(W - PAD_R + 6, yRsi(rsiLast), rsiLast.toFixed(0), PURPLE, 'oklch(0.15 0.03 291)');
 
-  /* ── fechas (eje compartido, debajo del panel de RSI) ── */
+  /* ── fechas ── */
   let dateSvg = '';
   if (t.length === count) {
-    const ticks = 5;
     for (let k = 0; k <= ticks; k++) {
       const i = Math.min(count - 1, Math.round((k * (count - 1)) / ticks));
       dateSvg += `<text x="${x(i).toFixed(1)}" y="${H - 8}" fill="${AXIS_TEXT}" font-size="10" font-family="IBM Plex Mono, monospace" text-anchor="middle">${(t[i] || '').slice(5)}</text>`;
     }
   }
 
-  const sepSvg = `<line x1="${PAD_L}" y1="${PRICE_BOTTOM + GAP / 2}" x2="${W - PAD_R}" y2="${PRICE_BOTTOM + GAP / 2}" stroke="${GRID}" stroke-width="1"/>
-    <line x1="${PAD_L}" y1="${VOL_BOTTOM + GAP / 2}" x2="${W - PAD_R}" y2="${VOL_BOTTOM + GAP / 2}" stroke="${GRID}" stroke-width="1"/>`;
+  /* ── separadores entre paneles ── */
+  const sep = (yy) => `<line x1="${PAD_L}" y1="${yy}" x2="${W - PAD_R}" y2="${yy}" stroke="${GRID}" stroke-width="1"/>`;
+  const sepSvg = sep(PRICE_BOTTOM + GAP / 2) + sep(VOL_BOTTOM + GAP / 2) + sep(MACD_BOTTOM + GAP / 2);
 
-  const crosshairSvg = `<line class="chart-ch-line" x1="0" y1="${PRICE_TOP}" x2="0" y2="${RSI_BOTTOM}" stroke="${WHITE}" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>`;
+  /* ── crosshair (líneas + etiquetas flotantes, ocultas hasta el hover) ── */
+  const crosshairSvg = `
+    <line class="chart-ch-vline" x1="0" y1="${PRICE_TOP}" x2="0" y2="${RSI_BOTTOM}" stroke="${WHITE}" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+    <line class="chart-ch-hline" x1="${PAD_L}" y1="0" x2="${W - PAD_R}" y2="0" stroke="${WHITE}" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+    <g class="chart-ch-ytag" opacity="0"><rect x="${W - PAD_R + 2}" y="0" width="${PAD_R - 4}" height="16" rx="3" fill="oklch(0.86 0.02 260)"/><text x="${W - PAD_R + 7}" y="8" fill="oklch(0.16 0.02 260)" font-size="10" font-weight="700" font-family="IBM Plex Mono, monospace" dominant-baseline="middle">0</text></g>
+    <g class="chart-ch-xtag" opacity="0"><rect x="0" y="${H - DATE_H + 2}" width="64" height="15" rx="3" fill="oklch(0.86 0.02 260)"/><text x="32" y="${H - DATE_H + 9}" fill="oklch(0.16 0.02 260)" font-size="9.5" font-weight="700" font-family="IBM Plex Mono, monospace" text-anchor="middle" dominant-baseline="middle"></text></g>`;
 
+  /* ── línea de estado (OHLC + var) — se actualiza al pasar el mouse ── */
+  const chg = count > 1 ? ((lastPrice - c[count - 2]) / c[count - 2]) * 100 : 0;
+  const statusLine = `<div class="chart-statusline" data-default="1">
+    <span class="csl-o">O <b>${niceFmt(o[count - 1])}</b></span>
+    <span class="csl-h">H <b>${niceFmt(h[count - 1])}</b></span>
+    <span class="csl-l">L <b>${niceFmt(l[count - 1])}</b></span>
+    <span class="csl-c">C <b>${niceFmt(lastPrice)}</b></span>
+    <span class="${chg >= 0 ? 'csl-up' : 'csl-down'}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</span>
+  </div>`;
+
+  const emaLbl = (val) => val == null ? '—' : niceFmt(val);
   return `
     <div class="chart-svg-wrap">
-    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Gráfico de precio con volumen y RSI">
-      ${areaDefsSvg}
+    ${statusLine}
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Gráfico de precio con volumen, MACD y RSI">
+      ${defsSvg}
+      ${vGridSvg}
       ${priceGridSvg}
       ${areaFill}
+      ${bbFill}
       ${zonesSvg}
       ${bbSvg}
       ${candlesSvg}
       ${emaSvg}
+      ${extremaSvg}
       ${lastPriceSvg}
       ${sepSvg}
       ${volSvg}
+      ${macdSvg}
       ${rsiSvg}
       ${dateSvg}
       ${crosshairSvg}
@@ -228,9 +322,9 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
     <div class="chart-legend">
       <span><i style="background:${GREEN};"></i>Alcista</span>
       <span><i style="background:${RED};"></i>Bajista</span>
-      <span><i style="background:${GOLD};"></i>EMA 20 / RSI</span>
-      <span><i style="background:${WHITE};"></i>EMA 50</span>
-      <span><i style="background:${PURPLE};"></i>EMA 200</span>
+      <span><i style="background:${GOLD};"></i>EMA 20 · ${emaLbl(last(ema20))}</span>
+      <span><i style="background:${WHITE};"></i>EMA 50 · ${emaLbl(last(ema50))}</span>
+      <span><i style="background:${PURPLE};"></i>EMA 200 · ${emaLbl(last(ema200))}</span>
       <span><i style="background:${BLUE};"></i>Bollinger</span>
       ${plan ? `
       <span><i style="background:${GREEN}; opacity:0.35;"></i>Zona de compra</span>
@@ -240,16 +334,20 @@ export function renderPriceChartSVG(candles, { support, resistance, plan } = {},
     </div>`;
 }
 
-/** Wire de interactividad post-render: como renderPriceChartSVG solo genera
- *  un string, el hover/crosshair se conecta acá con addEventListener sobre
- *  el <svg> ya insertado en el DOM. Recalcula la misma geometría que el
- *  render (misma ventana, mismo padding de precio) para ubicar candle/precio
- *  a partir de la posición del mouse. */
-export function wireChartHover(container, candles, windowSize = 130) {
+/** Wire de interactividad post-render: crosshair completo (líneas vertical y
+ *  horizontal + etiquetas flotantes de precio y fecha en los ejes), tooltip
+ *  OHLC y línea de estado. Recalcula la MISMA geometría que el render
+ *  (misma ventana, misma escala de precio vía priceExtent) para que todo
+ *  coincida con lo dibujado. */
+export function wireChartHover(container, candles, opts = {}, windowSize = 130) {
   const svg = container.querySelector('svg');
   const tooltip = container.querySelector('.chart-hover-tooltip');
-  const chLine = container.querySelector('.chart-ch-line');
-  if (!svg || !tooltip || !chLine) return;
+  const vLine = container.querySelector('.chart-ch-vline');
+  const hLine = container.querySelector('.chart-ch-hline');
+  const yTag = container.querySelector('.chart-ch-ytag');
+  const xTag = container.querySelector('.chart-ch-xtag');
+  const statusLine = container.querySelector('.chart-statusline');
+  if (!svg || !tooltip || !vLine) return;
 
   const nTotal = candles.c.length;
   const start = Math.max(0, nTotal - windowSize);
@@ -260,17 +358,44 @@ export function wireChartHover(container, candles, windowSize = 130) {
   if (count < 2) return;
   const plotW = W - PAD_L - PAD_R;
   const slot = plotW / count;
+  const { pMin, pMax } = priceExtent(candles, start, opts);
+  const defaultStatus = statusLine ? statusLine.innerHTML : '';
 
   const onMove = (e) => {
     const rect = svg.getBoundingClientRect();
-    const scale = W / rect.width;
-    const svgX = (e.clientX - rect.left) * scale;
+    const scaleX = W / rect.width, scaleY_ = H / rect.height;
+    const svgX = (e.clientX - rect.left) * scaleX;
+    const svgY = (e.clientY - rect.top) * scaleY_;
     let i = Math.floor((svgX - PAD_L) / slot);
     i = Math.max(0, Math.min(count - 1, i));
     const xc = PAD_L + slot * i + slot / 2;
-    chLine.setAttribute('x1', xc.toFixed(1));
-    chLine.setAttribute('x2', xc.toFixed(1));
-    chLine.setAttribute('opacity', '0.6');
+
+    vLine.setAttribute('x1', xc.toFixed(1)); vLine.setAttribute('x2', xc.toFixed(1)); vLine.setAttribute('opacity', '0.55');
+
+    // Crosshair horizontal + etiqueta de precio (solo dentro del panel de precio).
+    if (hLine && yTag && svgY >= PRICE_TOP && svgY <= PRICE_BOTTOM) {
+      const yy = Math.max(PRICE_TOP, Math.min(PRICE_BOTTOM, svgY));
+      hLine.setAttribute('y1', yy.toFixed(1)); hLine.setAttribute('y2', yy.toFixed(1)); hLine.setAttribute('opacity', '0.45');
+      const priceAtY = pMin + ((PRICE_BOTTOM - yy) / (PRICE_BOTTOM - PRICE_TOP)) * (pMax - pMin);
+      yTag.setAttribute('opacity', '1');
+      yTag.querySelector('rect').setAttribute('y', (yy - 8).toFixed(1));
+      const tx = yTag.querySelector('text'); tx.setAttribute('y', yy.toFixed(1)); tx.textContent = niceFmt(priceAtY);
+    } else if (hLine) { hLine.setAttribute('opacity', '0'); yTag && yTag.setAttribute('opacity', '0'); }
+
+    // Etiqueta de fecha en el eje inferior.
+    if (xTag) {
+      xTag.setAttribute('opacity', '1');
+      const w = 64, rx = Math.max(PAD_L, Math.min(W - PAD_R - w, xc - w / 2));
+      xTag.querySelector('rect').setAttribute('x', rx.toFixed(1));
+      const tx = xTag.querySelector('text'); tx.setAttribute('x', (rx + w / 2).toFixed(1)); tx.textContent = (t[i] || '').slice(5);
+    }
+
+    // Línea de estado OHLC.
+    if (statusLine) {
+      const up = c[i] >= o[i];
+      const changePct = i > 0 ? ((c[i] - c[i - 1]) / c[i - 1]) * 100 : 0;
+      statusLine.innerHTML = `<span class="csl-o">O <b>${niceFmt(o[i])}</b></span><span class="csl-h">H <b>${niceFmt(h[i])}</b></span><span class="csl-l">L <b>${niceFmt(l[i])}</b></span><span class="csl-c">C <b>${niceFmt(c[i])}</b></span><span class="${changePct >= 0 ? 'csl-up' : 'csl-down'}">${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%</span>`;
+    }
 
     const up = c[i] >= o[i];
     const changePct = i > 0 ? ((c[i] - c[i - 1]) / c[i - 1]) * 100 : 0;
@@ -280,17 +405,21 @@ export function wireChartHover(container, candles, windowSize = 130) {
       <div class="ch-row"><span>H</span><b>${niceFmt(h[i])}</b></div>
       <div class="ch-row"><span>L</span><b>${niceFmt(l[i])}</b></div>
       <div class="ch-row"><span>C</span><b class="${up ? 'ch-up' : 'ch-down'}">${niceFmt(c[i])}</b></div>
-      ${v[i] ? `<div class="ch-row"><span>Vol</span><b>${v[i] >= 1e6 ? (v[i] / 1e6).toFixed(1) + 'M' : (v[i] / 1e3).toFixed(0) + 'K'}</b></div>` : ''}
+      ${v[i] ? `<div class="ch-row"><span>Vol</span><b>${fmtVol(v[i])}</b></div>` : ''}
       <div class="ch-row"><span>Var</span><b class="${changePct >= 0 ? 'ch-up' : 'ch-down'}">${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%</b></div>`;
     tooltip.style.display = 'block';
     const leftPct = (xc / W) * 100;
     tooltip.style.left = leftPct > 65 ? 'auto' : `calc(${leftPct}% + 10px)`;
     tooltip.style.right = leftPct > 65 ? `calc(${100 - leftPct}% + 10px)` : 'auto';
-    tooltip.style.top = '8px';
+    tooltip.style.top = '30px';
   };
   const onLeave = () => {
-    chLine.setAttribute('opacity', '0');
+    vLine.setAttribute('opacity', '0');
+    hLine && hLine.setAttribute('opacity', '0');
+    yTag && yTag.setAttribute('opacity', '0');
+    xTag && xTag.setAttribute('opacity', '0');
     tooltip.style.display = 'none';
+    if (statusLine && defaultStatus) statusLine.innerHTML = defaultStatus;
   };
   svg.addEventListener('mousemove', onMove);
   svg.addEventListener('mouseleave', onLeave);
