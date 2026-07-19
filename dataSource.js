@@ -113,13 +113,53 @@ const Mock = {
       o.push(op); h.push(Math.max(op, cp) + wick * rnd()); l.push(Math.min(op, cp) - wick * rnd()); c.push(cp); v.push(Math.round(500000 + rnd() * 4000000));
       price = cp;
     }
+    // Hueco (gap) de apertura de demostración en la última rueda para ~35% de
+    // los tickers, determinista por seed — así el Radar de Gaps tiene contenido
+    // en modo demo (en producción, con velas reales, los gaps salen solos).
+    if (n >= 2) {
+      const gr = mulberry32(seed ^ 0x9e37);
+      if (gr() < 0.35) {
+        const gapPct = (gr() < 0.5 ? 1 : -1) * (0.012 + gr() * 0.03); // ±1.2%..±4.2%
+        const prevC = c[n - 2];
+        const newOpen = prevC * (1 + gapPct);
+        const intraShock = (gr() - 0.45) * 2 * vol;
+        let newClose = newOpen * (1 + intraShock); if (newClose < 1) newClose = 1;
+        const wick = newOpen * vol * (0.5 + gr());
+        o[n - 1] = newOpen;
+        c[n - 1] = newClose;
+        h[n - 1] = Math.max(newOpen, newClose) + wick * gr();
+        l[n - 1] = Math.min(newOpen, newClose) - wick * gr();
+      }
+    }
     const scf = u.refPriceUsd / c[c.length - 1];
     for (const k of [o, h, l, c]) for (let i = 0; i < k.length; i++) k[i] *= scf;
     const t = [];
     for (let i = n - 1; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); t.push(d.toISOString().slice(0, 10)); }
     return { o, h, l, c, v, t, isReal: false };
   },
-  async getFundamentals() { return { hasData: false, isReal: false }; },
+  // Sin fundamentales reales en modo mock. Se sintetiza SOLO un flujo de
+  // insiders de demostración (para poder ver la tarjeta "Flujo de Insiders"
+  // en el modo demo) — en producción esto lo reemplaza Finnhub con las
+  // operaciones reales de los formularios 3/4/5 de la SEC.
+  async getFundamentals(ticker) {
+    const seed = String(ticker || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    const bought = 20000 + (seed * 137 % 90000);
+    const sold = 15000 + (seed * 91 % 70000);
+    const insider = {
+      windowDays: 183,
+      boughtShares: bought, soldShares: sold,
+      buyCount: 1 + seed % 4, sellCount: 1 + (seed * 3) % 5,
+      distinctBuyers: 1 + seed % 3, distinctSellers: 1 + (seed * 2) % 3,
+      netOpenMarket: bought - sold, netShares: bought - sold,
+      bias: bought >= sold * 1.3 ? 'compra' : sold >= bought * 1.3 ? 'venta' : 'neutral',
+      totalRecords: 6,
+      transactions: [
+        { name: 'Directivo (demo)', date: new Date(Date.now() - 6 * 86400e3).toISOString().slice(0, 10), change: Math.round(bought / 2), code: 'P', price: null },
+        { name: 'Director (demo)', date: new Date(Date.now() - 20 * 86400e3).toISOString().slice(0, 10), change: -Math.round(sold / 2), code: 'S', price: null },
+      ],
+    };
+    return { hasData: false, isReal: false, insider };
+  },
   async getNews() { return { items: [], sentimentScore: null, isReal: false }; },
   async getGeneralNews() { return { items: [], sentimentScore: null, isReal: false }; },
   async getEarnings() { return { nextDate: null, isReal: false }; },

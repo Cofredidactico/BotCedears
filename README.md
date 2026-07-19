@@ -470,6 +470,46 @@ stop ajustado bajo el swing, dos objetivos por múltiplos de ATR, R:R y rango
 diario típico). Marcado con un aviso de **riesgo alto** bien visible: es un
 tamiz técnico, no una recomendación ni garantía de suba.
 
+## Track Record del Motor, Radar de Gaps y Flujo de Insiders
+
+Tres apartados nuevos, todos con datos reales y sin inventar nada.
+
+**Track Record del Motor** (sidebar "Track Record del Motor"): la prueba honesta
+del motor. Corre el mismo backtest sin look-ahead que la página de Backtesting,
+pero sobre un universo curado de 12 activos líquidos con historial largo
+(AAPL, MSFT, GOOGL, AMZN, NVDA, META, JPM, KO, XOM, JNJ, WMT, DIS) y **agrega**
+los resultados: junta todas las ocurrencias de cada señal (Compra Fuerte …
+Venta) a lo largo de todos los activos y calcula el retorno promedio y el win
+rate **ponderados por cantidad de muestras** (`pooledAvg = Σ(avg·n)/Σn`). Lo
+mismo para las alertas de precio por (tipo, confianza). Tres tarjetas de titular
+(retorno tras "Compra Fuerte" a 20 y 40 ruedas, tras "Venta" a 20), la tabla
+agregada por señal, la de precisión de alertas y una tabla de cobertura con los
+cortes analizados por activo. Se corre serialmente al entrar a la página (no
+satura el proveedor de velas); los activos sin historial suficiente se excluyen
+y se reporta la cobertura real (`N/12`).
+
+**Radar de Gaps de Apertura** (sidebar "Radar de Gaps"): rankea el universo
+curado + Watchlist por el hueco de apertura de la última rueda, calculado por
+`computeGap` dentro de `computeLightSignal` (sin requests extra). Separa gaps
+alcistas y bajistas en dos columnas; cada tarjeta muestra el tamaño en % y en
+**múltiplos de ATR** (para saber si es grande *para ese activo*), el cierre
+previo, la apertura y el estado: **sostiene** la apertura, o ya se **rellenó**
+intradía (con el % rellenado). Marca los gaps grandes (≥1× ATR) y enlaza con el
+Radar de Trades Cortos cuando el activo también tiene un setup alcista.
+
+**Flujo de Insiders** (tarjeta nueva en la ficha de cada activo): resume las
+transacciones de directivos y dueños (>10%) de los últimos ~6 meses, obtenidas
+de los formularios 3/4/5 de la SEC vía Finnhub (`stock/insider-transactions`,
+plegado dentro de `api/fundamentals.js` para no sumar una función serverless y
+respetar el límite de 12 del plan Hobby). Muestra el sesgo (compra/venta/
+neutral), acciones compradas vs vendidas, cantidad de operaciones e insiders
+distintos, el neto de mercado abierto, y las operaciones recientes en detalle.
+Solo cuenta compras/ventas de mercado abierto (códigos P/S) — excluye
+ejercicios de opciones, grants y regalos, que no son decisiones de mercado. La
+compra de insiders tiene valor de señal documentado; la venta, mucho menos, y
+así se explica en la propia tarjeta. Si el símbolo no tiene cobertura, la
+tarjeta no aparece (nunca se inventan operaciones).
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

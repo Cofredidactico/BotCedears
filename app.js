@@ -653,6 +653,8 @@ const ICONS = {
   flag: `<svg ${ICON_ATTR}><line x1="5" y1="3" x2="5" y2="21"/><path d="M5 4.5h13l-3 4 3 4H5"/></svg>`,
   coins: `<svg ${ICON_ATTR}><ellipse cx="8" cy="6" rx="5.5" ry="2.6"/><path d="M2.5 6v5c0 1.4 2.5 2.6 5.5 2.6"/><path d="M2.5 11v5c0 1.4 2.5 2.6 5.5 2.6"/><ellipse cx="16" cy="14" rx="5.5" ry="2.6"/><path d="M10.5 14v5c0 1.4 2.5 2.6 5.5 2.6s5.5-1.2 5.5-2.6v-5"/></svg>`,
   zap: `<svg ${ICON_ATTR}><polygon points="13,2 4,14 11,14 10,22 20,9 13,9"/></svg>`,
+  gap: `<svg ${ICON_ATTR}><line x1="3" y1="15" x2="9" y2="15"/><line x1="9" y1="15" x2="9" y2="7"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="15" y1="7" x2="15" y2="18"/><line x1="15" y1="18" x2="21" y2="18"/><polyline points="12,4 15,7 12,10" opacity="0.55"/></svg>`,
+  award: `<svg ${ICON_ATTR}><circle cx="12" cy="9" r="6"/><path d="M8.5 14L7 22l5-3 5 3-1.5-8"/></svg>`,
   chart: `<svg ${ICON_ATTR}><polyline points="3,17 9,10 13,14 21,5"/><circle cx="21" cy="5" r="1.4" fill="currentColor" stroke="none"/></svg>`,
   briefcase: `<svg ${ICON_ATTR}><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`,
   warning: `<svg ${ICON_ATTR}><path d="M12 3.5 21.5 20h-19z"/><line x1="12" y1="9.5" x2="12" y2="14"/><circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none"/></svg>`,
@@ -1377,6 +1379,8 @@ const VIEW_PAGES = {
   calendar: { html: calendarPageHTML, wire: wireCalendarEvents, load: loadCalendarData },
   screener: { html: screenerPageHTML, wire: wireScreenerEvents, load: () => { if (!dashState.started) loadDashboardData(); } },
   shorttrades: { html: shortTradesPageHTML, wire: wireShortTradesEvents, load: () => { if (!dashState.started) loadDashboardData(); loadWatchlistData(); } },
+  gaps: { html: gapsPageHTML, wire: wireGapsEvents, load: () => { if (!dashState.started) loadDashboardData(); loadWatchlistData(); } },
+  trackrecord: { html: trackRecordPageHTML, wire: wireTrackRecordEvents, load: () => { if (!trackState.started) loadTrackRecord(); } },
   dividends: { html: dividendsPageHTML, wire: wireDividendsEvents, load: loadDividendsData },
   compare: { html: comparePageHTML, wire: wireCompareEvents, load: () => {} },
   settings: { html: settingsPageHTML, wire: wireSettingsEvents, load: () => {} },
@@ -1700,6 +1704,8 @@ function renderReportImpl() {
       </div>
     </div>
 
+    ${insiderFlowCardHTML(f?.insider, asset)}
+
     <div class="grid2-macronews">
       <div>
         <div class="panel-header">
@@ -1971,6 +1977,67 @@ function didacticTechnicalCards(t, confluence, relativeStrength, plan, quote) {
   return rows;
 }
 
+/* ───────────────────────── flujo de insiders ───────────────────────────
+ * Muestra qué hicieron los insiders (directivos y dueños con >10%) en los
+ * últimos ~6 meses: compras vs ventas en mercado abierto. La compra de un
+ * insider es una de las pocas señales con valor predictivo documentado —
+ * alguien que conoce la empresa por dentro pone SU plata. Las ventas pesan
+ * menos (venden por mil razones: impuestos, diversificación, un auto nuevo).
+ * Datos reales de Finnhub (formularios 3/4/5 de la SEC); si no hay cobertura
+ * para el símbolo, la tarjeta no se muestra — nunca se inventan operaciones. */
+function fmtShares(n) {
+  const a = Math.abs(n);
+  if (a >= 1e6) return (n / 1e6).toFixed(a >= 1e7 ? 0 : 1) + 'M';
+  if (a >= 1e3) return (n / 1e3).toFixed(a >= 1e4 ? 0 : 1) + 'K';
+  return String(Math.round(n));
+}
+function insiderFlowCardHTML(ins, asset) {
+  if (!ins || (!ins.buyCount && !ins.sellCount)) return ''; // sin operaciones de mercado abierto → no se muestra
+  const biasMeta = ins.bias === 'compra'
+    ? { color: GREEN, icon: '▲', label: 'Sesgo comprador', txt: 'Los insiders compraron más de lo que vendieron — señal de convicción interna.' }
+    : ins.bias === 'venta'
+      ? { color: RED, icon: '▼', label: 'Sesgo vendedor', txt: 'Los insiders vendieron más de lo que compraron. Ojo: pueden vender por muchas razones ajenas al negocio.' }
+      : { color: AMBER, icon: '≈', label: 'Sin sesgo claro', txt: 'Compras y ventas de insiders más o menos parejas — sin una señal direccional fuerte.' };
+  const codeLabel = (c) => c === 'P' ? 'Compra' : c === 'S' ? 'Venta' : c;
+  return `
+    ${sectionTitleHTML('Flujo de Insiders', 'briefcase')}
+    <div class="card insider-card">
+      <div class="insider-head">
+        <div class="insider-bias" style="color:${biasMeta.color};">
+          <span class="insider-bias-icon">${biasMeta.icon}</span>
+          <div>
+            <div class="insider-bias-label">${biasMeta.label}</div>
+            <div class="insider-bias-sub">Directivos y dueños · últimos 6 meses en ${esc(asset.ticker)}</div>
+          </div>
+        </div>
+        <div class="insider-summary">
+          <div class="insider-stat"><span>Compraron</span><b class="up">${fmtShares(ins.boughtShares)}</b><small>${ins.buyCount} op. · ${ins.distinctBuyers} insider${ins.distinctBuyers === 1 ? '' : 's'}</small></div>
+          <div class="insider-stat"><span>Vendieron</span><b class="down">${fmtShares(ins.soldShares)}</b><small>${ins.sellCount} op. · ${ins.distinctSellers} insider${ins.distinctSellers === 1 ? '' : 's'}</small></div>
+          <div class="insider-stat"><span>Neto (mercado abierto)</span><b class="${ins.netOpenMarket >= 0 ? 'up' : 'down'}">${ins.netOpenMarket >= 0 ? '+' : '−'}${fmtShares(Math.abs(ins.netOpenMarket))}</b><small>acciones</small></div>
+        </div>
+      </div>
+      <div class="insider-note">${biasMeta.txt}</div>
+      ${ins.transactions.length ? `
+      <details class="advanced-details insider-details">
+        <summary>Ver operaciones recientes (${ins.transactions.length})</summary>
+        <table class="insider-table">
+          <thead><tr><th>Insider</th><th>Fecha</th><th>Tipo</th><th>Acciones</th><th>Precio</th></tr></thead>
+          <tbody>
+            ${ins.transactions.map(t => `
+              <tr>
+                <td>${esc(t.name)}</td>
+                <td>${esc(t.date ?? '—')}</td>
+                <td class="${t.code === 'P' ? 'up' : t.code === 'S' ? 'down' : ''}">${esc(codeLabel(t.code))}</td>
+                <td>${t.change >= 0 ? '+' : '−'}${fmtShares(Math.abs(t.change))}</td>
+                <td>${t.price != null ? fmtUsd(t.price) : '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </details>` : ''}
+      <div class="insider-disclaimer">Fuente: formularios 3/4/5 de la SEC vía Finnhub. Solo se cuentan compras/ventas de mercado abierto (códigos P/S) — se excluyen ejercicios de opciones, grants y regalos, que no son decisiones de mercado. La compra de insiders tiene valor de señal; la venta, mucho menos.</div>
+    </div>`;
+}
+
 function didacticFundamentalCards(f, earnings, daysToEarnings, dividends, asset) {
   if (!f?.hasData) return null;
   const rows = [];
@@ -2164,12 +2231,14 @@ const SIDEBAR_NAV = [
   { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
   { view: 'screener', label: 'Screener', icon: 'filter' },
   { view: 'shorttrades', label: 'Trades Cortos', icon: 'zap' },
+  { view: 'gaps', label: 'Radar de Gaps', icon: 'gap' },
   { view: 'dividends', label: 'Dividendos', icon: 'coins' },
   { view: 'compare', label: 'Comparador', icon: 'compare' },
   { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
   { view: 'alerts', label: 'Alertas', icon: 'warning' },
   { view: 'calendar', label: 'Calendario Económico', icon: 'calendar' },
   { view: 'backtest', label: 'Backtesting', icon: 'trend' },
+  { view: 'trackrecord', label: 'Track Record del Motor', icon: 'award' },
   { view: 'settings', label: 'Configuración', icon: 'gear' },
 ];
 // Ninguna funcionalidad queda deshabilitada por ahora: cada ítem del sidebar
@@ -3217,6 +3286,90 @@ function shortTradeCardHTML(ticker, d) {
 function wireShortTradesEvents() {
   els.report.querySelectorAll('[data-short-ticker]').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.shortTicker));
+  });
+}
+
+/* ───────────────────────── radar de gaps de apertura ─────────────────────
+ * Ranking del universo curado + Watchlist por el hueco (gap) de apertura de
+ * la última rueda, calculado por computeGap dentro de computeLightSignal (sin
+ * requests extra). Un gap grande señala que el mercado repreció el activo de
+ * un salto por un catalizador; separamos gaps alcistas y bajistas, mostramos
+ * el tamaño en % y en ATR, si sostiene la apertura o ya se rellenó, y —
+ * cuando hay— el setup de trade corto asociado. */
+function gapsPageHTML() {
+  const seen = new Set();
+  const rows = [];
+  const pushFrom = (map) => {
+    for (const [ticker, d] of Object.entries(map)) {
+      if (!d || seen.has(ticker) || !d.gap) continue;
+      seen.add(ticker);
+      rows.push({ ticker, d });
+    }
+  };
+  pushFrom(dashState.data);
+  pushFrom(watchState.data);
+  const ups = rows.filter(r => r.d.gap.direction === 'up').sort((a, b) => b.d.gap.pct - a.d.gap.pct);
+  const downs = rows.filter(r => r.d.gap.direction === 'down').sort((a, b) => a.d.gap.pct - b.d.gap.pct);
+
+  const loadingCurated = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
+  const total = ups.length + downs.length;
+
+  return `
+    ${sectionTitleHTML('Radar de Gaps de Apertura', 'gap')}
+    <div class="dash-intro">Activos del universo curado y tu Watchlist que abrieron con un <strong>hueco (gap)</strong> respecto al cierre anterior — la señal de que el mercado repreció el activo de un salto (balance, noticia, guidance). Se mide el tamaño del gap en % y en múltiplos de ATR (para saber si es grande <em>para ese activo</em>), si <strong>sostiene</strong> la apertura o ya se <strong>rellenó</strong> intradía. ${loadingCurated ? 'Cargando el universo…' : ''}</div>
+    <div class="cedear-note" style="margin-bottom:22px;">
+      <strong>ℹ Cómo leerlo:</strong> un gap alcista que <strong>sostiene</strong> la apertura suele indicar fuerza real; uno que se <strong>rellena</strong> rápido (el precio vuelve al cierre previo) suele ser menos sostenible. El tamaño en <strong>ATR</strong> importa más que el %: un gap de +2% es enorme en un activo tranquilo y normal en uno volátil. No es una recomendación — es un tamiz de dónde está pasando algo hoy.
+    </div>
+    ${!total ? `<div class="card watch-empty">${loadingCurated ? 'Analizando huecos de apertura…' : 'No hay gaps de apertura relevantes en el universo en este momento — el mercado abrió sin huecos significativos.'}</div>` : `
+      <div class="gap-cols">
+        <div class="gap-col">
+          <div class="gap-col-title up">▲ Gaps alcistas <span>${ups.length}</span></div>
+          ${ups.length ? `<div class="short-grid gap-grid">${ups.map(({ ticker, d }) => gapCardHTML(ticker, d)).join('')}</div>` : `<div class="card watch-empty gap-empty">Ningún activo abrió con gap alcista relevante.</div>`}
+        </div>
+        <div class="gap-col">
+          <div class="gap-col-title down">▼ Gaps bajistas <span>${downs.length}</span></div>
+          ${downs.length ? `<div class="short-grid gap-grid">${downs.map(({ ticker, d }) => gapCardHTML(ticker, d)).join('')}</div>` : `<div class="card watch-empty gap-empty">Ningún activo abrió con gap bajista relevante.</div>`}
+        </div>
+      </div>`}
+  `;
+}
+
+function gapCardHTML(ticker, d) {
+  const g = d.gap;
+  const up = g.direction === 'up';
+  const col = up ? GREEN : RED;
+  const statusChip = g.filled
+    ? `<span class="gap-status filled">Rellenó ${Math.round(g.fillFrac * 100)}%</span>`
+    : g.holding
+      ? `<span class="gap-status holding">Sostiene la apertura</span>`
+      : `<span class="gap-status partial">Rellenó ${Math.round(g.fillFrac * 100)}%</span>`;
+  return `
+    <div class="card short-card gap-card" data-gap-ticker="${esc(ticker)}">
+      <div class="short-head">
+        <div>
+          <div class="short-ticker">${esc(ticker)} <span class="watch-stale">${esc(d.category ?? '')}</span></div>
+          <div class="short-name">${esc(d.name ?? '')}</div>
+        </div>
+        <div class="short-conf" style="color:${col};">
+          <div class="short-conf-score">${g.pct >= 0 ? '+' : ''}${g.pct.toFixed(1)}%</div>
+          <div class="short-conf-label">gap de apertura</div>
+        </div>
+      </div>
+      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
+      <div class="gap-metrics">
+        <div class="gap-metric"><span>Cierre previo</span><b>${fmtUsd(g.prevClose)}</b></div>
+        <div class="gap-metric"><span>Apertura</span><b style="color:${col};">${fmtUsd(g.open)}</b></div>
+        <div class="gap-metric"><span>Tamaño en ATR</span><b>${g.atr != null ? (g.atr >= 0 ? '+' : '') + g.atr.toFixed(1) + '×' : 'N/D'}</b></div>
+        <div class="gap-metric"><span>Estado</span>${statusChip}</div>
+      </div>
+      ${g.significant ? `<div class="gap-tag ${up ? 'up' : 'down'}">⚡ Gap grande para este activo (${g.atr != null ? Math.abs(g.atr).toFixed(1) + '× ATR' : Math.abs(g.pct).toFixed(1) + '%'})</div>` : ''}
+      ${d.setup?.qualifies ? `<div class="gap-setup-note">También aparece en Trades Cortos con setup alcista (confianza ${esc(d.setup.confidence)}).</div>` : ''}
+    </div>`;
+}
+
+function wireGapsEvents() {
+  els.report.querySelectorAll('[data-gap-ticker]').forEach(el => {
+    el.addEventListener('click', () => selectTicker(el.dataset.gapTicker));
   });
 }
 
@@ -5380,6 +5533,209 @@ function wireBacktestEvents() {
   });
 }
 
+/* ───────────────────────── track record automático del motor ─────────────
+ * El backtest de la página anterior mide UN activo por vez. El Track Record
+ * corre el MISMO motor sin look-ahead sobre un universo curado de tickers
+ * líquidos con historial largo, y AGREGA los resultados: junta todas las
+ * ocurrencias de cada señal (Compra Fuerte … Venta) a lo largo de todos los
+ * activos y calcula el retorno promedio y el win rate ponderados por muestra.
+ * Es la respuesta honesta a "¿el motor realmente sirve?" — no una promesa,
+ * evidencia agregada sobre datos reales. Mismo criterio de siempre: nada se
+ * inventa; los activos sin historial suficiente o sin datos se excluyen y se
+ * reporta la cobertura real. */
+const TRACK_UNIVERSE = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'JPM', 'KO', 'XOM', 'JNJ', 'WMT', 'DIS'];
+const trackState = { started: false, loading: false, done: 0, total: TRACK_UNIVERSE.length, result: null, error: null };
+
+/** Combina las filas por-señal de varios backtests en una sola tabla
+ *  agregada. Pondera cada activo por su cantidad de ocurrencias (n), así un
+ *  ticker con 200 muestras pesa más que uno con 20 — pooledAvg =
+ *  Σ(avg_i·n_i)/Σn_i, pooledWin = Σ(win_i·n_i)/Σn_i. */
+function aggregateBacktestRows(perTickerRows, labels, colorFn) {
+  return labels.map(label => {
+    const acc = {}; // h -> { sumAvgN, sumWinN, n }
+    for (const rows of perTickerRows) {
+      const row = rows.find(r => r.label === label || `${r.type}:${r.confidence}` === label);
+      if (!row) continue;
+      for (const x of row.horizons) {
+        if (!x.n) continue;
+        const a = (acc[x.h] ??= { sumAvgN: 0, sumWinN: 0, n: 0 });
+        a.sumAvgN += x.avgPct * x.n;
+        a.sumWinN += x.winRate * x.n;
+        a.n += x.n;
+      }
+    }
+    const horizons = BACKTEST_HORIZONS.map(h => {
+      const a = acc[h];
+      if (!a || !a.n) return { h, n: 0, avgPct: null, winRate: null };
+      return { h, n: a.n, avgPct: a.sumAvgN / a.n, winRate: Math.round(a.sumWinN / a.n) };
+    });
+    return { label, horizons, occurrences: horizons.reduce((m, x) => Math.max(m, x.n), 0) };
+  }).filter(r => r.occurrences > 0);
+}
+
+async function loadTrackRecord() {
+  if (trackState.loading) return;
+  trackState.started = true;
+  trackState.loading = true;
+  trackState.error = null;
+  trackState.done = 0;
+  renderReport();
+  const results = [];
+  try {
+    // Serial (no en paralelo) para no saturar el proveedor de velas ni la CPU
+    // del navegador: cada backtest recorre ~500 velas con recálculo por corte.
+    for (const ticker of TRACK_UNIVERSE) {
+      try {
+        const r = await runBacktest(ticker);
+        if (!r.insufficientData) results.push(r);
+      } catch (e) { /* activo sin datos: se excluye, no se inventa */ }
+      trackState.done++;
+      if (!state.asset && state.view === 'trackrecord') renderReport();
+    }
+    if (!results.length) { trackState.error = 'No se pudo correr el track record: ningún activo del universo tuvo historial suficiente en este momento.'; return; }
+
+    const signalRows = aggregateBacktestRows(results.map(r => r.rows), BACKTEST_LABELS);
+    // Alertas: universo de claves (tipo:confianza) presentes en algún activo.
+    const alertKeys = [...new Set(results.flatMap(r => (r.alertRows ?? []).map(a => `${a.type}:${a.confidence}`)))];
+    const alertAgg = aggregateBacktestRows(results.map(r => r.alertRows ?? []), alertKeys);
+    // Reetiquetar las filas de alertas con su label lindo + tipo (para color).
+    const alertRows = alertAgg.map(row => {
+      const [type, confidence] = row.label.split(':');
+      return { ...row, type, confidence, label: `${ALERT_BT_TYPE_LABEL[type] ?? type} · confianza ${confidence}` };
+    }).sort((a, b) => a.type.localeCompare(b.type) || (ALERT_BT_CONFIDENCE_ORDER[a.confidence] ?? 9) - (ALERT_BT_CONFIDENCE_ORDER[b.confidence] ?? 9));
+
+    const totalSamples = results.reduce((s, r) => s + r.sampleCount, 0);
+    const allReal = results.every(r => r.isReal);
+    const coverage = results.map(r => ({ ticker: r.ticker, samples: r.sampleCount, from: r.from, to: r.to, isReal: r.isReal }));
+    trackState.result = { signalRows, alertRows, totalSamples, tickersUsed: results.length, tickersTotal: TRACK_UNIVERSE.length, allReal, coverage };
+    showToast('Track record del motor listo', 'success');
+  } catch (e) {
+    trackState.error = `No se pudo correr el track record: ${e.message}`;
+    showToast(trackState.error, 'error');
+  } finally {
+    trackState.loading = false;
+    if (!state.asset && state.view === 'trackrecord') renderReport();
+  }
+}
+
+/** Lee la fila "Compra Fuerte" a 20 ruedas como titular honesto del motor:
+ *  cuando dijo su señal más alcista, ¿qué pasó en promedio al mes? */
+function trackHeadlineStats(res) {
+  const strong = res.signalRows.find(r => r.label === 'Compra Fuerte');
+  const weak = res.signalRows.find(r => r.label === 'Venta');
+  const pick = (row, h) => row?.horizons.find(x => x.h === h) ?? null;
+  return {
+    strong20: pick(strong, 20), strong40: pick(strong, 40),
+    sell20: pick(weak, 20),
+  };
+}
+
+function trackRecordPageHTML() {
+  const res = trackState.result;
+  const pct = trackState.total ? Math.round((trackState.done / trackState.total) * 100) : 0;
+  return `
+    ${sectionTitleHTML('Track Record del Motor', 'award')}
+    <div class="dash-intro">La prueba honesta del motor: se corre la <strong>misma señal que ves en vivo</strong> — sin mirar el futuro (cada corte usa solo velas hasta ese día) — sobre un universo curado de ${TRACK_UNIVERSE.length} activos líquidos con historial largo, y se <strong>agregan</strong> todos los resultados. Junta cada vez que el motor dijo "Compra Fuerte", "Reducir", etc. a lo largo de todos los activos y mide el retorno real y el % de acierto que vinieron después, ponderados por cantidad de muestras.</div>
+    ${trackState.loading ? `
+      <div class="card bt-meta-card">
+        <div style="margin-bottom:8px;">Corriendo el motor sobre ${TRACK_UNIVERSE.length} activos con historial real — ${trackState.done}/${trackState.total} listos…</div>
+        <div class="track-progress"><div class="track-progress-bar" style="width:${pct}%;"></div></div>
+      </div>` : ''}
+    ${trackState.error ? `<div class="card watch-empty">${esc(trackState.error)}</div>` : ''}
+    ${!res ? (trackState.loading ? '' : `<div class="card watch-empty">Preparando el track record…</div>`) : `
+      ${trackHeadlineCardsHTML(res)}
+      <div class="card bt-meta-card">Agregado sobre <strong>${res.tickersUsed}/${res.tickersTotal}</strong> activos con historial suficiente · <strong>${res.totalSamples.toLocaleString('es-AR')}</strong> cortes históricos analizados en total${res.allReal ? '' : ' · algunos activos usaron datos de caché (sin conexión en vivo al proveedor en este momento)'}</div>
+      <div class="card bt-table-card">
+        <div class="bt-factor-title">Rendimiento agregado por señal del motor</div>
+        <div class="bt-factor-intro">Cada fila junta TODAS las veces que el motor dio esa señal, en los ${res.tickersUsed} activos. Retorno promedio y win rate ponderados por cantidad de ocurrencias.</div>
+        <div class="bt-table-wrap">
+          <table class="bt-table">
+            <thead><tr>
+              <th>Señal</th><th>Ocurrencias</th>
+              ${BACKTEST_HORIZONS.map(h => `<th>${h}d retorno prom.</th><th>${h}d win rate</th>`).join('')}
+            </tr></thead>
+            <tbody>
+              ${res.signalRows.map(row => `
+                <tr>
+                  <td class="bt-label-cell"><span class="bt-label-dot" style="background:${scoreLabelColor(row.label).color}"></span>${esc(row.label)}</td>
+                  <td>${row.occurrences.toLocaleString('es-AR')}</td>
+                  ${row.horizons.map(x => x.n ? `
+                    <td class="${x.avgPct >= 0 ? 'bt-pos' : 'bt-neg'}">${x.avgPct >= 0 ? '+' : ''}${x.avgPct.toFixed(1)}%</td><td>${x.winRate}%</td>
+                  ` : `<td class="bt-nd">—</td><td class="bt-nd">—</td>`).join('')}
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="bt-disclaimer">Lo esperable si el motor sirve: el retorno promedio y el win rate deberían caer de forma ordenada desde "Compra Fuerte" hacia "Venta". Resultado histórico sobre datos reales, sin look-ahead. No es garantía de resultados futuros.</div>
+      </div>
+      ${res.alertRows.length ? `
+      <div class="card bt-table-card" style="margin-top:14px;">
+        <div class="bt-factor-title">Precisión agregada de las alertas de precio</div>
+        <div class="bt-factor-intro">Lo mismo para las alertas de zona de compra/venta/stop, agregado sobre todos los activos: cuando el motor avisó con confianza "alta", ¿acertó más seguido que con confianza "baja"?</div>
+        <div class="bt-table-wrap">
+          <table class="bt-table">
+            <thead><tr>
+              <th>Alerta</th><th>Ocurrencias</th>
+              ${BACKTEST_HORIZONS.map(h => `<th>${h}d retorno prom.</th><th>${h}d acierto</th>`).join('')}
+            </tr></thead>
+            <tbody>
+              ${res.alertRows.map(row => `
+                <tr>
+                  <td class="bt-label-cell"><span class="bt-label-dot" style="background:${ALERT_META[row.type]?.color ?? 'var(--text-faint)'}"></span>${esc(row.label)}</td>
+                  <td>${row.occurrences.toLocaleString('es-AR')}</td>
+                  ${row.horizons.map(x => x.n ? `
+                    <td class="${x.avgPct >= 0 ? 'bt-pos' : 'bt-neg'}">${x.avgPct >= 0 ? '+' : ''}${x.avgPct.toFixed(1)}%</td><td>${x.winRate}%</td>
+                  ` : `<td class="bt-nd">—</td><td class="bt-nd">—</td>`).join('')}
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>` : ''}
+      <div class="card bt-table-card" style="margin-top:14px;">
+        <div class="bt-factor-title">Cobertura — activos incluidos</div>
+        <div class="bt-table-wrap">
+          <table class="bt-table">
+            <thead><tr><th>Activo</th><th>Cortes analizados</th><th>Desde</th><th>Hasta</th><th>Datos</th></tr></thead>
+            <tbody>
+              ${res.coverage.map(c => `
+                <tr>
+                  <td class="bt-label-cell">${esc(c.ticker)}</td>
+                  <td>${c.samples.toLocaleString('es-AR')}</td>
+                  <td>${esc(c.from ?? '—')}</td>
+                  <td>${esc(c.to ?? '—')}</td>
+                  <td>${c.isReal ? 'en vivo' : 'caché'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="bt-disclaimer">Universo curado de activos líquidos con años de historial (donde el backtest sin look-ahead es más confiable). No incluye CEDEARs de baja liquidez ni cripto — su historial corto o ruidoso distorsionaría el agregado. ${res.tickersUsed < res.tickersTotal ? `${res.tickersTotal - res.tickersUsed} activo(s) quedaron fuera por historial insuficiente o falta de datos en este momento.` : ''}</div>
+      </div>
+    `}
+  `;
+}
+
+function trackHeadlineCardsHTML(res) {
+  const s = trackHeadlineStats(res);
+  const card = (label, stat, sub) => {
+    if (!stat) return '';
+    const pos = stat.avgPct >= 0;
+    return `
+      <div class="card track-head-card">
+        <div class="track-head-label">${esc(label)}</div>
+        <div class="track-head-value ${pos ? 'up' : 'down'}">${pos ? '+' : ''}${stat.avgPct.toFixed(1)}%</div>
+        <div class="track-head-sub">${esc(sub)} · ${stat.winRate}% win rate · ${stat.n.toLocaleString('es-AR')} casos</div>
+      </div>`;
+  };
+  return `
+    <div class="track-head-grid">
+      ${card('Tras "Compra Fuerte", a 20 ruedas', s.strong20, 'retorno promedio real')}
+      ${card('Tras "Compra Fuerte", a 40 ruedas', s.strong40, 'retorno promedio real')}
+      ${card('Tras "Venta", a 20 ruedas', s.sell20, 'retorno promedio real')}
+    </div>`;
+}
+
+function wireTrackRecordEvents() { /* la página se autocarga vía load(); sin interacción extra */ }
+
 /** Página de Calendario Económico: agrega la fecha de próximo balance (real,
  *  misma fuente Finnhub que ya se usa en la ficha de cada activo) de todos
  *  los tickers en Watchlist + Portfolio + universo curado del Dashboard, en
@@ -5568,6 +5924,7 @@ async function computeLightSignal(ticker, macro) {
   // para stop sugerido y distancia al stop de cada tenencia.
   const planRaw = computePlan(technical, scoreResult.score).raw;
   const setup = shortTermSetup(technical, candles); // radar de trades cortos, sin pedidos extra
+  const gap = computeGap(candles, technical); // radar de gaps de apertura, sin pedidos extra
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
     price: quote.usd, changePct: quote.changePct,
@@ -5588,6 +5945,7 @@ async function computeLightSignal(ticker, macro) {
     highlight: technicalHighlight(technical),
     planRaw, // stop/objetivos numéricos (USD) — para la columna de stop del Portfolio
     setup, // setup de trade corto (o null) — para el Radar de Trades Cortos
+    gap, // hueco de apertura de la última rueda (o null) — para el Radar de Gaps
   };
 }
 
@@ -5672,6 +6030,46 @@ function shortTermSetup(technical, candles) {
     score, qualifies, triggers, risks,
     entry: price, stop, target1, target2, rr, expectedMovePct,
     confidence: score >= 75 ? 'muy alta' : score >= 60 ? 'alta' : score >= 45 ? 'media' : 'baja',
+  };
+}
+
+/* ───────────────────────── radar de gaps / pre-market ─────────────────────
+ * Detecta el hueco (gap) de apertura de la última rueda: la diferencia entre
+ * la apertura de hoy y el cierre de ayer. Un gap es una señal de fuerza (o
+ * pánico) real — el mercado reprecia el activo de un salto por un catalizador
+ * (balance, noticia, guidance). Se mide su tamaño en % y en múltiplos de ATR
+ * (para saber si es grande relativo a la volatilidad típica del activo), la
+ * dirección, y si ya se "rellenó" intradía (el precio volvió al cierre previo
+ * — un gap que se rellena suele ser menos sostenible). Todo se calcula sobre
+ * las mismas velas ya pedidas por computeLightSignal, sin requests extra.
+ * Devuelve null si el gap es insignificante (<0.75%) para no ensuciar el
+ * radar con ruido. */
+function computeGap(candles, technical) {
+  const o = candles.o, c = candles.c, h = candles.h, l = candles.l;
+  const n = c.length;
+  if (n < 2 || !o || o[n - 1] == null) return null;
+  const prevClose = c[n - 2];
+  const open = o[n - 1];
+  if (!(prevClose > 0)) return null;
+  const gapPct = ((open - prevClose) / prevClose) * 100;
+  if (Math.abs(gapPct) < 0.75) return null; // ruido: no es un gap real
+  const atr = technical?.atr;
+  const gapAtr = atr > 0 && !isNaN(atr) ? (open - prevClose) / atr : null;
+  const up = gapPct > 0;
+  // Relleno del gap: un gap alcista se "rellena" si el mínimo del día tocó el
+  // cierre previo; uno bajista, si el máximo lo tocó.
+  const filled = up ? l[n - 1] <= prevClose : h[n - 1] >= prevClose;
+  // Cuánto del hueco se cerró intradía (0 = intacto, 1 = totalmente relleno).
+  const lastPrice = c[n - 1];
+  const gapDist = open - prevClose;
+  const fillFrac = gapDist !== 0 ? Math.max(0, Math.min(1, (open - lastPrice) / gapDist)) : 0;
+  // ¿El precio se mantiene por encima/debajo de la apertura? (holding the gap)
+  const holding = up ? lastPrice >= open * 0.999 : lastPrice <= open * 1.001;
+  return {
+    pct: gapPct, atr: gapAtr, direction: up ? 'up' : 'down',
+    filled, fillFrac, holding, prevClose, open, last: lastPrice,
+    // Significancia: gap grande relativo a la volatilidad típica del activo.
+    significant: gapAtr != null ? Math.abs(gapAtr) >= 1 : Math.abs(gapPct) >= 3,
   };
 }
 
