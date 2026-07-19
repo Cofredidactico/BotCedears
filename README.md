@@ -510,6 +510,43 @@ compra de insiders tiene valor de señal documentado; la venta, mucho menos, y
 así se explica en la propia tarjeta. Si el símbolo no tiene cobertura, la
 tarjeta no aparece (nunca se inventan operaciones).
 
+## Radiografía de Cartera (salto grande del Portfolio Advisor)
+
+El Portfolio Advisor pasó de ser un scroll largo de tarjetas a una **terminal
+con pestañas** (Resumen · Riesgo & Proyección · Operar · Tenencias) y sumó tres
+motores de inteligencia nuevos, todos sobre datos ya calculados (sin pedidos
+extra ni números inventados):
+
+- **Copiloto / Radiografía** (pestaña Resumen): una **nota A-F** (derivada del
+  health score, penalizada por señales críticas), un diagnóstico ejecutivo en
+  criollo y una lista PRIORIZADA de acciones concretas ("bajá el peso de X",
+  "diversificá fuera de tal sector", "tenés posiciones pegadas al stop"). Cada
+  punto sale de un umbral trazable (`portfolioCopilot`): concentración por
+  activo/sector, volatilidad, beta, Sharpe, solapamientos, posiciones en
+  Venta/Reducir, distancia al stop y comparación vs S&P 500. No es una opinión
+  de IA.
+
+- **Proyección Monte Carlo a 12 meses** (pestaña Riesgo): simula 350 futuros
+  posibles reMuestreando por **bootstrap** los retornos diarios REALES de tu
+  cartera (`monteCarloProjection`) — preserva la forma real de la distribución
+  (colas gordas) en vez de asumir una gaussiana. Fan chart SVG con bandas p5-p95
+  y p25-p75, escenario medio/optimista/pesimista y probabilidad de terminar en
+  verde. Determinista (semilla fija por composición) para no titilar entre
+  refrescos.
+
+- **Escenarios de estrés** (pestaña Riesgo): cuánto valdría tu cartera hoy ante
+  shocks concretos — mercado −10%/−20% (vía **beta real de cada posición** vs
+  S&P), cripto −30% (sobre el peso cripto), tu mayor posición −15% — más un
+  panel interactivo para probar tu propio shock de mercado (`stressScenarios`,
+  `marketShockImpact`). Se agregó beta por posición (`assetBetas`) a
+  `computePortfolioRiskMetrics`, junto con la media/desvío diario y la serie de
+  retornos de la cartera que alimentan el Monte Carlo.
+
+Reorganización pura de layout: todas las tarjetas que ya existían (riesgo,
+aporte al riesgo, rebalanceo, asignador, impuestos, dividendos, operaciones,
+tabla de tenencias) siguen ahí, ahora repartidas por pestaña para que la página
+se sienta una mesa de análisis y no un scroll infinito.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente
