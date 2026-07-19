@@ -26,6 +26,31 @@ function fmtDate(d) {
   return d.toISOString().slice(0, 10);
 }
 
+// Traducción de titulares al español vía el endpoint gratuito de Google
+// Translate (sin API key). Se traducen todos los titulares en UNA sola
+// llamada uniéndolos con saltos de línea (Google los preserva como segmentos
+// separados). Si algo falla o la cantidad de líneas no coincide, se devuelven
+// los originales en inglés — nunca se rompe la carga de noticias por esto.
+async function translateHeadlines(texts) {
+  if (!texts.length) return texts;
+  try {
+    const joined = texts.join('\n');
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=es&dt=t&q=${encodeURIComponent(joined)}`;
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!r.ok) return texts;
+    const d = await r.json();
+    const segs = Array.isArray(d?.[0]) ? d[0] : [];
+    const full = segs.map(s => s?.[0] ?? '').join('');
+    const lines = full.split('\n');
+    // Solo se usa la traducción si mantiene la misma cantidad de titulares
+    // (si Google fusionó/partió líneas, se cae al original para no desalinear).
+    if (lines.length === texts.length) return lines.map((l, i) => l.trim() || texts[i]);
+    return texts;
+  } catch (_) {
+    return texts;
+  }
+}
+
 export default async function handler(req, res) {
   const symbol = String(req.query.symbol || '').toUpperCase();
   const general = req.query.general === '1';
@@ -38,10 +63,14 @@ export default async function handler(req, res) {
       // esta categoría, así que va sin sentimentScore.
       const r = await fetch(`${FINNHUB}/news?category=general&token=${process.env.FINNHUB_KEY}`);
       const raw = r.ok ? await r.json() : [];
-      const items = (Array.isArray(raw) ? raw : [])
+      const picked = (Array.isArray(raw) ? raw : [])
         .sort((a, b) => (b.datetime || 0) - (a.datetime || 0))
-        .slice(0, 14)
-        .map(n => ({ ...tagHeadline(n.headline), text: n.headline, source: n.source, url: n.url, datetime: n.datetime }));
+        .slice(0, 14);
+      const translated = await translateHeadlines(picked.map(n => n.headline || ''));
+      const items = picked.map((n, i) => ({
+        ...tagHeadline(n.headline), // sentimiento sobre el titular original en inglés
+        text: translated[i], textEn: n.headline, source: n.source, url: n.url, datetime: n.datetime,
+      }));
       res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=1200');
       return res.status(200).json({ items, sentimentScore: null });
     }
@@ -55,10 +84,14 @@ export default async function handler(req, res) {
     const newsRaw = newsRes.ok ? await newsRes.json() : [];
     const sentRaw = sentRes.ok ? await sentRes.json() : null;
 
-    const items = (Array.isArray(newsRaw) ? newsRaw : [])
+    const picked = (Array.isArray(newsRaw) ? newsRaw : [])
       .sort((a, b) => (b.datetime || 0) - (a.datetime || 0))
-      .slice(0, 6)
-      .map(n => ({ ...tagHeadline(n.headline), text: n.headline, source: n.source, url: n.url, datetime: n.datetime }));
+      .slice(0, 6);
+    const translated = await translateHeadlines(picked.map(n => n.headline || ''));
+    const items = picked.map((n, i) => ({
+      ...tagHeadline(n.headline), // sentimiento sobre el titular original en inglés
+      text: translated[i], textEn: n.headline, source: n.source, url: n.url, datetime: n.datetime,
+    }));
 
     const bullishPercent = sentRaw?.sentiment?.bullishPercent;
     const sentimentScore = typeof bullishPercent === 'number' ? bullishPercent : null;
