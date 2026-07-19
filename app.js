@@ -138,6 +138,8 @@ const portState = {
   compact: lsGetSafe('icp_port_compact', '0') === '1',
   privacy: lsGetSafe('icp_port_privacy', '0') === '1',
   allocAmount: '', allocResult: null, // asignador "¿qué compro con AR$X?"
+  tab: 'resumen', // pestaña activa de la Radiografía de Cartera
+  stressShock: null, // shock de mercado elegido en el panel de estrés (o null)
 };
 const taxState = { cumplidor: lsGetSafe('icp_tax_cumplidor', '0') === '1' };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
@@ -3589,7 +3591,7 @@ function computePortfolioRiskMetrics(rows, macro, spyCloses = null) {
 
   const minLen = Math.min(...withCloses.map(r => r.d.closes.length));
   const totalW = withCloses.reduce((s, r) => s + r.weight, 0);
-  const series = withCloses.map(r => ({ ticker: r.ticker, weight: r.weight / totalW, closes: r.d.closes.slice(-minLen) }));
+  const series = withCloses.map(r => ({ ticker: r.ticker, weight: r.weight / totalW, closes: r.d.closes.slice(-minLen), category: r.d.category ?? null }));
 
   const returnsOf = (closes) => {
     const out = [];
@@ -3652,6 +3654,7 @@ function computePortfolioRiskMetrics(rows, macro, spyCloses = null) {
 
   // Beta y comparación vs SPY, sobre la ventana común de datos.
   let beta = null, portfolioTotalReturn = null, spyTotalReturn = null;
+  const assetBetas = []; // beta por posición vs SPY — para el estrés de mercado
   if (spyCloses?.length >= MIN_DAYS) {
     const spyReturns = returnsOf(spyCloses);
     const n = Math.min(portfolioReturns.length, spyReturns.length);
@@ -3660,6 +3663,15 @@ function computePortfolioRiskMetrics(rows, macro, spyCloses = null) {
     beta = cps != null && vs > 0 ? cps / vs : null;
     portfolioTotalReturn = p.reduce((acc, r) => acc * (1 + r), 1) - 1;
     spyTotalReturn = s.reduce((acc, r) => acc * (1 + r), 1) - 1;
+    // Beta de cada posición: cuánto se mueve ESE activo cuando el mercado
+    // (SPY) se mueve 1 — la sensibilidad real de cada tenencia al índice.
+    if (vs > 0) {
+      for (let k = 0; k < series.length; k++) {
+        const ar = assetReturns[k].slice(-n);
+        const cas = cov(ar, s.slice(-ar.length));
+        assetBetas.push({ ticker: series[k].ticker, weight: series[k].weight, category: series[k].category, beta: cas != null ? cas / vs : null });
+      }
+    }
   }
 
   // Solapamiento: pares de tenencias cuyos retornos van >0.8 correlacionados
@@ -3681,6 +3693,8 @@ function computePortfolioRiskMetrics(rows, macro, spyCloses = null) {
     coveredHoldings: withCloses.length, totalHoldings: totalWithWeight, days: minLen,
     annualizedReturn, annualizedVol, sharpe, maxDrawdown: maxDD, riskFreeUsed: riskFree,
     riskContributions, worstWeek, worstMonth, beta, portfolioTotalReturn, spyTotalReturn, overlaps,
+    dailyMean: mean, dailyStd, portfolioReturns, assetBetas,
+    series: series.map(s => ({ ticker: s.ticker, weight: s.weight, category: s.category })),
   };
 }
 
@@ -4422,6 +4436,293 @@ function portfolioTreemapSVG(rows) {
     </div>`;
 }
 
+/* ═══════════════════ RADIOGRAFÍA DE CARTERA (capa de inteligencia) ═══════════
+ * Tres motores nuevos, todos sobre datos ya calculados (stats + risk), sin
+ * pedidos extra ni números inventados:
+ *   1. Copiloto: nota A-F + diagnóstico ejecutivo + acciones prioritarias.
+ *   2. Monte Carlo: proyección a 12 meses por bootstrap de los retornos
+ *      diarios REALES de la cartera (no una gaussiana teórica), con bandas.
+ *   3. Estrés: impacto de shocks de mercado/cripto/posición, por beta real.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+const PORT_TABS = [
+  { key: 'resumen', label: 'Resumen', icon: 'grid' },
+  { key: 'riesgo', label: 'Riesgo & Proyección', icon: 'trend' },
+  { key: 'operar', label: 'Operar', icon: 'shuffle' },
+  { key: 'tenencias', label: 'Tenencias', icon: 'briefcase' },
+];
+
+/** Cuenta posiciones con el precio a ≤3% del stop sugerido (decisión inminente). */
+function nearStopRows(stats) {
+  return stats.rows.filter(r => {
+    const pr = r.d?.planRaw;
+    return pr?.stopLoss != null && r.d.price > 0 && ((r.d.price - pr.stopLoss) / r.d.price) * 100 <= 3;
+  });
+}
+function isCryptoPos(r) {
+  return CRYPTO_RELATED.has(r.ticker) || /crypto|cripto/i.test(r.d?.category ?? '');
+}
+
+/** Copiloto de cartera: convierte las métricas ya calculadas en una lectura
+ *  ejecutiva en criollo, una nota A-F (derivada del health score, ajustada por
+ *  señales críticas) y una lista PRIORIZADA de acciones concretas. No es una
+ *  opinión de IA: cada punto sale de un umbral trazable sobre datos reales. */
+function portfolioCopilot(stats, risk, health) {
+  if (!stats?.rows?.length) return null;
+  const points = [], actions = [];
+  const topW = stats.topHolding?.weight ?? null;
+  const topSector = stats.sectorRows?.[0] ?? null;
+  const sells = stats.sellSignals ?? [];
+  const near = nearStopRows(stats);
+
+  // Diagnóstico (lecturas)
+  if (topW != null) {
+    if (topW >= 0.4) { points.push({ tone: 'bad', text: `Muy concentrada: ${esc(stats.topHolding.ticker)} es el ${Math.round(topW * 100)}% de la cartera. Un mal día de ese activo te pega de lleno.` }); actions.push({ pri: 1, text: `Bajá el peso de ${stats.topHolding.ticker} (hoy ${Math.round(topW * 100)}%) hacia ≤15-20% para no depender de un solo activo.` }); }
+    else if (topW >= 0.25) points.push({ tone: 'warn', text: `Algo concentrada: tu mayor posición (${esc(stats.topHolding.ticker)}) pesa ${Math.round(topW * 100)}%.` });
+    else points.push({ tone: 'good', text: `Bien distribuida por activo: ninguna posición domina (la mayor es ${Math.round(topW * 100)}%).` });
+  }
+  if (topSector && topSector.pct >= 0.5) { points.push({ tone: 'bad', text: `Muy expuesta a un sector: ${esc(topSector.sector)} es el ${Math.round(topSector.pct * 100)}% de la cartera.` }); actions.push({ pri: 2, text: `Diversificá fuera de ${topSector.sector} (${Math.round(topSector.pct * 100)}%): sumá activos de otros sectores para no jugarte a una sola industria.` }); }
+  else if (topSector && topSector.pct >= 0.35) points.push({ tone: 'warn', text: `${esc(topSector.sector)} concentra el ${Math.round(topSector.pct * 100)}% — el sector más pesado.` });
+
+  if (risk) {
+    if (risk.annualizedVol >= 0.4) points.push({ tone: 'bad', text: `Volatilidad alta: ${(risk.annualizedVol * 100).toFixed(0)}% anual. Esperá swings fuertes de valor.` });
+    else if (risk.annualizedVol >= 0.25) points.push({ tone: 'warn', text: `Volatilidad media-alta: ${(risk.annualizedVol * 100).toFixed(0)}% anual.` });
+    else points.push({ tone: 'good', text: `Volatilidad contenida: ${(risk.annualizedVol * 100).toFixed(0)}% anual.` });
+    if (risk.beta != null && risk.beta >= 1.3) points.push({ tone: 'warn', text: `Beta ${risk.beta.toFixed(2)}: amplificás al mercado — si SPY cae 10%, tendés a caer ~${(risk.beta * 10).toFixed(0)}%.` });
+    if (risk.sharpe != null) {
+      if (risk.sharpe >= 1) points.push({ tone: 'good', text: `Buen retorno ajustado por riesgo (Sharpe ${risk.sharpe.toFixed(2)}).` });
+      else if (risk.sharpe < 0) points.push({ tone: 'warn', text: `Sharpe negativo (${risk.sharpe.toFixed(2)}): en esta ventana, el riesgo no se pagó con retorno.` });
+    }
+    if (risk.overlaps?.length) { points.push({ tone: 'warn', text: `${risk.overlaps.length} par(es) de activos se mueven casi igual (correlación >0.8) — esa diversificación es en parte ilusoria.` }); actions.push({ pri: 4, text: `Revisá los pares muy correlacionados (ej. ${esc(risk.overlaps[0].a)}/${esc(risk.overlaps[0].b)}): tener los dos no diversifica tanto como parece.` }); }
+    if (risk.portfolioTotalReturn != null && risk.spyTotalReturn != null) {
+      const diff = (risk.portfolioTotalReturn - risk.spyTotalReturn) * 100;
+      points.push({ tone: diff >= 0 ? 'good' : 'warn', text: `Contra el S&P 500 (mismo período): ${diff >= 0 ? 'le ganás' : 'quedás atrás'} por ${Math.abs(diff).toFixed(1)} puntos.` });
+    }
+  }
+
+  if (sells.length) { const w = Math.round(sells.reduce((s, r) => s + (r.weight ?? 0), 0) * 100); points.push({ tone: 'warn', text: `${sells.length} posición(es) en señal de Venta/Reducir (${w}% del peso).` }); actions.push({ pri: 3, text: `Definí qué hacés con las ${sells.length} posición(es) en Venta/Reducir (${w}% de la cartera): sostener con tesis clara o achicar.` }); }
+  if (near.length) { points.push({ tone: 'bad', text: `${near.length} posición(es) a ≤3% del stop sugerido — decisión inminente.` }); actions.push({ pri: 0, text: `Atención URGENTE: ${near.map(r => esc(r.ticker)).join(', ')} está(n) pegada(s) al stop. Decidí ahora si respetás el stop o ajustás la tesis.` }); }
+
+  const gradeFor = (s) => s >= 85 ? 'A' : s >= 72 ? 'B' : s >= 58 ? 'C' : s >= 42 ? 'D' : 'F';
+  let base = health?.score ?? 60;
+  if (near.length) base -= 6; // riesgo inminente pesa aunque el resto esté ok
+  base = Math.max(0, Math.min(100, base));
+  const grade = gradeFor(base);
+  const gradeColor = base >= 72 ? GREEN : base >= 58 ? AMBER : RED;
+
+  const headline = grade === 'A' ? 'Cartera sólida y bien equilibrada.'
+    : grade === 'B' ? 'Cartera saludable, con detalles para pulir.'
+    : grade === 'C' ? 'Cartera aceptable, pero con riesgos concretos a atender.'
+    : grade === 'D' ? 'Cartera con problemas de riesgo que conviene corregir.'
+    : 'Cartera con riesgo alto — varias señales críticas juntas.';
+
+  actions.sort((a, b) => a.pri - b.pri);
+  return { grade, gradeColor, healthScore: base, headline, points, actions: actions.slice(0, 4) };
+}
+
+function portfolioCopilotCardHTML(cp, health) {
+  if (!cp) return '';
+  return `
+    <div class="card port-copilot-card">
+      <div class="copilot-top">
+        <div class="copilot-grade" style="border-color:${cp.gradeColor}; color:${cp.gradeColor};">
+          <div class="copilot-grade-letter">${cp.grade}</div>
+          <div class="copilot-grade-score">${cp.healthScore}/100</div>
+        </div>
+        <div class="copilot-head-text">
+          <div class="copilot-eyebrow">Radiografía de tu cartera</div>
+          <div class="copilot-headline">${esc(cp.headline)}</div>
+          <div class="copilot-sub">Diagnóstico automático sobre tus métricas reales — no es asesoramiento financiero.</div>
+        </div>
+      </div>
+      ${cp.actions.length ? `
+      <div class="copilot-actions">
+        <div class="copilot-actions-title">⚡ Qué haría primero</div>
+        <ol class="copilot-actions-list">
+          ${cp.actions.map(a => `<li>${a.text}</li>`).join('')}
+        </ol>
+      </div>` : `<div class="copilot-actions"><div class="copilot-actions-title">✓ Sin acciones urgentes</div><div class="copilot-sub">No detecté señales críticas — mantené el seguimiento habitual.</div></div>`}
+      <div class="copilot-points">
+        ${cp.points.map(p => `<div class="copilot-point ${p.type ?? p.tone}"><span class="copilot-dot ${p.tone}"></span>${p.text}</div>`).join('')}
+      </div>
+    </div>`;
+}
+
+/* ─────────────────────── Proyección Monte Carlo ─────────────────────── */
+const MC_SIMS = 350, MC_HORIZON = 252, MC_STEPS = 12; // 12 puntos mensuales
+// PRNG determinista (mulberry32) + hash de string — para que la simulación dé
+// SIEMPRE el mismo resultado con la misma cartera (no titila entre refrescos).
+function mcHash(str) { let h = 2166136261 >>> 0; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function mcRng(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+/** Proyecta el valor de la cartera 12 meses hacia adelante por bootstrap:
+ *  reMuestrea los retornos diarios REALES de tu cartera (con reemplazo) para
+ *  armar miles de futuros posibles — así preserva la forma real de la
+ *  distribución (colas gordas incluidas), en vez de asumir una campana de
+ *  Gauss. Determinista (semilla fija por composición) para no titilar entre
+ *  refrescos. */
+function monteCarloProjection(stats, risk) {
+  const rets = risk?.portfolioReturns;
+  const start = stats?.totalValue;
+  if (!rets || rets.length < 40 || !(start > 0)) return null;
+  // Semilla estable derivada de la composición (tickers+pesos redondeados).
+  const seedStr = stats.rows.map(r => `${r.ticker}:${Math.round((r.weight ?? 0) * 100)}`).join('|');
+  const rand = mcRng(mcHash(seedStr) ^ 0xC0FFEE);
+  const stepDays = Math.floor(MC_HORIZON / MC_STEPS);
+  const n = rets.length;
+  // Para cada simulación guardamos el multiplicador acumulado en cada step.
+  const stepMultsAll = Array.from({ length: MC_STEPS }, () => []);
+  const endMults = [];
+  for (let s = 0; s < MC_SIMS; s++) {
+    let mult = 1;
+    for (let step = 0; step < MC_STEPS; step++) {
+      for (let d = 0; d < stepDays; d++) {
+        const r = rets[Math.floor(rand() * n)];
+        mult *= (1 + r);
+      }
+      stepMultsAll[step].push(mult);
+    }
+    endMults.push(mult);
+  }
+  const pctl = (arr, p) => {
+    const a = [...arr].sort((x, y) => x - y);
+    const idx = Math.min(a.length - 1, Math.max(0, Math.round((p / 100) * (a.length - 1))));
+    return a[idx];
+  };
+  const steps = stepMultsAll.map((mults, i) => ({
+    month: i + 1,
+    p5: start * pctl(mults, 5), p25: start * pctl(mults, 25), p50: start * pctl(mults, 50),
+    p75: start * pctl(mults, 75), p95: start * pctl(mults, 95),
+  }));
+  const probPositive = endMults.filter(m => m > 1).length / endMults.length;
+  return {
+    start, steps, horizonMonths: 12,
+    endP5: start * pctl(endMults, 5), endP25: start * pctl(endMults, 25), endP50: start * pctl(endMults, 50),
+    endP75: start * pctl(endMults, 75), endP95: start * pctl(endMults, 95),
+    probPositive, sims: MC_SIMS,
+    coveredHoldings: risk.coveredHoldings, totalHoldings: risk.totalHoldings,
+  };
+}
+
+function monteCarloFanSVG(mc) {
+  const W = 720, H = 260, PADL = 8, PADR = 8, PADT = 14, PADB = 26;
+  const plotW = W - PADL - PADR, plotH = H - PADT - PADB;
+  // Punto 0 = hoy (valor inicial) para las 5 bandas.
+  const pts = [{ month: 0, p5: mc.start, p25: mc.start, p50: mc.start, p75: mc.start, p95: mc.start }, ...mc.steps];
+  const allV = pts.flatMap(p => [p.p5, p.p95]);
+  let lo = Math.min(...allV), hi = Math.max(...allV);
+  const pad = (hi - lo) * 0.08 || hi * 0.05; lo -= pad; hi += pad;
+  const x = (m) => PADL + (m / mc.horizonMonths) * plotW;
+  const y = (v) => PADT + (1 - (v - lo) / (hi - lo)) * plotH;
+  const band = (loKey, hiKey) => {
+    const up = pts.map(p => `${x(p.month).toFixed(1)},${y(p[hiKey]).toFixed(1)}`);
+    const dn = [...pts].reverse().map(p => `${x(p.month).toFixed(1)},${y(p[loKey]).toFixed(1)}`);
+    return `M${up.join(' L')} L${dn.join(' L')} Z`;
+  };
+  const line = (key) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.month).toFixed(1)},${y(p[key]).toFixed(1)}`).join(' ');
+  const startY = y(mc.start);
+  const g = GREEN, b = 'oklch(0.72 0.15 250)';
+  return `
+    <svg class="mc-fan" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Proyección Monte Carlo del valor de la cartera a 12 meses">
+      <path d="${band('p5', 'p95')}" fill="${b}" fill-opacity="0.10" />
+      <path d="${band('p25', 'p75')}" fill="${b}" fill-opacity="0.20" />
+      <line x1="${PADL}" y1="${startY.toFixed(1)}" x2="${W - PADR}" y2="${startY.toFixed(1)}" stroke="var(--text-faint)" stroke-dasharray="3 4" stroke-width="1" />
+      <path d="${line('p50')}" fill="none" stroke="${g}" stroke-width="2.2" />
+      <path d="${line('p95')}" fill="none" stroke="${b}" stroke-width="1" stroke-opacity="0.5" />
+      <path d="${line('p5')}" fill="none" stroke="${b}" stroke-width="1" stroke-opacity="0.5" />
+      ${[3, 6, 9, 12].map(m => `<text x="${x(m).toFixed(1)}" y="${H - 8}" fill="var(--text-mute)" font-size="10" text-anchor="middle" font-family="'IBM Plex Mono',monospace">${m}m</text>`).join('')}
+    </svg>`;
+}
+
+function monteCarloCardHTML(mc) {
+  if (!mc) return '';
+  const chg = (v) => ((v - mc.start) / mc.start) * 100;
+  const chgTxt = (v) => `${chg(v) >= 0 ? '+' : ''}${chg(v).toFixed(0)}%`;
+  return `
+    <div class="card port-notes-card mc-card">
+      <div class="dash-radar-title">Proyección Monte Carlo — 12 meses</div>
+      <div class="mc-intro">${mc.sims.toLocaleString('es-AR')} futuros posibles simulados reMuestreando los retornos diarios reales de tu cartera. La línea verde es el escenario medio; la banda, el rango probable. No es una predicción — es la dispersión de resultados que tu propio riesgo histórico implica.</div>
+      <div class="mc-chart-wrap">${monteCarloFanSVG(mc)}</div>
+      <div class="mc-stats">
+        <div class="mc-stat"><span>Escenario medio (p50)</span><b>${pv(fmtUsd(mc.endP50))}</b><small class="${chg(mc.endP50) >= 0 ? 'up' : 'down'}">${chgTxt(mc.endP50)}</small></div>
+        <div class="mc-stat"><span>Optimista (p95)</span><b class="up">${pv(fmtUsd(mc.endP95))}</b><small class="up">${chgTxt(mc.endP95)}</small></div>
+        <div class="mc-stat"><span>Pesimista (p5)</span><b class="down">${pv(fmtUsd(mc.endP5))}</b><small class="down">${chgTxt(mc.endP5)}</small></div>
+        <div class="mc-stat"><span>Prob. de terminar en verde</span><b class="${mc.probPositive >= 0.5 ? 'up' : 'down'}">${Math.round(mc.probPositive * 100)}%</b><small>en 12 meses</small></div>
+      </div>
+      <div class="bt-disclaimer">Bootstrap sobre ${mc.coveredHoldings}${mc.coveredHoldings < mc.totalHoldings ? `/${mc.totalHoldings}` : ''} posiciones con historial, con los pesos actuales. Asume que el comportamiento futuro se parece al pasado reciente — puede no cumplirse. No incluye aportes ni retiros nuevos.</div>
+    </div>`;
+}
+
+/* ─────────────────────── Escenarios de estrés ─────────────────────── */
+const STRESS_MARKET_SHOCKS = [-5, -10, -20, -30];
+
+/** Impacto estimado de un shock de mercado (caída del S&P) en el valor USD de
+ *  la cartera, sumando por posición beta_i × peso_i × shock. Si no hay betas
+ *  por activo (falta SPY), cae al beta de cartera. */
+function marketShockImpact(stats, risk, shockPct) {
+  const betas = risk?.assetBetas;
+  if (betas?.length) {
+    let deltaFrac = 0;
+    for (const a of betas) if (a.beta != null) deltaFrac += a.weight * a.beta * (shockPct / 100);
+    return deltaFrac;
+  }
+  if (risk?.beta != null) return risk.beta * (shockPct / 100);
+  return null;
+}
+
+function stressScenarios(stats, risk) {
+  const out = [];
+  const start = stats.totalValue;
+  const mk = (id, label, frac, note) => {
+    if (frac == null) return;
+    out.push({ id, label, deltaPct: frac * 100, deltaUsd: start * frac, note });
+  };
+  mk('mkt10', 'Mercado −10% (corrección)', marketShockImpact(stats, risk, -10), 'Vía beta real de cada posición vs S&P 500.');
+  mk('mkt20', 'Mercado −20% (bear market)', marketShockImpact(stats, risk, -20), 'El doble de una corrección típica.');
+  // Cripto −30%
+  const cryptoW = stats.rows.filter(isCryptoPos).reduce((s, r) => s + (r.weight ?? 0), 0);
+  if (cryptoW > 0) mk('crypto30', 'Cripto −30%', -0.30 * cryptoW, `${Math.round(cryptoW * 100)}% de tu cartera es cripto o relacionado.`);
+  // Mayor posición −15%
+  if (stats.topHolding?.weight) mk('top15', `${stats.topHolding.ticker} −15%`, -0.15 * stats.topHolding.weight, `Tu mayor posición pesa ${Math.round(stats.topHolding.weight * 100)}%.`);
+  return { start, scenarios: out, hasBetas: !!(risk?.assetBetas?.length) };
+}
+
+function stressTestCardHTML(stats, risk) {
+  const st = stressScenarios(stats, risk);
+  if (!st.scenarios.length && !st.hasBetas) return '';
+  const start = stats.totalValue;
+  const shock = portState.stressShock;
+  const customFrac = shock != null ? marketShockImpact(stats, risk, shock) : null;
+  return `
+    <div class="card port-notes-card stress-card">
+      <div class="dash-radar-title">Escenarios de estrés</div>
+      <div class="mc-intro">Cuánto valdría tu cartera hoy si pasara cada shock, estimado con la sensibilidad real (beta) de cada posición. Un simulacro, no un pronóstico.</div>
+      <div class="stress-grid">
+        ${st.scenarios.map(s => `
+          <div class="stress-cell ${s.deltaPct >= 0 ? 'pos' : ''}">
+            <div class="stress-cell-label">${esc(s.label)}</div>
+            <div class="stress-cell-delta ${s.deltaPct >= 0 ? 'up' : 'down'}">${s.deltaPct >= 0 ? '+' : ''}${s.deltaPct.toFixed(1)}%</div>
+            <div class="stress-cell-abs">${pv(fmtUsd(start + s.deltaUsd))} <span class="port-pnl-abs">(${s.deltaUsd >= 0 ? '+' : '−'}${pv(fmtUsd(Math.abs(s.deltaUsd)))})</span></div>
+            <div class="stress-cell-note">${esc(s.note)}</div>
+          </div>`).join('')}
+      </div>
+      ${st.hasBetas ? `
+      <div class="stress-custom">
+        <div class="stress-custom-label">Probá tu propio shock de mercado:</div>
+        <div class="stress-shock-btns">
+          ${STRESS_MARKET_SHOCKS.map(sh => `<button class="stress-shock-btn ${shock === sh ? 'active' : ''}" data-stress-shock="${sh}">S&amp;P ${sh}%</button>`).join('')}
+          ${shock != null ? `<button class="stress-shock-btn stress-clear" data-stress-shock="clear">✕</button>` : ''}
+        </div>
+        ${customFrac != null ? `
+          <div class="stress-custom-result">
+            Con el S&amp;P <b>${shock}%</b>, tu cartera pasaría a <b>${pv(fmtUsd(start * (1 + customFrac)))}</b>
+            <span class="stress-cell-delta ${customFrac >= 0 ? 'up' : 'down'}" style="display:inline-block;">${customFrac >= 0 ? '+' : ''}${(customFrac * 100).toFixed(1)}%</span>
+            <span class="port-pnl-abs">(${customFrac >= 0 ? '+' : '−'}${pv(fmtUsd(Math.abs(start * customFrac)))})</span>
+          </div>` : ''}
+      </div>` : `<div class="bt-disclaimer">El shock de mercado por beta necesita historial de SPY — se calcula apenas cargue.</div>`}
+    </div>`;
+}
+
 function portfolioHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
@@ -4429,8 +4730,11 @@ function portfolioHTML() {
   const health = stats ? computePortfolioHealth(stats, risk) : null;
   const notes = stats ? portfolioRiskNotes(stats, risk) : [];
   const recoHist = stats ? trackRecoChanges(stats.rows) : [];
+  const copilot = stats ? portfolioCopilot(stats, risk, health) : null;
+  const mc = stats ? monteCarloProjection(stats, risk) : null;
   const loadingCount = holdings.filter(h => !portState.data[h.ticker]).length;
   const editingHolding = portState.editing ? holdings.find(h => h.ticker === portState.editing) : null;
+  const tab = portState.tab;
 
   return `
     ${sectionTitleHTML('Portfolio Advisor', 'briefcase')}
@@ -4482,68 +4786,79 @@ function portfolioHTML() {
       </div>
     </div>
 
-    ${portfolioTreemapSVG(stats.rows)}
-    ${riskMetricsCardHTML(risk, holdings.length)}
-    ${portfolioHealthCardHTML(health)}
-    ${riskContributionCardHTML(risk)}
-    ${taxImpactCardHTML(stats.totalValue, portState.ccl)}
-    ${rebalanceCardHTML(stats)}
-    ${allocatorCardHTML(stats)}
-    ${benchmarksCardHTML(stats)}
-    ${portfolioDividendsCardHTML(stats)}
-
-    <div class="card port-notes-card">
-      <div class="dash-radar-title">Recomendación por posición</div>
-      ${stats.rows.filter(r => r.d).map(r => {
-        const reco = portfolioRecommendation(r);
-        if (!reco) return '';
-        const tone = RECO_TONE[reco.tone];
-        return `
-        <div class="port-reco-row">
-          <span class="port-reco-ticker">${esc(r.ticker)}</span>
-          <span class="watch-signal" style="background:${tone.bg}; color:${tone.color};">${esc(reco.label)}</span>
-          <span class="port-reco-detail">${esc(reco.detail)}</span>
-        </div>`;
-      }).join('') || '<div class="dash-loading-note">Cargando análisis de cada posición…</div>'}
+    <div class="port-tabs" role="tablist">
+      ${PORT_TABS.map(t => `<button class="port-tab ${tab === t.key ? 'active' : ''}" data-port-tab="${t.key}" role="tab" aria-selected="${tab === t.key}">${ICONS[t.icon]}<span>${esc(t.label)}</span></button>`).join('')}
     </div>
 
-    ${recoHistoryCardHTML(recoHist)}
+    ${tab === 'resumen' ? `
+      ${portfolioCopilotCardHTML(copilot, health)}
+      ${portfolioTreemapSVG(stats.rows)}
+      ${portfolioHealthCardHTML(health)}
+      <div class="card port-notes-card">
+        <div class="dash-radar-title">Lectura de diversificación</div>
+        ${notes.map(n => `<div class="port-note ${n.type}">${n.type === 'risk' ? '⚠' : '✓'} ${esc(n.text)}</div>`).join('')}
+      </div>
+      ${stats.sectorRows.length ? `
+      <div class="card port-notes-card">
+        <div class="dash-radar-title">Asignación por sector</div>
+        ${stats.sectorRows.map(s => `
+          <div class="score-row" style="grid-template-columns: 140px 1fr 50px;">
+            <span class="score-label">${esc(s.sector)}</span>
+            <div class="score-bar-bg"><div class="score-bar-fill" style="width:${Math.round(s.pct * 100)}%;"></div></div>
+            <span class="score-fraction">${Math.round(s.pct * 100)}%</span>
+          </div>`).join('')}
+      </div>` : ''}
+    ` : ''}
 
-    <div class="card port-notes-card">
-      <div class="dash-radar-title">Lectura de diversificación</div>
-      ${notes.map(n => `<div class="port-note ${n.type}">${n.type === 'risk' ? '⚠' : '✓'} ${esc(n.text)}</div>`).join('')}
-    </div>
+    ${tab === 'riesgo' ? `
+      ${riskMetricsCardHTML(risk, holdings.length)}
+      ${monteCarloCardHTML(mc)}
+      ${stressTestCardHTML(stats, risk)}
+      ${riskContributionCardHTML(risk)}
+      ${benchmarksCardHTML(stats)}
+    ` : ''}
 
-    ${opsCardHTML(stats)}
+    ${tab === 'operar' ? `
+      <div class="card port-notes-card">
+        <div class="dash-radar-title">Recomendación por posición</div>
+        ${stats.rows.filter(r => r.d).map(r => {
+          const reco = portfolioRecommendation(r);
+          if (!reco) return '';
+          const tone = RECO_TONE[reco.tone];
+          return `
+          <div class="port-reco-row">
+            <span class="port-reco-ticker">${esc(r.ticker)}</span>
+            <span class="watch-signal" style="background:${tone.bg}; color:${tone.color};">${esc(reco.label)}</span>
+            <span class="port-reco-detail">${esc(reco.detail)}</span>
+          </div>`;
+        }).join('') || '<div class="dash-loading-note">Cargando análisis de cada posición…</div>'}
+      </div>
+      ${rebalanceCardHTML(stats)}
+      ${allocatorCardHTML(stats)}
+      ${taxImpactCardHTML(stats.totalValue, portState.ccl)}
+      ${portfolioDividendsCardHTML(stats)}
+      ${opsCardHTML(stats)}
+      ${recoHistoryCardHTML(recoHist)}
+    ` : ''}
 
-    ${stats.sectorRows.length ? `
-    <div class="card port-notes-card">
-      <div class="dash-radar-title">Asignación por sector</div>
-      ${stats.sectorRows.map(s => `
-        <div class="score-row" style="grid-template-columns: 140px 1fr 50px;">
-          <span class="score-label">${esc(s.sector)}</span>
-          <div class="score-bar-bg"><div class="score-bar-fill" style="width:${Math.round(s.pct * 100)}%;"></div></div>
-          <span class="score-fraction">${Math.round(s.pct * 100)}%</span>
-        </div>`).join('')}
-    </div>` : ''}
-
-    <div class="port-table-controls">
-      <select class="watch-select" id="port-sort" aria-label="Ordenar tenencias por">
-        ${PORT_SORT_OPTIONS.map(o => `<option value="${o.key}" ${portState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
-      </select>
-    </div>
-
-    <div class="port-table-wrap">
-      <table class="port-table">
-        <thead><tr>${portState.compact
-          ? '<th>Ticker</th><th>Valor</th><th>P&amp;L</th><th>Señal</th><th>Recomendación</th><th></th>'
-          : '<th>Ticker</th><th>Cantidad</th><th>Precio</th><th>Valor</th><th>Peso</th><th>P&amp;L</th><th>Stop / Objetivo</th><th>Señal</th><th>Recomendación</th><th></th>'}</tr></thead>
-        <tbody>
-          ${sortPortfolioRows(stats.rows).map(r => portfolioRowHTML(r)).join('')}
-        </tbody>
-        ${portfolioTotalsRowHTML(stats)}
-      </table>
-    </div>`}
+    ${tab === 'tenencias' ? `
+      <div class="port-table-controls">
+        <select class="watch-select" id="port-sort" aria-label="Ordenar tenencias por">
+          ${PORT_SORT_OPTIONS.map(o => `<option value="${o.key}" ${portState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="port-table-wrap">
+        <table class="port-table">
+          <thead><tr>${portState.compact
+            ? '<th>Ticker</th><th>Valor</th><th>P&amp;L</th><th>Señal</th><th>Recomendación</th><th></th>'
+            : '<th>Ticker</th><th>Cantidad</th><th>Precio</th><th>Valor</th><th>Peso</th><th>P&amp;L</th><th>Stop / Objetivo</th><th>Señal</th><th>Recomendación</th><th></th>'}</tr></thead>
+          <tbody>
+            ${sortPortfolioRows(stats.rows).map(r => portfolioRowHTML(r)).join('')}
+          </tbody>
+          ${portfolioTotalsRowHTML(stats)}
+        </table>
+      </div>
+    ` : ''}`}
   `;
 }
 
@@ -4637,6 +4952,20 @@ function wirePortfolioEvents() {
     taxState.cumplidor = cumplidorEl.checked;
     lsSetSafe('icp_tax_cumplidor', taxState.cumplidor ? '1' : '0');
     renderReport();
+  });
+  els.report.querySelectorAll('[data-port-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      portState.tab = btn.dataset.portTab;
+      renderReport();
+      els.report.querySelector('.port-tabs')?.scrollIntoView({ block: 'nearest' });
+    });
+  });
+  els.report.querySelectorAll('[data-stress-shock]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const v = btn.dataset.stressShock;
+      portState.stressShock = v === 'clear' ? null : Number(v);
+      renderReport();
+    });
   });
   els.report.querySelectorAll('[data-port-ticker]').forEach(el => {
     el.addEventListener('click', (e) => {
