@@ -1332,3 +1332,91 @@ select.port-input { cursor: pointer; }
 /* ---------- Portfolio: Mapa de correlaciones ---------- */
 .port-corr-table td { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--text-dim); border: 1px solid var(--bg, rgba(0,0,0,0.3)); }
 .port-corr-table th { position: sticky; left: 0; }
+
+/* ---------- Dashboard: hero renovado (sesión + cinta) ---------- */
+.dash-hero-toprow { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.dash-session { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); background: var(--surface-2, rgba(255,255,255,0.05)); padding: 6px 12px; border-radius: 20px; white-space: nowrap; }
+.dash-session-dot { width: 8px; height: 8px; border-radius: 50%; }
+.dash-session-dot.open { background: var(--green, oklch(0.76 0.18 152)); box-shadow: 0 0 0 3px oklch(0.76 0.18 152 / 0.2); }
+.dash-session-dot.pre { background: var(--amber, oklch(0.75 0.15 70)); box-shadow: 0 0 0 3px oklch(0.75 0.15 70 / 0.2); }
+.dash-session-dot.closed { background: var(--text-faint); }
+.dash-tape { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 4px; }
+.dash-tape-item { display: inline-flex; align-items: center; gap: 8px; background: var(--surface-2, rgba(255,255,255,0.04)); border-radius: 8px; padding: 7px 12px; }
+.dash-tape-label { font-size: 11.5px; color: var(--text-mute); }
+.dash-tape-chg { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; }
+
+/* ---------- Dashboard: Clima del mercado ---------- */
+.climate-card { padding: 18px 22px; margin-bottom: 24px; border-left: 4px solid var(--text-faint); }
+.climate-card.climate-good { border-left-color: var(--green, oklch(0.76 0.18 152)); background: linear-gradient(180deg, oklch(0.76 0.18 152 / 0.06), transparent 60%); }
+.climate-card.climate-warn { border-left-color: var(--amber, oklch(0.75 0.15 70)); background: linear-gradient(180deg, oklch(0.75 0.15 70 / 0.06), transparent 60%); }
+.climate-card.climate-bad { border-left-color: var(--red, oklch(0.70 0.21 23)); background: linear-gradient(180deg, oklch(0.70 0.21 23 / 0.06), transparent 60%); }
+.climate-main { display: flex; align-items: center; gap: 18px; }
+.climate-icon { font-size: 42px; line-height: 1; }
+.climate-text { flex: 1; }
+.climate-verdict { font-family: 'IBM Plex Sans', sans-serif; font-size: 20px; font-weight: 700; }
+.climate-sub { font-size: 13px; color: var(--text-mute); margin-top: 3px; }
+.climate-gauge { text-align: center; }
+.climate-gauge-val { font-family: 'IBM Plex Mono', monospace; font-size: 30px; font-weight: 700; line-height: 1; }
+.climate-gauge-lbl { font-size: 10px; color: var(--text-mute); text-transform: uppercase; letter-spacing: 0.5px; }
+.climate-factors { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.climate-chip { font-size: 11.5px; padding: 3px 10px; border-radius: 20px; background: var(--surface-2, rgba(255,255,255,0.05)); color: var(--text-mute); }
+.climate-chip.good { background: oklch(0.76 0.18 152 / 0.13); color: var(--green, oklch(0.76 0.18 152)); }
+.climate-chip.bad { background: oklch(0.70 0.21 23 / 0.13); color: var(--red, oklch(0.70 0.21 23)); }
+@media (max-width: 640px) { .climate-gauge { display: none; } }
+
+/* ---------- Dashboard: info-tip didáctico ---------- */
+.info-tip { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; font-size: 10px; border-radius: 50%; background: var(--surface-2, rgba(255,255,255,0.08)); color: var(--text-mute); cursor: help; vertical-align: middle; font-style: normal; }
+.info-tip:hover, .info-tip:focus { background: var(--accent, oklch(0.70 0.19 291)); color: #fff; outline: none; }
+
+/* ---------- Dashboard: Amplitud (breadth) + máx/mín ---------- */
+.breadth-hl { display: flex; align-items: center; justify-content: center; gap: 20px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.breadth-hl-cell { font-size: 13px; color: var(--text-dim); }
+.breadth-hl-cell b { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 700; }
+.breadth-hl-cell.up b { color: var(--green, oklch(0.76 0.18 152)); }
+.breadth-hl-cell.down b { color: var(--red, oklch(0.70 0.21 23)); }
+.breadth-hl-sep { width: 1px; height: 28px; background: var(--border-soft); }
+
+/* ---------- Dashboard: Agenda "Qué mirar hoy" ---------- */
+.agenda-card { padding: 6px 16px; }
+.agenda-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); cursor: pointer; transition: background 0.12s; }
+.agenda-row:last-child { border-bottom: none; }
+.agenda-row:hover { background: var(--surface-2, rgba(255,255,255,0.03)); }
+.agenda-icon { font-size: 15px; }
+.agenda-ticker { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 13px; min-width: 54px; }
+.agenda-text { font-size: 13px; color: var(--text-dim); }
+
+/* ---------- Dashboard: Idea del día ---------- */
+.idea-card { padding: 18px 22px; cursor: pointer; transition: border-color 0.15s; }
+.idea-card:hover { border-color: var(--accent, oklch(0.70 0.19 291)); }
+.idea-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.idea-ticker { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 700; }
+.idea-name { font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; font-weight: 400; color: var(--text-mute); }
+.idea-price { font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; margin-top: 4px; }
+.idea-conv { text-align: center; flex-shrink: 0; }
+.idea-conv-score { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 700; line-height: 1; }
+.idea-conv-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+.idea-thesis { font-size: 13.5px; color: var(--text-dim); line-height: 1.55; margin: 14px 0; }
+.idea-plan { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.idea-plan-cell { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; background: var(--surface-2, rgba(255,255,255,0.04)); border-radius: 8px; }
+.idea-plan-cell span { font-size: 10.5px; color: var(--text-mute); }
+.idea-plan-cell b { font-family: 'IBM Plex Mono', monospace; font-size: 14px; }
+.idea-foot { font-size: 11px; color: var(--text-faint); margin-top: 12px; }
+@media (max-width: 640px) { .idea-plan { grid-template-columns: 1fr 1fr; } }
+
+/* ---------- Dashboard: Destacados del día (movers) ---------- */
+.movers-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.movers-col { padding: 14px 16px; }
+.movers-col-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+.movers-col-title.up { color: var(--green, oklch(0.76 0.18 152)); }
+.movers-col-title.down { color: var(--red, oklch(0.70 0.21 23)); }
+.mover-row { padding: 10px 0; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
+.mover-row:last-child { border-bottom: none; }
+.mover-main { display: flex; justify-content: space-between; align-items: center; }
+.mover-ticker { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 14px; }
+.mover-change { font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 14px; }
+.mover-row .watch-sparkline { width: 100%; height: 28px; margin: 6px 0 2px; }
+.mover-why { font-size: 11.5px; color: var(--text-mute); line-height: 1.4; }
+@media (max-width: 640px) { .movers-cols { grid-template-columns: 1fr; } }
+
+/* ---------- Dashboard: badge de convicción en cards ---------- */
+.watch-conv { font-size: 10.5px; font-weight: 600; margin-top: 4px; }

@@ -104,8 +104,12 @@ const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
 
 /* ───────────────────────── dashboard personalizable ───────────────────────── */
 const DASH_WIDGETS = [
+  { key: 'idea', label: 'Idea del Día' },
+  { key: 'agenda', label: 'Qué Mirar Hoy' },
   { key: 'opportunities', label: 'Oportunidades del Día' },
   { key: 'buyzone', label: 'En Zona de Compra Ahora' },
+  { key: 'breadth', label: 'Amplitud del Mercado' },
+  { key: 'movers', label: 'Destacados del Día' },
   { key: 'argentina', label: 'Panel Argentina' },
   { key: 'cripto', label: 'Termómetro Cripto' },
   { key: 'heatmap', label: 'Heatmap Sectorial' },
@@ -2331,6 +2335,12 @@ function dashCardHTML(ticker, d) {
   const up = d.changePct >= 0;
   const sig = scoreLabelColor(d.scoreLabel);
   const am = d.alert ? ALERT_META[d.alert.type] : null;
+  // Badge de convicción: solo se muestra cuando es alta o media (una señal
+  // débil no aporta y ensuciaría la tarjeta) — mismo motor que el Portfolio.
+  const conv = positionConviction({ d });
+  const convBadge = conv && conv.verdict !== 'baja'
+    ? `<div class="watch-conv" style="color:${conv.verdict === 'alta' ? GREEN : AMBER};" title="Convicción ${conv.verdict} (${conv.score}/100): qué tan alineadas están las señales técnicas de este activo hoy">◆ convicción ${esc(conv.verdict)}</div>`
+    : '';
   return `<div class="watch-card ${am ? 'has-alert' : ''} ${d.alert?.pending ? 'is-pending' : ''}" data-dash-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
     <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
     <div class="watch-name">${esc(d.name ?? '')}</div>
@@ -2338,9 +2348,250 @@ function dashCardHTML(ticker, d) {
     <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
     ${sparklineSVG(d.sparkline, up)}
     <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
+    ${convBadge}
     ${d.highlight ? `<div class="watch-highlight">${esc(d.highlight)}</div>` : ''}
     ${am ? `<div class="watch-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
   </div>`;
+}
+
+/* ═══════════════════ DASHBOARD: capa de contexto de mercado ═══════════════
+ * Motores didácticos que resumen el día de un vistazo, todos sobre el universo
+ * curado ya cargado en dashState (sin requests extra):
+ *   • Clima del mercado (risk-on / neutral / risk-off)
+ *   • Amplitud (breadth) + nuevos máximos/mínimos
+ *   • Agenda "qué mirar hoy" (gaps, alertas, setups)
+ *   • Idea del día (mejor oportunidad con tesis en criollo)
+ *   • Estado de la sesión de mercado + cinta de índices
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/** Estado de la sesión bursátil de EE.UU. en tiempo real (hora del cliente
+ *  convertida a Nueva York). Didáctico: dice si lo que ves es en vivo o del
+ *  último cierre. */
+function marketSessionState() {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
+    const wd = parts.find(p => p.type === 'weekday')?.value;
+    let hh = +(parts.find(p => p.type === 'hour')?.value ?? 0); if (hh === 24) hh = 0;
+    const mm = +(parts.find(p => p.type === 'minute')?.value ?? 0);
+    const mins = hh * 60 + mm;
+    if (wd === 'Sat' || wd === 'Sun') return { dot: 'closed', label: 'Mercado cerrado (fin de semana)' };
+    if (mins >= 570 && mins < 960) return { dot: 'open', label: 'Mercado abierto · NYSE' };
+    if (mins >= 240 && mins < 570) return { dot: 'pre', label: 'Pre-market · NYSE' };
+    if (mins >= 960 && mins < 1200) return { dot: 'pre', label: 'After-hours · NYSE' };
+    return { dot: 'closed', label: 'Mercado cerrado · NYSE' };
+  } catch { return null; }
+}
+
+/** Clima del mercado: combina amplitud del universo, VIX, tendencia del S&P y
+ *  Fear&Greed en un veredicto simple risk-on / neutral / risk-off. Es una
+ *  lectura de sentimiento, no una predicción — cada factor es visible. */
+function marketClimate(loaded, macro) {
+  if (!loaded.length) return null;
+  let score = 50; const factors = [];
+  const buyPct = loaded.filter(e => e.d.score >= 55).length / loaded.length;
+  score += (buyPct - 0.5) * 45;
+  factors.push({ good: buyPct >= 0.5, t: `${Math.round(buyPct * 100)}% del universo en señal de compra` });
+  const vix = parseFloat(macro?.vix);
+  if (!isNaN(vix)) {
+    if (vix < 16) { score += 10; factors.push({ good: true, t: `VIX bajo (${vix.toFixed(0)}) — calma` }); }
+    else if (vix > 24) { score -= 12; factors.push({ good: false, t: `VIX alto (${vix.toFixed(0)}) — nerviosismo` }); }
+    else factors.push({ good: true, t: `VIX moderado (${vix.toFixed(0)})` });
+  }
+  const spy = dashState.data['SPY'];
+  if (spy?.closes?.length >= 50) {
+    const c = spy.closes, ma = c.slice(-50).reduce((a, b) => a + b, 0) / 50, above = c[c.length - 1] > ma;
+    score += above ? 10 : -10;
+    factors.push({ good: above, t: `S&P 500 ${above ? 'sobre' : 'bajo'} su media de 50 ruedas` });
+  }
+  if (macro?.fearGreed?.value != null) {
+    const v = +macro.fearGreed.value;
+    score += (v - 50) * 0.15;
+    factors.push({ good: v >= 50, t: `Fear & Greed cripto: ${v} (${esc(macro.fearGreed.label)})` });
+  }
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const meta = score >= 62 ? { icon: '☀️', verdict: 'Mercado risk-on', tone: 'good', sub: 'El apetito por riesgo domina — la mayoría de las señales acompañan.' }
+    : score >= 42 ? { icon: '⛅', verdict: 'Mercado mixto', tone: 'warn', sub: 'Señales encontradas — ni euforia ni pánico. Selectividad.' }
+    : { icon: '🌧️', verdict: 'Mercado risk-off', tone: 'bad', sub: 'Predomina la aversión al riesgo — cautela con las compras.' };
+  return { score, ...meta, factors };
+}
+
+/** Amplitud (breadth) del universo curado + nuevos máximos/mínimos. */
+function marketBreadth(loaded) {
+  if (!loaded.length) return null;
+  let buy = 0, aboveMA = 0, posMom = 0, maN = 0, momN = 0, nearHigh = 0, nearLow = 0, hlN = 0;
+  for (const e of loaded) {
+    const d = e.d, c = d.closes;
+    if (d.score >= 55) buy++;
+    if (c?.length >= 50) { const ma = c.slice(-50).reduce((a, b) => a + b, 0) / 50; if (c[c.length - 1] > ma) aboveMA++; maN++; }
+    if (c?.length >= 21) { const mom = (c[c.length - 1] - c[c.length - 21]) / c[c.length - 21]; if (mom > 0) posMom++; momN++; }
+    if (c?.length >= 60) { const hi = Math.max(...c), lo = Math.min(...c), p = c[c.length - 1]; if (p >= hi * 0.98) nearHigh++; else if (p <= lo * 1.02) nearLow++; hlN++; }
+  }
+  return { count: loaded.length, buyPct: buy / loaded.length, aboveMAPct: maN ? aboveMA / maN : null, posMomPct: momN ? posMom / momN : null, nearHigh, nearLow, hlN };
+}
+
+/** Agenda "qué mirar hoy": junta gaps significativos, entradas/salidas de zona
+ *  y setups de trade corto del universo — todo ya calculado, sin pedidos. */
+function marketAgenda(loaded) {
+  const items = [];
+  for (const e of loaded) {
+    const d = e.d, t = e.ticker;
+    if (d.alert && !d.alert.pending) {
+      if (d.alert.type === 'buy') items.push({ pri: 1, icon: '🟢', ticker: t, text: 'Entró en zona de compra' });
+      else if (d.alert.type === 'stop') items.push({ pri: 1, icon: '🔴', ticker: t, text: 'Tocó el stop loss' });
+      else if (d.alert.type === 'sell') items.push({ pri: 1, icon: '🔴', ticker: t, text: 'Entró en zona de venta' });
+    }
+    if (d.gap?.significant) items.push({ pri: 2, icon: '⚡', ticker: t, text: `Gap de apertura ${d.gap.pct >= 0 ? '+' : ''}${d.gap.pct.toFixed(1)}% ${d.gap.direction === 'up' ? 'al alza' : 'a la baja'} — ${d.gap.filled ? 'ya se rellenó' : 'sostiene'}` });
+    if (d.setup?.qualifies) items.push({ pri: 3, icon: '🚀', ticker: t, text: `Setup de trade corto (confianza ${d.setup.confidence})` });
+  }
+  items.sort((a, b) => a.pri - b.pri);
+  return items.slice(0, 12);
+}
+
+/** Idea del día: la mejor oportunidad del universo por convicción, con una
+ *  tesis en criollo y su plan operativo. Reusa el motor de convicción del
+ *  Portfolio. */
+const IDEA_EXCLUDE = new Set(['SPY', 'QQQ', 'DIA', 'IWM', 'VOO', 'VTI']); // índices amplios: no son una "idea" puntual
+function ideaOfTheDay(loaded) {
+  const cands = loaded.filter(e => !IDEA_EXCLUDE.has(e.ticker) && (e.d.scoreLabel === 'Compra Fuerte' || e.d.scoreLabel === 'Compra Moderada' || e.d.alert?.type === 'buy'));
+  const scored = cands.map(e => ({ e, conv: positionConviction({ d: e.d }) })).filter(x => x.conv);
+  scored.sort((a, b) => b.conv.score - a.conv.score || b.e.d.score - a.e.d.score);
+  const best = scored[0];
+  if (!best || best.conv.score < 50) return null;
+  return { ticker: best.e.ticker, d: best.e.d, conv: best.conv };
+}
+
+function infoTip(text) {
+  return `<span class="info-tip" tabindex="0" role="button" aria-label="${esc(text)}" title="${esc(text)}">ⓘ</span>`;
+}
+
+/* ── tarjetas del contexto de mercado ── */
+function climateCardHTML(climate) {
+  if (!climate) return '';
+  return `
+    <div class="card climate-card climate-${climate.tone}">
+      <div class="climate-main">
+        <div class="climate-icon">${climate.icon}</div>
+        <div class="climate-text">
+          <div class="climate-verdict">${esc(climate.verdict)} ${infoTip('Lectura de sentimiento que combina amplitud del universo, VIX, tendencia del S&P 500 y Fear&Greed. No es una predicción.')}</div>
+          <div class="climate-sub">${esc(climate.sub)}</div>
+        </div>
+        <div class="climate-gauge">
+          <div class="climate-gauge-val">${climate.score}</div>
+          <div class="climate-gauge-lbl">risk-on</div>
+        </div>
+      </div>
+      <div class="climate-factors">
+        ${climate.factors.map(f => `<span class="climate-chip ${f.good ? 'good' : 'bad'}">${f.good ? '✓' : '✕'} ${f.t}</span>`).join('')}
+      </div>
+    </div>`;
+}
+
+function breadthRingHTML(label, frac, note) {
+  if (frac == null) return '';
+  const pct = Math.round(frac * 100);
+  const col = frac >= 0.6 ? GREEN : frac >= 0.4 ? AMBER : RED;
+  return `
+    <div class="breadth-cell">
+      <div class="breadth-ring" style="background:conic-gradient(${col} ${pct * 3.6}deg, var(--surface-2, rgba(255,255,255,0.06)) 0deg);">
+        <div class="breadth-ring-inner">${pct}%</div>
+      </div>
+      <div class="breadth-label">${esc(label)}</div>
+      <div class="breadth-note">${esc(note)}</div>
+    </div>`;
+}
+
+function marketBreadthWidgetHTML(loaded) {
+  const b = marketBreadth(loaded);
+  if (!b) return `${sectionTitleHTML('Amplitud del Mercado', 'radar')}<div class="card watch-empty">Cargando universo curado…</div>`;
+  return `
+    ${sectionTitleHTML('Amplitud del Mercado', 'radar')}
+    <div class="dash-intro" style="margin-bottom:14px;">Qué proporción del universo curado está fuerte por dentro. Un mercado sano sube con amplitud (muchos activos acompañando), no apoyado en unos pocos. ${infoTip('Porcentaje de los activos del universo que cumplen cada condición sobre sus propios cierres reales.')}</div>
+    <div class="card breadth-card">
+      <div class="breadth-grid">
+        ${breadthRingHTML('En señal de compra', b.buyPct, `${Math.round(b.buyPct * b.count)} de ${b.count}`)}
+        ${breadthRingHTML('Sobre su media de 50 ruedas', b.aboveMAPct, `${b.count} activos`)}
+        ${breadthRingHTML('Con momentum positivo (20d)', b.posMomPct, `${b.count} activos`)}
+      </div>
+      ${b.hlN ? `<div class="breadth-hl">
+        <div class="breadth-hl-cell up"><b>${b.nearHigh}</b> cerca de máximos recientes</div>
+        <div class="breadth-hl-sep"></div>
+        <div class="breadth-hl-cell down"><b>${b.nearLow}</b> cerca de mínimos recientes</div>
+      </div>` : ''}
+    </div>`;
+}
+
+function agendaWidgetHTML(loaded) {
+  const items = marketAgenda(loaded);
+  return `
+    ${sectionTitleHTML('Qué Mirar Hoy', 'target')}
+    <div class="dash-intro" style="margin-bottom:14px;">Los movimientos accionables del universo curado ahora mismo: entradas y salidas de zona, gaps de apertura y setups de trade corto. ${infoTip('Se arma con las señales ya calculadas de cada activo — clic en cualquier fila para ver su informe.')}</div>
+    ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : !items.length ? `<div class="card watch-empty">Sin movimientos destacados en el universo por ahora — mercado tranquilo.</div>` : `
+    <div class="card agenda-card">
+      ${items.map(it => `<div class="agenda-row" data-dash-ticker="${esc(it.ticker)}">
+        <span class="agenda-icon">${it.icon}</span>
+        <span class="agenda-ticker">${esc(it.ticker)}</span>
+        <span class="agenda-text">${esc(it.text)}</span>
+      </div>`).join('')}
+    </div>`}`;
+}
+
+function ideaWidgetHTML(loaded) {
+  const idea = ideaOfTheDay(loaded);
+  if (!loaded.length) return `${sectionTitleHTML('Idea del Día', 'zap')}<div class="card watch-empty">Cargando universo curado…</div>`;
+  if (!idea) return `${sectionTitleHTML('Idea del Día', 'zap')}<div class="card watch-empty">No hay una oportunidad de convicción alta en el universo hoy — no forzamos una idea si el mercado no la ofrece.</div>`;
+  const d = idea.d, pr = d.planRaw;
+  const col = idea.conv.verdict === 'alta' ? GREEN : AMBER;
+  return `
+    ${sectionTitleHTML('Idea del Día', 'zap')}
+    <div class="card idea-card" data-dash-ticker="${esc(idea.ticker)}">
+      <div class="idea-head">
+        <div>
+          <div class="idea-ticker">${esc(idea.ticker)} <span class="idea-name">${esc(d.name ?? '')}</span></div>
+          <div class="idea-price">${fmtUsd(d.price)} <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
+        </div>
+        <div class="idea-conv" style="color:${col};">
+          <div class="idea-conv-score">${idea.conv.score}</div>
+          <div class="idea-conv-lbl">convicción ${esc(idea.conv.verdict)}</div>
+        </div>
+      </div>
+      <div class="idea-thesis">${esc(d.highlight ?? 'Señal técnica favorable.')} ${idea.conv.factors.length ? 'Respaldo: ' + idea.conv.factors.map(f => f.t.toLowerCase()).join('; ') + '.' : ''}</div>
+      ${pr?.stopLoss != null ? `
+      <div class="idea-plan">
+        <div class="idea-plan-cell"><span>Precio</span><b>${fmtUsd(d.price)}</b></div>
+        <div class="idea-plan-cell"><span>Stop</span><b class="down">${fmtUsd(pr.stopLoss)}</b></div>
+        <div class="idea-plan-cell"><span>Objetivo</span><b class="up">${fmtUsd(pr.tp1)}</b></div>
+        <div class="idea-plan-cell"><span>Señal</span><b>${esc(d.scoreLabel)} · ${d.score}</b></div>
+      </div>` : ''}
+      <div class="idea-foot">Clic para ver el informe completo · no es una recomendación de inversión.</div>
+    </div>`;
+}
+
+function moversWidgetHTML(loaded) {
+  const byChange = loaded.slice().sort((a, b) => b.d.changePct - a.d.changePct);
+  const gainers = byChange.slice(0, 3), losers = byChange.slice(-3).reverse();
+  const moverRow = (e, up) => `
+    <div class="mover-row" data-dash-ticker="${esc(e.ticker)}">
+      <div class="mover-main">
+        <span class="mover-ticker">${esc(e.ticker)}</span>
+        <span class="mover-change ${up ? 'up' : 'down'}">${fmtPct(e.d.changePct)}</span>
+      </div>
+      ${sparklineSVG(e.d.sparkline, up)}
+      ${e.d.highlight ? `<div class="mover-why">${esc(e.d.highlight)}</div>` : ''}
+    </div>`;
+  return `
+    ${sectionTitleHTML('Destacados del Día', 'trend')}
+    <div class="dash-intro" style="margin-bottom:14px;">Las mayores subas y bajas del universo, con el motivo técnico de cada una. ${infoTip('% del día, mini-gráfico de los últimos ~30 cierres y el titular técnico ya calculado.')}</div>
+    ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `
+    <div class="movers-cols">
+      <div class="card movers-col">
+        <div class="movers-col-title up">▲ Mayores subas</div>
+        ${gainers.map(e => moverRow(e, true)).join('')}
+      </div>
+      <div class="card movers-col">
+        <div class="movers-col-title down">▼ Mayores bajas</div>
+        ${losers.map(e => moverRow(e, false)).join('')}
+      </div>
+    </div>`}`;
 }
 
 function dashboardHTML() {
@@ -2386,29 +2637,53 @@ function dashboardHTML() {
 
   const avgScore = loaded.length ? Math.round(loaded.reduce((s, e) => s + e.d.score, 0) / loaded.length) : null;
   const topSignal = Object.entries(bySignal).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-  const heroStat = (value, label, small) => `<div class="dash-hero-stat"><div class="dash-hero-stat-value${small ? ' small' : ''}">${value}</div><div class="dash-hero-stat-label">${label}</div></div>`;
+  const heroStat = (value, label, small, tip) => `<div class="dash-hero-stat"><div class="dash-hero-stat-value${small ? ' small' : ''}">${value}</div><div class="dash-hero-stat-label">${label}${tip ? ' ' + infoTip(tip) : ''}</div></div>`;
+
+  const session = marketSessionState();
+  const climate = marketClimate(loaded, dashState.macro);
+  // Cinta de índices: S&P, Nasdaq, Bitcoin (del universo) + CCL (macro/ccl).
+  const tape = [
+    { label: 'S&P 500', d: dashState.data['SPY'] },
+    { label: 'Nasdaq', d: dashState.data['QQQ'] },
+    { label: 'Bitcoin', d: dashState.data['BTC'] },
+  ].filter(x => x.d).map(x => ({ label: x.label, changePct: x.d.changePct }));
+  const cclVal = dashState.ccl?.value ?? dashState.macro?.dolares?.ccl ?? null;
+  const cclChg = dashState.ccl?.changePct ?? null;
 
   return `
     <div class="dash-hero">
-      <div class="dash-hero-text">
-        <div class="dash-hero-title">Tu mesa de análisis, en un vistazo</div>
-        <div class="dash-hero-sub">Score compuesto, plan operativo y contexto macro con datos reales — sin señales inventadas.</div>
+      <div class="dash-hero-toprow">
+        <div class="dash-hero-text">
+          <div class="dash-hero-title">Tu mesa de análisis, en un vistazo</div>
+          <div class="dash-hero-sub">Score compuesto, plan operativo y contexto macro con datos reales — sin señales inventadas.</div>
+        </div>
+        ${session ? `<div class="dash-session"><span class="dash-session-dot ${session.dot}"></span>${esc(session.label)}</div>` : ''}
       </div>
+      ${(tape.length || cclVal != null) ? `<div class="dash-tape">
+        ${tape.map(t => `<div class="dash-tape-item"><span class="dash-tape-label">${esc(t.label)}</span><span class="dash-tape-chg ${t.changePct >= 0 ? 'up' : 'down'}">${fmtPct(t.changePct)}</span></div>`).join('')}
+        ${cclVal != null ? `<div class="dash-tape-item"><span class="dash-tape-label">Dólar CCL</span><span class="dash-tape-chg">${fmtArs(cclVal)}${cclChg != null ? ` <span class="${cclChg >= 0 ? 'up' : 'down'}">${fmtPct(cclChg)}</span>` : ''}</span></div>` : ''}
+      </div>` : ''}
       <div class="dash-hero-stats">
         ${heroStat(`${loaded.length}/${DASHBOARD_UNIVERSE.length}`, 'Activos en vivo')}
-        ${heroStat(buyZone.length, 'En zona de compra')}
-        ${heroStat(avgScore ?? '—', 'Score promedio')}
+        ${heroStat(buyZone.length, 'En zona de compra', false, 'Activos cuyo precio está en zona de compra según el análisis técnico (mismo criterio que las alertas).')}
+        ${heroStat(avgScore ?? '—', 'Score promedio', false, 'Promedio del score compuesto (0-100) de todo el universo curado. Arriba de 55 es sesgo comprador.')}
         ${heroStat(esc(topSignal ?? '—'), 'Señal dominante', true)}
       </div>
     </div>
     ${sectionTitleHTML('Dashboard', 'grid')}
     <div class="dash-intro">Oportunidades del día y radar del mercado sobre un universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos (acciones US, CEDEARs argentinos, ETFs y cripto) — no es todo el universo buscable, para no exceder el límite de requests del proveedor de datos gratuito. Elegí cualquiera para ver el informe completo, o buscá otro activo arriba.</div>
 
+    ${climate ? climateCardHTML(climate) : ''}
+
     ${dashCustomizeButtonHTML()}
     ${dashWidgetState.customizeOpen ? dashCustomizePanelHTML() : ''}
 
     ${(() => {
       const widgetHtml = {
+        idea: ideaWidgetHTML(loaded),
+        agenda: agendaWidgetHTML(loaded),
+        breadth: marketBreadthWidgetHTML(loaded),
+        movers: moversWidgetHTML(loaded),
         opportunities: `
           ${sectionTitleHTML('Oportunidades del Día', 'trend', 'margin-top:28px;')}
           ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
