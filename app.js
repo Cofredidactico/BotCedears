@@ -1795,7 +1795,9 @@ function renderReportImpl() {
   });
   const chartWrap = els.report.querySelector('.chart-svg-wrap');
   const chartEntry = chartState.cache[chartState.tf];
-  if (chartWrap && chartEntry) wireChartHover(chartWrap, chartEntry.candles);
+  // Mismos opts que el render (support/resistance/plan diarios) para que la
+  // escala de precio del crosshair coincida exactamente con lo dibujado.
+  if (chartWrap && chartEntry) wireChartHover(chartWrap, chartEntry.candles, { support: t.support, resistance: t.resistance, plan: plan?.raw });
 
   els.report.querySelectorAll('.chart-mode-tab').forEach(btn => {
     btn.addEventListener('click', () => {
