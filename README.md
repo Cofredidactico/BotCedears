@@ -547,6 +547,45 @@ aporte al riesgo, rebalanceo, asignador, impuestos, dividendos, operaciones,
 tabla de tenencias) siguen ahí, ahora repartidas por pestaña para que la página
 se sienta una mesa de análisis y no un scroll infinito.
 
+## Motor de recomendaciones profesionales (5 capas de análisis)
+
+Cinco capas de análisis de alta confianza sobre la cartera registrada, todas
+sobre los cierres reales ya pedidos (sin requests extra):
+
+- **Optimizador de cartera** (pestaña Operar): sobre la matriz de covarianza
+  real de tus posiciones (`portfolioOptimizer`, con inversión de matriz por
+  Gauss-Jordan, `matInverse`), propone tres carteras objetivo bien fundadas y
+  robustas — **Mínima Varianza** (los pesos que minimizan la volatilidad total),
+  **Paridad de Riesgo** (cada posición aporta riesgo parecido, ∝1/vol) e **Igual
+  Peso** (1/N). Muestra la volatilidad proyectada vs. la actual y, por activo,
+  cuánto comprar/vender **con montos concretos**. Deliberadamente NO optimiza por
+  retorno esperado (estimarlo a futuro es el eslabón frágil de la optimización
+  clásica y suele sobre-concentrar) — eso lo hace más honesto, no menos.
+
+- **Plan de acción priorizado** (pestaña Resumen): junta TODAS las señales
+  (por posición y de cartera) en una sola lista rankeada por urgencia, cada una
+  con un **nivel de confianza** (alta/media) — `portfolioActionPlan`. Es el "qué
+  hago hoy" concreto: cortar pérdidas, decidir stops, tomar ganancias, sumar en
+  Compra Fuerte de convicción alta, bajar concentración, diversificar sector,
+  revisar solapamientos.
+
+- **Convicción por posición** (pestaña Operar): un score 0-100 por tenencia
+  (`positionConviction`) que combina score del motor, estructura de tendencia,
+  momentum de 20 ruedas, régimen de RSI, distancia al stop y alertas activas —
+  la base de la "alta confianza": una reco pesa más cuando la convicción la
+  respalda. Ranking visual con barras y los factores que suman/restan.
+
+- **Mapa de correlaciones** (pestaña Riesgo): heatmap NxN de cuánto se mueven
+  juntas tus posiciones (`corrMatrix` en `computePortfolioRiskMetrics`). Rojo =
+  casi idénticas (poca diversificación real); azul = se cubren. Hace visible la
+  diversificación ilusoria.
+
+- **Amplitud & momentum de la cartera** (pestaña Resumen): qué proporción de tus
+  posiciones está fuerte por dentro (en señal de compra, sobre su media de 50
+  ruedas, con momentum positivo) más el RSI promedio (`portfolioBreadth`), como
+  anillos. Una cartera puede estar en verde pero apoyada en una o dos posiciones
+  — la amplitud lo delata.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente
