@@ -140,6 +140,7 @@ const portState = {
   allocAmount: '', allocResult: null, // asignador "¿qué compro con AR$X?"
   tab: 'resumen', // pestaña activa de la Radiografía de Cartera
   stressShock: null, // shock de mercado elegido en el panel de estrés (o null)
+  optMode: 'minvar', // criterio del optimizador de cartera
 };
 const taxState = { cumplidor: lsGetSafe('icp_tax_cumplidor', '0') === '1' };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
@@ -3681,19 +3682,23 @@ function computePortfolioRiskMetrics(rows, macro, spyCloses = null) {
     return c != null && vx > 0 && vy > 0 ? c / Math.sqrt(vx * vy) : null;
   };
   const overlaps = [];
+  const corrM = series.map(() => series.map(() => null));
   for (let a = 0; a < series.length; a++) {
+    corrM[a][a] = 1;
     for (let b = a + 1; b < series.length; b++) {
       const corr = pearson(assetReturns[a], assetReturns[b]);
+      corrM[a][b] = corrM[b][a] = corr;
       if (corr != null && corr > 0.8) overlaps.push({ a: series[a].ticker, b: series[b].ticker, corr });
     }
   }
   overlaps.sort((x, y) => y.corr - x.corr);
+  const corrMatrix = series.length >= 2 ? { tickers: series.map(s => s.ticker), m: corrM } : null;
 
   return {
     coveredHoldings: withCloses.length, totalHoldings: totalWithWeight, days: minLen,
     annualizedReturn, annualizedVol, sharpe, maxDrawdown: maxDD, riskFreeUsed: riskFree,
     riskContributions, worstWeek, worstMonth, beta, portfolioTotalReturn, spyTotalReturn, overlaps,
-    dailyMean: mean, dailyStd, portfolioReturns, assetBetas,
+    dailyMean: mean, dailyStd, portfolioReturns, assetBetas, corrMatrix,
     series: series.map(s => ({ ticker: s.ticker, weight: s.weight, category: s.category })),
   };
 }
@@ -4723,6 +4728,338 @@ function stressTestCardHTML(stats, risk) {
     </div>`;
 }
 
+/* ═══════════════════ MOTOR DE RECOMENDACIONES PROFESIONALES ═══════════════
+ * Cinco capas de análisis de alta confianza, todas sobre los cierres reales
+ * ya pedidos por cada posición (sin requests extra):
+ *   1. Optimizador de cartera (Min-Varianza / Paridad de Riesgo / Igual Peso)
+ *      con inversión real de la matriz de covarianza y deltas concretos.
+ *   2. Plan de acción priorizado con niveles de confianza.
+ *   3. Score de convicción por posición (0-100).
+ *   4. Mapa de correlaciones (heatmap).
+ *   5. Amplitud (breadth) y momentum de la cartera.
+ * ─────────────────────────────────────────────────────────────────────────── */
+const PORT_OPT_MIN_DAYS = 60;
+
+/** Inversa de una matriz cuadrada por Gauss-Jordan con pivoteo parcial.
+ *  Devuelve null si es singular (no invertible). Para n≤25 es instantáneo. */
+function matInverse(A) {
+  const n = A.length;
+  const M = A.map((row, i) => [...row, ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))]);
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+    if (Math.abs(M[piv][col]) < 1e-12) return null;
+    [M[col], M[piv]] = [M[piv], M[col]];
+    const d = M[col][col];
+    for (let j = 0; j < 2 * n; j++) M[col][j] /= d;
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue;
+      const f = M[r][col];
+      if (f !== 0) for (let j = 0; j < 2 * n; j++) M[r][j] -= f * M[col][j];
+    }
+  }
+  return M.map(row => row.slice(n));
+}
+
+/** Optimizador de cartera: sobre los retornos diarios reales de las posiciones
+ *  con historial, calcula la matriz de covarianza y propone tres carteras
+ *  objetivo bien fundadas — todas independientes de estimar el retorno futuro
+ *  (el eslabón más frágil de la optimización clásica), por eso son robustas:
+ *    • Min-Varianza: los pesos que MINIMIZAN la volatilidad total (Σ⁻¹1
+ *      normalizado, con recorte long-only).
+ *    • Paridad de Riesgo: cada posición aporta un riesgo parecido (∝ 1/vol).
+ *    • Igual Peso: 1/N, el benchmark diversificado difícil de batir.
+ *  Devuelve, para cada objetivo, la volatilidad anualizada proyectada y los
+ *  pesos, para comparar contra tu cartera actual. */
+function portfolioOptimizer(stats) {
+  const elig = stats.rows.filter(r => r.d?.closes?.length >= PORT_OPT_MIN_DAYS && r.weight != null && r.value != null && r.value > 0);
+  if (elig.length < 2) return null;
+  const minLen = Math.min(...elig.map(r => r.d.closes.length));
+  const rets = elig.map(r => {
+    const c = r.d.closes.slice(-minLen), o = [];
+    for (let i = 1; i < c.length; i++) o.push((c[i] - c[i - 1]) / c[i - 1]);
+    return o;
+  });
+  const m = rets.length, T = rets[0].length;
+  if (T < 30) return null;
+  const mean = rets.map(a => a.reduce((x, y) => x + y, 0) / a.length);
+  const cov = (i, j) => { let c = 0; for (let t = 0; t < T; t++) c += (rets[i][t] - mean[i]) * (rets[j][t] - mean[j]); return c / (T - 1); };
+  const Sigma = Array.from({ length: m }, (_, i) => Array.from({ length: m }, (_, j) => cov(i, j)));
+  const vol = mean.map((_, i) => Math.sqrt(Math.max(0, Sigma[i][i])));
+
+  const eligSubtotal = elig.reduce((s, r) => s + r.value, 0);
+  const curW = elig.map(r => r.value / eligSubtotal);
+  const clampNorm = (w) => { const c = w.map(x => Math.max(0, x)); const s = c.reduce((a, b) => a + b, 0); return s > 0 ? c.map(x => x / s) : elig.map(() => 1 / m); };
+
+  const inv = matInverse(Sigma);
+  let minVar = null;
+  if (inv) { const raw = inv.map(row => row.reduce((s, v) => s + v, 0)); minVar = clampNorm(raw); }
+  const invVol = vol.map(v => (v > 0 ? 1 / v : 0)); const sInv = invVol.reduce((a, b) => a + b, 0);
+  const riskParity = sInv > 0 ? invVol.map(x => x / sInv) : null;
+  const equal = elig.map(() => 1 / m);
+
+  const annVol = (w) => { let v = 0; for (let i = 0; i < m; i++) for (let j = 0; j < m; j++) v += w[i] * w[j] * Sigma[i][j]; return Math.sqrt(Math.max(0, v)) * Math.sqrt(TRADING_DAYS_YEAR); };
+  const annRet = (w) => Math.pow(1 + w.reduce((s, x, i) => s + x * mean[i], 0), TRADING_DAYS_YEAR) - 1;
+  const pack = (w) => (w ? { weights: w, vol: annVol(w), ret: annRet(w) } : null);
+
+  return {
+    tickers: elig.map(r => r.ticker), days: minLen, coverage: elig.length, totalHoldings: stats.rows.length,
+    eligValues: elig.map(r => r.value), eligSubtotal,
+    current: pack(curW),
+    targets: { minvar: pack(minVar), riskparity: pack(riskParity), equal: pack(equal) },
+  };
+}
+
+const PORT_OPT_MODES = [
+  { key: 'minvar', label: 'Mínima Varianza', desc: 'Los pesos que minimizan la volatilidad total de la cartera.' },
+  { key: 'riskparity', label: 'Paridad de Riesgo', desc: 'Cada posición aporta un riesgo parecido (peso ∝ 1/volatilidad).' },
+  { key: 'equal', label: 'Igual Peso', desc: '1/N — el benchmark diversificado, difícil de batir.' },
+];
+
+function optimizerCardHTML(stats) {
+  const opt = portfolioOptimizer(stats);
+  if (!opt) return `
+    <div class="card port-notes-card">
+      <div class="dash-radar-title">Optimizador de cartera</div>
+      <div class="dash-loading-note">Hace falta al menos 2 posiciones con ~60 ruedas de historial para optimizar los pesos — probá de nuevo en un momento.</div>
+    </div>`;
+  const mode = PORT_OPT_MODES.find(mm => mm.key === portState.optMode) ?? PORT_OPT_MODES[0];
+  const tgt = opt.targets[mode.key];
+  const cur = opt.current;
+  if (!tgt) return '';
+  const rows = opt.tickers.map((t, i) => {
+    const curPct = cur.weights[i], tgtPct = tgt.weights[i];
+    const deltaPct = tgtPct - curPct;
+    const deltaUsd = deltaPct * opt.eligSubtotal;
+    return { t, curPct, tgtPct, deltaPct, deltaUsd };
+  }).sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct));
+  const volDelta = tgt.vol - cur.vol;
+  return `
+    <div class="card port-notes-card opt-card">
+      <div class="dash-radar-title">Optimizador de cartera</div>
+      <div class="mc-intro">Pesos objetivo calculados sobre la covarianza real de tus ${opt.coverage} posiciones con historial. Elegí un criterio y mirá qué ajustaría — con montos concretos. No es una orden: es la cartera "de manual" para ese objetivo, para que la compares con la tuya.</div>
+      <div class="opt-mode-btns">
+        ${PORT_OPT_MODES.map(mm => `<button class="opt-mode-btn ${portState.optMode === mm.key ? 'active' : ''}" data-opt-mode="${mm.key}">${esc(mm.label)}</button>`).join('')}
+      </div>
+      <div class="opt-desc">${esc(mode.desc)}</div>
+      <div class="opt-proj">
+        <div class="opt-proj-cell"><span>Volatilidad actual</span><b>${(cur.vol * 100).toFixed(1)}%</b></div>
+        <div class="opt-proj-arrow">→</div>
+        <div class="opt-proj-cell"><span>Volatilidad objetivo</span><b class="${volDelta <= 0 ? 'up' : 'down'}">${(tgt.vol * 100).toFixed(1)}%</b></div>
+        <div class="opt-proj-cell opt-proj-delta"><span>Cambio de riesgo</span><b class="${volDelta <= 0 ? 'up' : 'down'}">${volDelta <= 0 ? '' : '+'}${(volDelta * 100).toFixed(1)} pts</b></div>
+      </div>
+      <div class="port-table-wrap">
+        <table class="port-table opt-table">
+          <thead><tr><th>Activo</th><th>Peso actual</th><th>Peso objetivo</th><th>Ajuste</th><th>Acción aprox.</th></tr></thead>
+          <tbody>
+            ${rows.map(r => {
+              const act = Math.abs(r.deltaPct) < 0.02 ? '<span class="opt-hold">mantener</span>'
+                : r.deltaPct > 0 ? `<span class="up">comprar ${pv(fmtUsd(Math.abs(r.deltaUsd)))}</span>`
+                : `<span class="down">vender ${pv(fmtUsd(Math.abs(r.deltaUsd)))}</span>`;
+              return `<tr>
+                <td class="port-ticker-cell">${esc(r.t)}</td>
+                <td>${Math.round(r.curPct * 100)}%</td>
+                <td><b>${Math.round(r.tgtPct * 100)}%</b></td>
+                <td class="${r.deltaPct >= 0 ? 'up' : 'down'}">${r.deltaPct >= 0 ? '+' : ''}${Math.round(r.deltaPct * 100)} pts</td>
+                <td>${act}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="bt-disclaimer">Optimización long-only sobre ${opt.coverage}${opt.coverage < opt.totalHoldings ? `/${opt.totalHoldings}` : ''} posiciones (las que tienen historial), con ${opt.days} ruedas. La volatilidad proyectada es robusta; deliberadamente NO optimizamos por retorno esperado (estimarlo a futuro es poco confiable y suele concentrar de más). Los montos son orientativos y no incluyen comisiones ni impacto fiscal.</div>
+    </div>`;
+}
+
+/** Convicción por posición (0-100): qué tan alineadas están las señales reales
+ *  para ESA tenencia, combinando score del motor, estructura de tendencia,
+ *  momentum de 20 ruedas, régimen de RSI, distancia al stop y alertas activas.
+ *  Es la base de la "alta confianza": una reco pesa más cuando la convicción
+ *  la respalda. */
+function positionConviction(r) {
+  const d = r.d;
+  if (!d) return null;
+  let score = (d.score != null ? d.score : 50) * 0.45;
+  const factors = [];
+  if (d.structure?.bullish === true) { score += 12; factors.push({ good: true, t: 'Estructura de tendencia alcista' }); }
+  else if (d.structure?.bullish === false) { score -= 8; factors.push({ good: false, t: 'Estructura de tendencia bajista' }); }
+  const c = d.closes;
+  if (c?.length >= 21) {
+    const mom = (c[c.length - 1] - c[c.length - 21]) / c[c.length - 21];
+    if (mom > 0.03) { score += 10; factors.push({ good: true, t: `Momentum +${(mom * 100).toFixed(0)}% (20 ruedas)` }); }
+    else if (mom < -0.03) { score -= 8; factors.push({ good: false, t: `Momentum ${(mom * 100).toFixed(0)}% (20 ruedas)` }); }
+  }
+  if (d.rsi != null) {
+    if (d.rsi >= 45 && d.rsi <= 65) { score += 6; factors.push({ good: true, t: 'RSI en zona sana' }); }
+    else if (d.rsi > 70) { score -= 6; factors.push({ good: false, t: `RSI sobrecomprado (${d.rsi.toFixed(0)})` }); }
+    else if (d.rsi < 30) { score += 3; factors.push({ good: true, t: `RSI sobrevendido (${d.rsi.toFixed(0)}) — posible rebote` }); }
+  }
+  const pr = d.planRaw;
+  if (pr?.stopLoss != null && d.price > 0) {
+    const dist = ((d.price - pr.stopLoss) / d.price) * 100;
+    if (dist <= 3) { score -= 12; factors.push({ good: false, t: 'Precio pegado al stop' }); }
+    else if (dist >= 12) { score += 4; }
+  }
+  if (d.alert && !d.alert.pending) {
+    if (d.alert.type === 'buy') { score += 6; factors.push({ good: true, t: 'Alerta de zona de compra' }); }
+    else if (d.alert.type === 'sell' || d.alert.type === 'stop') { score -= 8; factors.push({ good: false, t: 'Alerta de venta / stop' }); }
+  }
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const verdict = score >= 68 ? 'alta' : score >= 48 ? 'media' : 'baja';
+  return { score, verdict, factors: factors.slice(0, 3) };
+}
+
+function convictionCardHTML(stats) {
+  const rows = stats.rows.filter(r => r.d).map(r => ({ r, conv: positionConviction(r) })).filter(x => x.conv);
+  if (!rows.length) return '';
+  rows.sort((a, b) => b.conv.score - a.conv.score);
+  const col = (v) => v === 'alta' ? GREEN : v === 'media' ? AMBER : RED;
+  return `
+    <div class="card port-notes-card conv-card">
+      <div class="dash-radar-title">Convicción por posición</div>
+      <div class="mc-intro">Qué tan alineadas están HOY las señales de cada tenencia (score del motor + tendencia + momentum + RSI + distancia al stop + alertas). Cuanto más alta, más respaldo tiene la recomendación de esa posición.</div>
+      ${rows.map(({ r, conv }) => `
+        <div class="conv-row">
+          <div class="conv-ticker">${esc(r.ticker)}</div>
+          <div class="conv-bar-wrap">
+            <div class="conv-bar" style="width:${conv.score}%; background:${col(conv.verdict)};"></div>
+          </div>
+          <div class="conv-score" style="color:${col(conv.verdict)};">${conv.score}<small>conv. ${esc(conv.verdict)}</small></div>
+          <div class="conv-factors">${conv.factors.map(f => `<span class="conv-chip ${f.good ? 'good' : 'bad'}">${f.good ? '✓' : '✕'} ${esc(f.t)}</span>`).join('') || '<span class="conv-chip">sin señales fuertes</span>'}</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+/** Plan de acción unificado y priorizado: junta TODAS las señales (por posición
+ *  y de cartera) en una sola lista rankeada por urgencia, cada una con un nivel
+ *  de confianza. Es el "qué hago hoy" concreto — la respuesta directa a
+ *  recomendaciones de alta confianza. */
+function portfolioActionPlan(stats, risk) {
+  const items = [];
+  for (const r of stats.rows) {
+    if (!r.d) continue;
+    const conv = positionConviction(r);
+    const near = r.d.planRaw?.stopLoss != null && r.d.price > 0 && ((r.d.price - r.d.planRaw.stopLoss) / r.d.price) * 100 <= 3;
+    const g = r.gainPct;
+    if (r.d.scoreLabel === 'Venta') items.push({ pri: 1, ticker: r.ticker, action: g != null && g < 0 ? 'Cortar pérdida' : 'Vender', conf: 'alta', why: near ? 'Señal de Venta del motor y a ≤3% del stop.' : 'Señal de Venta del motor.' });
+    else if (near) items.push({ pri: 1, ticker: r.ticker, action: 'Decidir el stop', conf: 'alta', why: 'El precio está a ≤3% del stop sugerido — decisión inminente.' });
+    else if (r.d.scoreLabel === 'Reducir') items.push({ pri: 2, ticker: r.ticker, action: g != null && g > 0 ? 'Tomar ganancias parciales' : 'Reducir exposición', conf: conv?.verdict === 'baja' ? 'alta' : 'media', why: 'La señal se debilitó (Reducir).' });
+    else if (r.d.scoreLabel === 'Compra Fuerte' && conv?.verdict === 'alta') items.push({ pri: 3, ticker: r.ticker, action: g != null && g < 0 ? 'Promediar a la baja' : 'Sumar posición', conf: 'alta', why: `Compra Fuerte con convicción alta (${conv.score}/100).` });
+    else if (r.d.scoreLabel === 'Compra Moderada' && conv && conv.verdict !== 'baja') items.push({ pri: 4, ticker: r.ticker, action: 'Sumar selectivo', conf: 'media', why: `Compra moderada con convicción ${conv.verdict} (${conv.score}/100).` });
+  }
+  if (stats.topHolding && (stats.topHolding.weight ?? 0) >= 0.35) items.push({ pri: 2, ticker: stats.topHolding.ticker, action: 'Bajar el peso', conf: 'alta', why: `Concentración del ${Math.round(stats.topHolding.weight * 100)}% en un solo activo.` });
+  if (stats.sectorRows[0]?.pct >= 0.5) items.push({ pri: 3, ticker: stats.sectorRows[0].sector, action: 'Diversificar el sector', conf: 'alta', why: `${Math.round(stats.sectorRows[0].pct * 100)}% de la cartera en ${stats.sectorRows[0].sector}.` });
+  if (risk?.overlaps?.length) { const o = risk.overlaps[0]; items.push({ pri: 5, ticker: `${o.a} / ${o.b}`, action: 'Revisar solapamiento', conf: 'media', why: `Se mueven casi igual (correlación ${o.corr.toFixed(2)}) — poca diversificación entre ambos.` }); }
+  items.sort((a, b) => a.pri - b.pri || (a.conf === 'alta' ? -1 : 1));
+  return items;
+}
+
+const CONF_COLOR = { alta: GREEN, media: AMBER, baja: RED };
+function actionPlanCardHTML(stats, risk) {
+  const items = portfolioActionPlan(stats, risk);
+  return `
+    <div class="card port-notes-card action-plan-card">
+      <div class="dash-radar-title">Plan de acción priorizado</div>
+      <div class="mc-intro">Todo lo accionable de tu cartera hoy, ordenado por urgencia y con un nivel de confianza en cada punto. Cruza las señales del motor con la convicción, la concentración y los solapamientos — no es asesoramiento financiero.</div>
+      ${!items.length ? `<div class="port-note ok">✓ No hay acciones urgentes: ninguna posición disparó una señal fuerte de compra o venta, ni hay riesgos de concentración críticos. Seguí el monitoreo habitual.</div>` : `
+      <ol class="action-plan-list">
+        ${items.map(it => `
+          <li class="action-plan-item">
+            <span class="action-conf" style="background:${CONF_COLOR[it.conf]}22; color:${CONF_COLOR[it.conf]};">${esc(it.conf)}</span>
+            <span class="action-body"><b>${esc(it.action)} — ${esc(it.ticker)}.</b> ${esc(it.why)}</span>
+          </li>`).join('')}
+      </ol>`}
+    </div>`;
+}
+
+/** Amplitud (breadth) y momentum de la cartera: qué proporción de tus
+ *  posiciones está "bien" por dentro (en señal de compra, sobre su media de
+ *  50 ruedas, con momentum positivo) y el RSI promedio. Una cartera puede
+ *  estar en verde pero con amplitud débil (sube por pocas posiciones) — esto
+ *  lo hace visible. */
+function portfolioBreadth(stats) {
+  const rows = stats.rows.filter(r => r.d);
+  if (!rows.length) return null;
+  let buy = 0, aboveMA = 0, posMom = 0, rsiSum = 0, rsiN = 0, maN = 0, momN = 0;
+  for (const r of rows) {
+    const d = r.d;
+    if (d.scoreLabel === 'Compra Fuerte' || d.scoreLabel === 'Compra Moderada') buy++;
+    const c = d.closes;
+    if (c?.length >= 50) { const ma = c.slice(-50).reduce((a, b) => a + b, 0) / 50; if (c[c.length - 1] > ma) aboveMA++; maN++; }
+    if (c?.length >= 21) { const mom = (c[c.length - 1] - c[c.length - 21]) / c[c.length - 21]; if (mom > 0) posMom++; momN++; }
+    if (d.rsi != null) { rsiSum += d.rsi; rsiN++; }
+  }
+  return {
+    count: rows.length,
+    buyPct: buy / rows.length,
+    aboveMAPct: maN ? aboveMA / maN : null, maN,
+    posMomPct: momN ? posMom / momN : null, momN,
+    avgRsi: rsiN ? rsiSum / rsiN : null,
+  };
+}
+
+function breadthCardHTML(stats) {
+  const b = portfolioBreadth(stats);
+  if (!b) return '';
+  const gauge = (label, frac, note) => {
+    if (frac == null) return '';
+    const pct = Math.round(frac * 100);
+    const col = frac >= 0.6 ? GREEN : frac >= 0.4 ? AMBER : RED;
+    return `
+      <div class="breadth-cell">
+        <div class="breadth-ring" style="background:conic-gradient(${col} ${pct * 3.6}deg, var(--surface-2, rgba(255,255,255,0.06)) 0deg);">
+          <div class="breadth-ring-inner">${pct}%</div>
+        </div>
+        <div class="breadth-label">${esc(label)}</div>
+        <div class="breadth-note">${esc(note)}</div>
+      </div>`;
+  };
+  const rsiTxt = b.avgRsi != null ? `RSI prom. ${b.avgRsi.toFixed(0)}` : '';
+  return `
+    <div class="card port-notes-card breadth-card">
+      <div class="dash-radar-title">Amplitud & momentum de la cartera ${rsiTxt ? `<span class="risk-days-note">— ${rsiTxt}</span>` : ''}</div>
+      <div class="mc-intro">Qué proporción de tus posiciones está fuerte por dentro. Una cartera sana sube con amplitud (muchas posiciones acompañando), no apoyada en una o dos.</div>
+      <div class="breadth-grid">
+        ${gauge('En señal de compra', b.buyPct, `${Math.round(b.buyPct * b.count)} de ${b.count} posiciones`)}
+        ${gauge('Sobre su media de 50 ruedas', b.aboveMAPct, `${b.maN} con historial`)}
+        ${gauge('Con momentum positivo (20d)', b.posMomPct, `${b.momN} con historial`)}
+      </div>
+    </div>`;
+}
+
+function corrMatrixCardHTML(risk) {
+  const cm = risk?.corrMatrix;
+  if (!cm) return '';
+  const colorFor = (v) => {
+    if (v == null) return 'var(--surface-2, rgba(255,255,255,0.05))';
+    if (v >= 0.8) return 'oklch(0.70 0.21 23 / 0.55)';
+    if (v >= 0.5) return 'oklch(0.75 0.15 70 / 0.45)';
+    if (v >= 0.2) return 'oklch(0.75 0.13 120 / 0.30)';
+    if (v >= -0.2) return 'var(--surface-2, rgba(255,255,255,0.06))';
+    return 'oklch(0.72 0.15 250 / 0.40)';
+  };
+  return `
+    <div class="card port-notes-card corr-card">
+      <div class="dash-radar-title">Mapa de correlaciones</div>
+      <div class="mc-intro">Cuánto se mueven juntas tus posiciones (últimas ${risk.days} ruedas). Rojo = casi idénticas (poca diversificación real entre ellas); azul = se mueven en sentidos opuestos (se cubren). Lo ideal para diversificar es tener varios pares en el medio o azules.</div>
+      <div class="corr-matrix-scroll">
+        <table class="corr-matrix-table port-corr-table">
+          <thead><tr><th></th>${cm.tickers.map(t => `<th>${esc(t)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${cm.tickers.map((t, i) => `
+              <tr>
+                <th>${esc(t)}</th>
+                ${cm.tickers.map((_, j) => {
+                  const v = cm.m[i][j];
+                  return `<td style="background:${colorFor(v)};" title="${esc(t)} vs ${esc(cm.tickers[j])}: ${v == null ? 'sin dato' : v.toFixed(2)}">${i === j ? '—' : (v == null ? '·' : v.toFixed(1))}</td>`;
+                }).join('')}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 function portfolioHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
@@ -4792,6 +5129,8 @@ function portfolioHTML() {
 
     ${tab === 'resumen' ? `
       ${portfolioCopilotCardHTML(copilot, health)}
+      ${actionPlanCardHTML(stats, risk)}
+      ${breadthCardHTML(stats)}
       ${portfolioTreemapSVG(stats.rows)}
       ${portfolioHealthCardHTML(health)}
       <div class="card port-notes-card">
@@ -4815,6 +5154,7 @@ function portfolioHTML() {
       ${monteCarloCardHTML(mc)}
       ${stressTestCardHTML(stats, risk)}
       ${riskContributionCardHTML(risk)}
+      ${corrMatrixCardHTML(risk)}
       ${benchmarksCardHTML(stats)}
     ` : ''}
 
@@ -4833,6 +5173,8 @@ function portfolioHTML() {
           </div>`;
         }).join('') || '<div class="dash-loading-note">Cargando análisis de cada posición…</div>'}
       </div>
+      ${convictionCardHTML(stats)}
+      ${optimizerCardHTML(stats)}
       ${rebalanceCardHTML(stats)}
       ${allocatorCardHTML(stats)}
       ${taxImpactCardHTML(stats.totalValue, portState.ccl)}
@@ -4964,6 +5306,12 @@ function wirePortfolioEvents() {
     btn.addEventListener('click', () => {
       const v = btn.dataset.stressShock;
       portState.stressShock = v === 'clear' ? null : Number(v);
+      renderReport();
+    });
+  });
+  els.report.querySelectorAll('[data-opt-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      portState.optMode = btn.dataset.optMode;
       renderReport();
     });
   });
