@@ -454,6 +454,22 @@ para acercarlo a una plataforma profesional:
 
 Todo sale del mismo OHLCV real que el resto del análisis — nada se simula.
 
+## Radar de Trades Cortos (setups de 1-3 días)
+
+Nueva sección en el sidebar ("Trades Cortos") que tamiza el universo curado +
+tu Watchlist buscando **setups técnicos alcistas de corto plazo de alta
+confianza**. El motor `shortTermSetup` combina disparadores reales sobre las
+velas ya pedidas (sin requests extra): squeeze de volatilidad recién liberado,
+ruptura de máximos de 20 ruedas con volumen, cruce alcista de MACD,
+divergencia alcista, salida de sobreventa en tendencia, recuperación de la
+EMA20, etc. — y penaliza riesgos (sobrecompra, volumen que no acompaña,
+divergencia bajista). Exige al menos un disparador "primario" (squeeze,
+ruptura, cruce de MACD o divergencia) para calificar. Cada setup muestra un
+puntaje de confianza, los disparadores, y un plan de trade corto (entrada,
+stop ajustado bajo el swing, dos objetivos por múltiplos de ATR, R:R y rango
+diario típico). Marcado con un aviso de **riesgo alto** bien visible: es un
+tamiz técnico, no una recomendación ni garantía de suba.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

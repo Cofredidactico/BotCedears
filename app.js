@@ -1,5 +1,5 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, isLive } from './dataSource.js';
-import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged } from './indicators.js';
+import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged, macd, rsi } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
@@ -1376,6 +1376,7 @@ const VIEW_PAGES = {
   backtest: { html: backtestPageHTML, wire: wireBacktestEvents, load: () => {} },
   calendar: { html: calendarPageHTML, wire: wireCalendarEvents, load: loadCalendarData },
   screener: { html: screenerPageHTML, wire: wireScreenerEvents, load: () => { if (!dashState.started) loadDashboardData(); } },
+  shorttrades: { html: shortTradesPageHTML, wire: wireShortTradesEvents, load: () => { if (!dashState.started) loadDashboardData(); loadWatchlistData(); } },
   dividends: { html: dividendsPageHTML, wire: wireDividendsEvents, load: loadDividendsData },
   compare: { html: comparePageHTML, wire: wireCompareEvents, load: () => {} },
   settings: { html: settingsPageHTML, wire: wireSettingsEvents, load: () => {} },
@@ -2162,6 +2163,7 @@ const SIDEBAR_NAV = [
   { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
   { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
   { view: 'screener', label: 'Screener', icon: 'filter' },
+  { view: 'shorttrades', label: 'Trades Cortos', icon: 'zap' },
   { view: 'dividends', label: 'Dividendos', icon: 'coins' },
   { view: 'compare', label: 'Comparador', icon: 'compare' },
   { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
@@ -3142,6 +3144,80 @@ function wireDividendsEvents() {
     runBtn.addEventListener('click', run);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
   }
+}
+
+/* ───────────────────────── radar de trades cortos (página) ───────────────────────── */
+const SHORT_CONF_COLOR = { 'muy alta': GREEN, alta: 'oklch(0.72 0.16 152)', media: AMBER, baja: 'oklch(0.62 0.02 262)' };
+
+function shortTradesPageHTML() {
+  // Combina universo curado + watchlist (sin duplicar), tomando el setup ya
+  // calculado por computeLightSignal — sin pedidos extra.
+  const seen = new Set();
+  const rows = [];
+  const pushFrom = (map) => {
+    for (const [ticker, d] of Object.entries(map)) {
+      if (!d || seen.has(ticker) || !d.setup?.qualifies) continue;
+      seen.add(ticker);
+      rows.push({ ticker, d });
+    }
+  };
+  pushFrom(dashState.data);
+  pushFrom(watchState.data);
+  rows.sort((a, b) => b.d.setup.score - a.d.setup.score);
+
+  const loadingCurated = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
+
+  return `
+    ${sectionTitleHTML('Radar de Trades Cortos', 'zap')}
+    <div class="dash-intro">Activos del universo curado y tu Watchlist con un <strong>setup técnico alcista de corto plazo (1-3 días)</strong> de alta confianza AHORA: squeeze de volatilidad recién liberado, ruptura de máximos con volumen, cruce de MACD, divergencia alcista, salida de sobreventa en tendencia, etc. Cada uno con entrada, stop ajustado y objetivos. ${loadingCurated ? 'Cargando el universo…' : ''}</div>
+    <div class="cedear-note" style="margin-bottom:22px; border-color:oklch(0.55 0.15 23 / 0.4);">
+      <strong>⚠ Riesgo alto:</strong> el trading de corto plazo es especulativo y de alto riesgo. Esto es un <strong>tamiz técnico</strong>, no una recomendación ni una garantía de suba — muchos setups fallan. Operá siempre con un stop, arriesgá solo lo que puedas perder, y recordá que un balance (earnings) cercano puede disparar movimientos que ningún indicador anticipa.
+    </div>
+    ${!rows.length ? `<div class="card watch-empty">${loadingCurated ? 'Analizando setups de corto plazo…' : 'No hay setups de corto plazo de alta confianza en este momento. El mercado no siempre ofrece entradas claras — volvé más tarde.'}</div>` : `
+    <div class="short-grid">
+      ${rows.map(({ ticker, d }) => shortTradeCardHTML(ticker, d)).join('')}
+    </div>`}
+  `;
+}
+
+function shortTradeCardHTML(ticker, d) {
+  const s = d.setup;
+  const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
+  const primary = s.triggers.filter(t => t.primary);
+  const secondary = s.triggers.filter(t => !t.primary);
+  return `
+    <div class="card short-card" data-short-ticker="${esc(ticker)}">
+      <div class="short-head">
+        <div>
+          <div class="short-ticker">${esc(ticker)} <span class="watch-stale">${esc(d.category ?? '')}</span></div>
+          <div class="short-name">${esc(d.name ?? '')}</div>
+        </div>
+        <div class="short-conf" style="color:${conf};">
+          <div class="short-conf-score">${s.score}</div>
+          <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
+        </div>
+      </div>
+      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
+      <div class="short-triggers">
+        ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
+        ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
+      </div>
+      <div class="short-plan">
+        <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
+        <div class="short-plan-cell"><span>Stop</span><b class="down">${fmtUsd(s.stop)}</b></div>
+        <div class="short-plan-cell"><span>Objetivo 1</span><b class="up">${fmtUsd(s.target1)}</b></div>
+        <div class="short-plan-cell"><span>Objetivo 2</span><b class="up">${fmtUsd(s.target2)}</b></div>
+        <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
+        <div class="short-plan-cell"><span>Rango diario típ.</span><b>±${s.expectedMovePct.toFixed(1)}%</b></div>
+      </div>
+      ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
+    </div>`;
+}
+
+function wireShortTradesEvents() {
+  els.report.querySelectorAll('[data-short-ticker]').forEach(el => {
+    el.addEventListener('click', () => selectTicker(el.dataset.shortTicker));
+  });
 }
 
 /** Página de Comparador: hasta 3 tickers elegidos por el usuario, con score
@@ -5491,6 +5567,7 @@ async function computeLightSignal(ticker, macro) {
   // sobre lo ya pedido, sin requests extra; lo usa la tabla del Portfolio
   // para stop sugerido y distancia al stop de cada tenencia.
   const planRaw = computePlan(technical, scoreResult.score).raw;
+  const setup = shortTermSetup(technical, candles); // radar de trades cortos, sin pedidos extra
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
     price: quote.usd, changePct: quote.changePct,
@@ -5510,6 +5587,91 @@ async function computeLightSignal(ticker, macro) {
     closes: candles.c, // serie completa (~220 ruedas) — reusada para volatilidad/drawdown de la cartera, sin pedidos extra
     highlight: technicalHighlight(technical),
     planRaw, // stop/objetivos numéricos (USD) — para la columna de stop del Portfolio
+    setup, // setup de trade corto (o null) — para el Radar de Trades Cortos
+  };
+}
+
+/* ───────────────────────── radar de trades cortos ─────────────────────────
+ * Detecta setups técnicos ALCISTAS de corto plazo (1-3 días) de alta
+ * confianza, combinando disparadores reales sobre las mismas velas ya
+ * pedidas: squeeze de volatilidad recién liberado, ruptura de máximos con
+ * volumen, cruce alcista de MACD, divergencia alcista, salida de sobreventa,
+ * tendencia fuerte, etc. Suma un puntaje de confianza y exige al menos un
+ * disparador "primario" para calificar — no es una recomendación ni una
+ * garantía, es un tamiz técnico para el trader de corto plazo (alto riesgo). */
+function shortTermSetup(technical, candles) {
+  const c = candles.c, h = candles.h, l = candles.l, v = candles.v || [];
+  const n = c.length;
+  if (n < 30) return null;
+  const price = c[n - 1], atr = technical.atr;
+  if (!(atr > 0) || isNaN(atr)) return null;
+
+  const triggers = [];
+  const risks = [];
+  let score = 0;
+  const add = (pts, label, primary = false) => { score += pts; triggers.push({ label, primary }); };
+
+  // 1. Squeeze de volatilidad (resorte comprimido)
+  if (technical.squeeze?.justFired) add(26, `Squeeze de volatilidad recién liberado tras ${technical.squeeze.barsInSqueeze} ruedas`, true);
+  else if (technical.squeeze?.active) add(8, `Volatilidad comprimida hace ${technical.squeeze.barsInSqueeze} ruedas — ruptura próxima`);
+
+  // 2. Ruptura de máximos de 20 ruedas con volumen
+  const hi20 = Math.max(...h.slice(-21, -1));
+  const hasVol = v.some(x => x > 0);
+  const volAvg = hasVol ? v.slice(-21, -1).reduce((a, b) => a + b, 0) / 20 : 0;
+  const volRatio = hasVol && volAvg > 0 ? v[n - 1] / volAvg : null;
+  if (price >= hi20 * 0.997) {
+    if (volRatio && volRatio >= 1.3) add(22, `Ruptura de máximos de 20 ruedas con volumen alto (${volRatio.toFixed(1)}× el promedio)`, true);
+    else add(12, 'Ruptura de máximos de 20 ruedas', true);
+  }
+
+  // 3. Cruce alcista de MACD reciente (histograma pasó a positivo)
+  const { hist } = macd(c);
+  if (hist[n - 1] != null && hist[n - 2] != null && hist[n - 2] <= 0 && hist[n - 1] > 0) add(16, 'Cruce alcista de MACD en la última rueda', true);
+
+  // 4. Patrón de vela alcista
+  if (technical.candlePattern?.bias === 'bullish') add(12, technical.candlePattern.label);
+
+  // 5. RSI saliendo de sobreventa
+  const rs = rsi(c, 14);
+  if (rs[n - 1] != null && rs[n - 2] != null && rs[n - 2] < 42 && rs[n - 1] > rs[n - 2] && rs[n - 1] >= 40) add(12, 'RSI girando al alza desde sobreventa');
+
+  // 6. Divergencia alcista
+  if (technical.divergence?.type === 'bullish') add(15, 'Divergencia alcista (RSI vs precio)', true);
+
+  // 7. Tendencia fuerte
+  if (technical.adx > 25 && price > technical.ema20 && technical.ema20 > technical.ema50) add(11, `Tendencia fuerte (ADX ${technical.adx.toFixed(0)})`);
+
+  // 8. Volumen confirma
+  if (technical.obvConfirms === true) add(8, 'El volumen (OBV) acompaña el movimiento');
+
+  // 9. Recuperó la EMA20 tras pullback en tendencia alcista
+  if (technical.bullishAlign && c[n - 2] < technical.ema20 && price > technical.ema20) add(10, 'Recuperó la EMA20 (rebote dentro de la tendencia)');
+
+  // Riesgos / penalizaciones
+  if (!isNaN(technical.rsi) && technical.rsi > 72) { score -= 12; risks.push(`RSI sobrecomprado (${technical.rsi.toFixed(0)}) — puede corregir antes de seguir`); }
+  if (technical.resistance && price >= technical.resistance * 0.99 && price <= technical.resistance * 1.01) risks.push('Muy cerca de una resistencia — puede frenar ahí');
+  if (technical.obvConfirms === false) { score -= 8; risks.push('El volumen no acompaña — riesgo de movimiento en falso'); }
+  if (technical.divergence?.type === 'bearish') { score -= 10; risks.push('Divergencia bajista activa — cautela'); }
+
+  score = Math.max(0, Math.min(100, score));
+  const hasPrimary = triggers.some(t => t.primary);
+  const qualifies = hasPrimary && score >= 45;
+
+  // Plan de trade corto (horizonte 1-3 días): stop ajustado bajo el swing
+  // reciente, objetivos por múltiplos de ATR.
+  const swingLow = Math.min(...l.slice(-6));
+  const stop = Math.max(swingLow - 0.2 * atr, price - 1.5 * atr);
+  const target1 = price + 1.5 * atr;
+  const target2 = price + 2.5 * atr;
+  const risk = price - stop, reward = target1 - price;
+  const rr = risk > 0 ? reward / risk : null;
+  const expectedMovePct = (atr / price) * 100;
+
+  return {
+    score, qualifies, triggers, risks,
+    entry: price, stop, target1, target2, rr, expectedMovePct,
+    confidence: score >= 75 ? 'muy alta' : score >= 60 ? 'alta' : score >= 45 ? 'media' : 'baja',
   };
 }
 
