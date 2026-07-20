@@ -739,6 +739,39 @@ calcula:
 El valor total de la cuenta se guarda en el navegador. Reemplaza al asignador
 simple anterior ("¿qué compro con AR$X?"), que solo miraba tus tenencias.
 
+## Plan de Trading + análisis de cartera (7 mejoras)
+
+Cierran el círculo análisis → acción → seguimiento en el Portfolio Advisor:
+
+- **Plan de Trading del Día** (pestaña Operar, arriba): un ticket unificado que
+  junta qué **vender** (por señal de Venta/Reducir, stop, o sobrepeso vs. el
+  tope del perfil), qué **comprar** con la liquidez declarada + lo que liberan
+  las ventas, y el **flujo neto de caja**. Cada orden tiene "Marcar
+  vendida/comprada" que la **registra en el historial y ajusta tus tenencias**
+  (`buildTradingPlan`, con ejecución por índice desde `portState._planCache`).
+- **De qué vender para liberar liquidez**: integrado en la sección de ventas del
+  plan — prioriza señales de salida y sobrepesos, con cuánto libera cada una.
+- **Previsualización "¿y si ejecuto?"**: antes de operar, muestra cómo quedaría
+  la cartera — mayor posición, mayor sector, N.º de posiciones y % de efectivo,
+  con flechas antes→después (`previewAfterPlan`).
+- **Curva de valor de la cartera** (pestaña Riesgo): reconstruye el valor
+  histórico de tus tenencias actuales sobre los cierres reales, con área SVG,
+  cambio del período y peor drawdown (`portfolioEquityCurve`).
+- **Journal de trading** (pestaña Operar): métricas reales de tus ventas
+  registradas — win rate, ganancia/pérdida media, **expectativa por operación**
+  y **profit factor**, por moneda (`tradingJournalStats`).
+- **Meta de patrimonio** (pestaña Riesgo): ponés una meta en USD y un aporte
+  mensual, y proyecta en cuánto tiempo llegás usando el retorno anual histórico
+  de tu cartera (acotado), con barra de avance (`goalProjection`).
+- **Tu cartera vs. tu perfil** (pestaña Riesgo): compara concentración,
+  diversificación, beta y volatilidad contra los umbrales del perfil elegido en
+  Configuración, con ✓/✕, y dice a qué modelo (conservador/moderado/agresivo)
+  se parece por su volatilidad (`modelPortfolioCardHTML`).
+
+Refactor: el motor de sugerencias de compra se extrajo a `suggestBuys(...)`,
+reutilizado por Efectivo & Compras y por el Plan de Trading. Nada garantiza
+ganancias — todo maximiza la ventaja y controla el riesgo.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente
