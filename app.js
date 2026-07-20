@@ -262,15 +262,61 @@ const ALERT_META = {
   exdiv: { label: 'Ex-dividend próximo', color: GOLD },
 };
 const ALERT_CONFIDENCE_LABEL = { alta: 'confianza alta', media: 'confianza media', baja: 'confianza baja' };
+const GRADE_META = {
+  A: { color: GREEN, label: 'grado A' },
+  B: { color: AMBER, label: 'grado B' },
+  C: { color: RED, label: 'grado C' },
+};
 // El stop es gestión de riesgo incondicional (no pasa por el filtro de
 // confirmaciones), por eso no muestra sufijo de confianza.
 function alertConfidenceSuffix(a) {
   if (!a || a.type === 'stop' || a.type === 'structure') return '';
   if (a.pending) return ` <span class="alert-confidence tentativa">tentativa</span>`;
+  // Grado A/B/C de la zona (nuevo motor ponderado); si no está, cae a la
+  // confianza textual anterior por compatibilidad.
+  if (a.grade && GRADE_META[a.grade]) {
+    const g = GRADE_META[a.grade];
+    return ` <span class="alert-grade grade-${a.grade}" style="color:${g.color}; border-color:${g.color};">${g.label}${a.rr != null ? ` · R:R ${a.rr}` : ''}</span>`;
+  }
   return ` <span class="alert-confidence ${esc(a.confidence)}">${esc(ALERT_CONFIDENCE_LABEL[a.confidence] ?? a.confidence)}</span>`;
 }
 function alertTitleAttr(a) {
-  return a?.confirmations?.length ? ` title="${esc(a.confirmations.join(' · '))}"` : '';
+  if (!a) return '';
+  const parts = [];
+  if (a.reason) parts.push(a.reason);
+  if (a.confirmations?.length) parts.push('✓ ' + a.confirmations.join(' · '));
+  return parts.length ? ` title="${esc(parts.join('  |  '))}"` : '';
+}
+
+/** Tarjeta didáctica del GRADO de la zona de compra/venta en la ficha del
+ *  activo: nota A/B/C, motivo en criollo, R:R y el desglose de todas las
+ *  confirmaciones (✓ cumplidas, ✕ en contra, — sin dato). Solo se muestra
+ *  cuando hay una zona de compra/venta activa con desglose (el nuevo motor). */
+function alertGradeCardHTML(a) {
+  if (!a || (a.type !== 'buy' && a.type !== 'sell') || !a.grade || !a.factors?.length) return '';
+  const g = GRADE_META[a.grade];
+  const dirLabel = a.type === 'buy' ? 'compra' : 'venta';
+  const factorRow = (f) => {
+    const cls = f.ok === true ? 'ok' : f.ok === false ? 'no' : 'na';
+    const mark = f.ok === true ? '✓' : f.ok === false ? '✕' : '—';
+    return `<div class="agc-factor ${cls}"><span class="agc-mark">${mark}</span><span>${esc(f.label)}</span>${f.primary ? '<span class="agc-primary" title="Confirmación de mayor peso">clave</span>' : ''}</div>`;
+  };
+  // Primarios primero, luego el resto; dentro de cada grupo, cumplidos arriba.
+  const ordered = a.factors.slice().sort((x, y) => (y.primary ? 1 : 0) - (x.primary ? 1 : 0) || (y.ok === true ? 1 : 0) - (x.ok === true ? 1 : 0));
+  return `
+    ${sectionTitleHTML('Calidad de la zona de ' + dirLabel, 'target')}
+    <div class="card agc-card">
+      <div class="agc-head">
+        <div class="agc-grade" style="border-color:${g.color}; color:${g.color};">${a.grade}</div>
+        <div class="agc-head-text">
+          <div class="agc-title">Zona de ${dirLabel} ${esc(g.label)}${a.pending ? ' · tentativa' : ''}</div>
+          <div class="agc-reason">${esc(a.reason ?? '')}</div>
+          <div class="agc-meta">Calidad ${a.quality}/100${a.rr != null ? ` · Riesgo/Beneficio ${a.rr}:1` : ''}${a.confluences?.length ? ` · nivel confluente con ${esc(a.confluences.join(', '))}` : ''}</div>
+        </div>
+      </div>
+      <div class="agc-factors">${ordered.map(factorRow).join('')}</div>
+      <div class="agc-foot">El grado combina, con distinto peso, la reversión del precio, el filtro de tendencia, el volumen, la confluencia del nivel y el riesgo/beneficio — no es una recomendación, es cuán alineadas están las señales técnicas ahora.</div>
+    </div>`;
 }
 let alertsEnabled = lsGetSafe('icp_alerts_enabled', '0') === '1';
 const lastAlertByTicker = {}; // ticker -> 'buy'|'sell'|'stop'|null, para notificar solo en la transición
@@ -321,7 +367,8 @@ function notifyIfNewAlert(ticker, priceAlert) {
   logAlertHistory(ticker, curr, priceAlert.confidence, priceAlert.confirmations);
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   const meta = ALERT_META[curr];
-  new Notification(`${ticker}: ${meta.label}`, { body: `Investment Copilot AI — confianza ${priceAlert.confidence} (${priceAlert.confirmations.join(', ')})`, tag: `icp-${ticker}` });
+  const gradeTxt = priceAlert.grade ? `grado ${priceAlert.grade}${priceAlert.rr != null ? ` · R:R ${priceAlert.rr}` : ''}` : `confianza ${priceAlert.confidence}`;
+  new Notification(`${ticker}: ${meta.label} (${gradeTxt})`, { body: `Investment Copilot AI — ${priceAlert.reason || priceAlert.confirmations.join(', ')}`, tag: `icp-${ticker}` });
 }
 
 /** Ruptura de estructura (BOS/CHoCH, ver marketStructure en indicators.js):
@@ -1792,6 +1839,8 @@ function renderReportImpl() {
       </div>
     </div>
 
+    ${alertGradeCardHTML(priceAlert)}
+
     ${sectionTitleHTML('Conclusión', 'check')}
     <div class="card conclusion-card">
       <div class="conclusion-text">${esc(conclusionText(r))}</div>
@@ -2593,7 +2642,11 @@ function dashboardHTML() {
   const loadingCount = DASHBOARD_UNIVERSE.length - loaded.length;
 
   const opportunities = loaded.slice().sort((a, b) => b.d.score - a.d.score).slice(0, 6);
-  const buyZone = loaded.filter(e => e.d.alert?.type === 'buy').sort((a, b) => b.d.score - a.d.score).slice(0, 6);
+  // Zona de compra ordenada por GRADO (A antes que C), luego por score — así
+  // las zonas de mayor calidad aparecen primero, no solo las de mayor score.
+  const buyZone = loaded.filter(e => e.d.alert?.type === 'buy')
+    .sort((a, b) => (a.d.alert.gradeRank ?? 3) - (b.d.alert.gradeRank ?? 3) || b.d.score - a.d.score)
+    .slice(0, 6);
 
   const bySignal = {};
   for (const e of loaded) bySignal[e.d.scoreLabel] = (bySignal[e.d.scoreLabel] || 0) + 1;
