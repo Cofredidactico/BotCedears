@@ -640,6 +640,38 @@ Limpieza: se eliminó el ticker muerto **SQ** (Block cotiza como **XYZ** desde
 enero 2025; el CEDEAR en BYMA también es XYZ) y se sumó **BMNR** al set de
 activos relacionados con cripto (tesorería de ETH).
 
+## Dashboard 2.0: distribución bento + rework visual (7 mejoras)
+
+El Dashboard dejó de ser una columna larga y pasó a un layout de terminal:
+
+- **Layout bento (2 columnas)**: cada sección es una tarjeta en una grilla
+  (`dash-bento`). Los widgets "pesados" (grids de cards, tablas) ocupan el ancho
+  completo; los compactos (Idea del Día ⬌ Qué Mirar Hoy, Watchlist ⬌ Portfolio,
+  Amplitud ⬌ Heatmap) se emparejan lado a lado. En mobile vuelve a una columna.
+- **Sub-navegación con chips sticky**: una barra fija bajo el hero con un chip
+  por sección; clic → scroll suave, y la sección visible se resalta al
+  scrollear (scroll-spy con IntersectionObserver).
+- **Secciones colapsables**: cada cabecera pliega/despliega su widget (chevron),
+  con el estado guardado en el navegador — complementa el "Personalizar".
+- **Hero unificado con el Clima**: el veredicto ☀️/⛅/🌧️ risk-on ahora vive
+  dentro del hero, junto a las stats y la cinta de índices — un solo panel de
+  apertura en vez de dos bloques.
+- **Cards de oportunidad v2**: nueva jerarquía — precio grande, sparkline
+  protagonista con gradiente, **anillo de score** (conic-gradient) en la
+  esquina, badge de convicción, y elevación + sombra de acento al pasar el
+  mouse.
+- **Cabeceras con acento de color por zona**: verde (oportunidades), celeste
+  (Argentina), naranja (cripto), violeta (mercado), ámbar (agenda), azul
+  (amplitud) — ubicación instantánea al scrollear, con línea y degradado sutil.
+- **Micro-animaciones de entrada**: fade-in escalonado de las tarjetas del
+  bento en la primera carga (respeta `prefers-reduced-motion` y no se repite en
+  los refrescos de fondo, para no titilar).
+
+Refactor interno: el sistema de widgets se unificó en un registro
+(`DASH_WIDGETS` con ícono/acento/ancho) + un despachador de cuerpos
+(`dashWidgetBody`) envueltos por `dashWidgetWrapper` — Watchlist y Portfolio
+también entraron al bento y a "Personalizar".
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

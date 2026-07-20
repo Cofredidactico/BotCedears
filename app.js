@@ -103,20 +103,23 @@ const dashState = { data: {}, loading: new Set(), started: false, macro: null, c
 const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
 
 /* ───────────────────────── dashboard personalizable ───────────────────────── */
+// Cada widget declara su ícono, color de acento (para la cabecera) y si ocupa
+// el ancho completo del bento (tablas/grids grandes) o media columna.
 const DASH_WIDGETS = [
-  { key: 'idea', label: 'Idea del Día' },
-  { key: 'agenda', label: 'Qué Mirar Hoy' },
-  { key: 'opportunities', label: 'Oportunidades del Día' },
-  { key: 'buyzone', label: 'En Zona de Compra Ahora' },
-  { key: 'breadth', label: 'Amplitud del Mercado' },
-  { key: 'movers', label: 'Destacados del Día' },
-  { key: 'argentina', label: 'Panel Argentina' },
-  { key: 'cripto', label: 'Termómetro Cripto' },
-  { key: 'heatmap', label: 'Heatmap Sectorial' },
-  { key: 'radar', label: 'Radar del Mercado' },
-  { key: 'watchlist', label: 'Watchlist Rápido' },
-  { key: 'portfolio', label: 'Mi Portfolio' },
+  { key: 'idea', label: 'Idea del Día', icon: 'zap', accent: 'violet', full: false },
+  { key: 'agenda', label: 'Qué Mirar Hoy', icon: 'target', accent: 'amber', full: false },
+  { key: 'opportunities', label: 'Oportunidades del Día', icon: 'trend', accent: 'green', full: true },
+  { key: 'buyzone', label: 'En Zona de Compra Ahora', icon: 'target', accent: 'green', full: true },
+  { key: 'breadth', label: 'Amplitud del Mercado', icon: 'radar', accent: 'blue', full: false },
+  { key: 'movers', label: 'Destacados del Día', icon: 'trend', accent: 'blue', full: true },
+  { key: 'argentina', label: 'Panel Argentina', icon: 'flag', accent: 'cyan', full: true },
+  { key: 'cripto', label: 'Termómetro Cripto', icon: 'zap', accent: 'orange', full: true },
+  { key: 'heatmap', label: 'Heatmap Sectorial', icon: 'grid', accent: 'violet', full: false },
+  { key: 'radar', label: 'Radar del Mercado', icon: 'radar', accent: 'violet', full: true },
+  { key: 'watchlist', label: 'Watchlist Rápido', icon: 'bookmark', accent: 'violet', full: false },
+  { key: 'portfolio', label: 'Mi Portfolio', icon: 'briefcase', accent: 'green', full: false },
 ];
+const DASH_ACCENTS = { violet: 'oklch(0.70 0.19 291)', green: 'oklch(0.76 0.18 152)', amber: 'oklch(0.75 0.15 70)', blue: 'oklch(0.72 0.15 250)', cyan: 'oklch(0.75 0.12 210)', orange: 'oklch(0.72 0.16 55)' };
 const DASH_WIDGET_KEYS = DASH_WIDGETS.map(w => w.key);
 function loadDashWidgetOrder() {
   const saved = lsGetSafe('icp_dash_order', '').split(',').filter(k => DASH_WIDGET_KEYS.includes(k));
@@ -126,11 +129,15 @@ function loadDashWidgetOrder() {
 function loadDashWidgetHidden() {
   return new Set(lsGetSafe('icp_dash_hidden', '').split(',').filter(k => DASH_WIDGET_KEYS.includes(k)));
 }
-const dashWidgetState = { order: loadDashWidgetOrder(), hidden: loadDashWidgetHidden(), customizeOpen: false };
+function loadDashWidgetCollapsed() {
+  return new Set(lsGetSafe('icp_dash_collapsed', '').split(',').filter(k => DASH_WIDGET_KEYS.includes(k)));
+}
+const dashWidgetState = { order: loadDashWidgetOrder(), hidden: loadDashWidgetHidden(), collapsed: loadDashWidgetCollapsed(), customizeOpen: false, animated: false };
 function saveDashWidgetState() {
   lsSetSafe('icp_dash_order', dashWidgetState.order.join(','));
   lsSetSafe('icp_dash_hidden', [...dashWidgetState.hidden].join(','));
 }
+function saveDashCollapsed() { lsSetSafe('icp_dash_collapsed', [...dashWidgetState.collapsed].join(',')); }
 
 /* ───────────────────────── portfolio advisor ───────────────────────── */
 const portState = {
@@ -2335,22 +2342,33 @@ function dashCardHTML(ticker, d) {
   const up = d.changePct >= 0;
   const sig = scoreLabelColor(d.scoreLabel);
   const am = d.alert ? ALERT_META[d.alert.type] : null;
-  // Badge de convicción: solo se muestra cuando es alta o media (una señal
-  // débil no aporta y ensuciaría la tarjeta) — mismo motor que el Portfolio.
+  // Badge de convicción: solo cuando es alta o media (una señal débil no aporta).
   const conv = positionConviction({ d });
   const convBadge = conv && conv.verdict !== 'baja'
-    ? `<div class="watch-conv" style="color:${conv.verdict === 'alta' ? GREEN : AMBER};" title="Convicción ${conv.verdict} (${conv.score}/100): qué tan alineadas están las señales técnicas de este activo hoy">◆ convicción ${esc(conv.verdict)}</div>`
+    ? `<span class="dcv-conv" style="color:${conv.verdict === 'alta' ? GREEN : AMBER};" title="Convicción ${conv.verdict} (${conv.score}/100): qué tan alineadas están las señales técnicas de este activo hoy">◆ ${esc(conv.verdict)}</span>`
     : '';
-  return `<div class="watch-card ${am ? 'has-alert' : ''} ${d.alert?.pending ? 'is-pending' : ''}" data-dash-ticker="${esc(ticker)}" style="${am ? `border-color:${am.color};` : ''}">
-    <div class="watch-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
-    <div class="watch-name">${esc(d.name ?? '')}</div>
-    <div class="watch-price">${fmtUsd(d.price)}</div>
-    <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
-    ${sparklineSVG(d.sparkline, up)}
-    <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
-    ${convBadge}
-    ${d.highlight ? `<div class="watch-highlight">${esc(d.highlight)}</div>` : ''}
-    ${am ? `<div class="watch-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
+  const ringDeg = Math.max(0, Math.min(100, d.score)) * 3.6;
+  return `<div class="dash-card ${am ? 'has-alert' : ''} ${d.alert?.pending ? 'is-pending' : ''}" data-dash-ticker="${esc(ticker)}" style="${am ? `--card-accent:${am.color};` : `--card-accent:${sig.color};`}">
+    <div class="dcv-head">
+      <div class="dcv-id">
+        <div class="dcv-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
+        <div class="dcv-name">${esc(d.name ?? '')}</div>
+      </div>
+      <div class="dcv-ring" style="background:conic-gradient(${sig.color} ${ringDeg}deg, var(--surface-2, rgba(255,255,255,0.08)) 0deg);" title="${esc(d.scoreLabel)} · score ${d.score}/100">
+        <span>${d.score}</span>
+      </div>
+    </div>
+    <div class="dcv-pricerow">
+      <span class="dcv-price">${fmtUsd(d.price)}</span>
+      <span class="dcv-change ${up ? 'up' : 'down'}">${up ? '▲' : '▼'} ${fmtPct(d.changePct)}</span>
+    </div>
+    <div class="dcv-spark">${sparklineSVG(d.sparkline, up)}</div>
+    <div class="dcv-sigrow">
+      <span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)}</span>
+      ${convBadge}
+    </div>
+    ${d.highlight ? `<div class="dcv-highlight">${esc(d.highlight)}</div>` : ''}
+    ${am ? `<div class="dcv-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
   </div>`;
 }
 
@@ -2465,27 +2483,6 @@ function infoTip(text) {
 }
 
 /* ── tarjetas del contexto de mercado ── */
-function climateCardHTML(climate) {
-  if (!climate) return '';
-  return `
-    <div class="card climate-card climate-${climate.tone}">
-      <div class="climate-main">
-        <div class="climate-icon">${climate.icon}</div>
-        <div class="climate-text">
-          <div class="climate-verdict">${esc(climate.verdict)} ${infoTip('Lectura de sentimiento que combina amplitud del universo, VIX, tendencia del S&P 500 y Fear&Greed. No es una predicción.')}</div>
-          <div class="climate-sub">${esc(climate.sub)}</div>
-        </div>
-        <div class="climate-gauge">
-          <div class="climate-gauge-val">${climate.score}</div>
-          <div class="climate-gauge-lbl">risk-on</div>
-        </div>
-      </div>
-      <div class="climate-factors">
-        ${climate.factors.map(f => `<span class="climate-chip ${f.good ? 'good' : 'bad'}">${f.good ? '✓' : '✕'} ${f.t}</span>`).join('')}
-      </div>
-    </div>`;
-}
-
 function breadthRingHTML(label, frac, note) {
   if (frac == null) return '';
   const pct = Math.round(frac * 100);
@@ -2500,11 +2497,10 @@ function breadthRingHTML(label, frac, note) {
     </div>`;
 }
 
-function marketBreadthWidgetHTML(loaded) {
+function marketBreadthWidgetBody(loaded) {
   const b = marketBreadth(loaded);
-  if (!b) return `${sectionTitleHTML('Amplitud del Mercado', 'radar')}<div class="card watch-empty">Cargando universo curado…</div>`;
+  if (!b) return `<div class="card watch-empty">Cargando universo curado…</div>`;
   return `
-    ${sectionTitleHTML('Amplitud del Mercado', 'radar')}
     <div class="dash-intro" style="margin-bottom:14px;">Qué proporción del universo curado está fuerte por dentro. Un mercado sano sube con amplitud (muchos activos acompañando), no apoyado en unos pocos. ${infoTip('Porcentaje de los activos del universo que cumplen cada condición sobre sus propios cierres reales.')}</div>
     <div class="card breadth-card">
       <div class="breadth-grid">
@@ -2520,10 +2516,9 @@ function marketBreadthWidgetHTML(loaded) {
     </div>`;
 }
 
-function agendaWidgetHTML(loaded) {
+function agendaWidgetBody(loaded) {
   const items = marketAgenda(loaded);
   return `
-    ${sectionTitleHTML('Qué Mirar Hoy', 'target')}
     <div class="dash-intro" style="margin-bottom:14px;">Los movimientos accionables del universo curado ahora mismo: entradas y salidas de zona, gaps de apertura y setups de trade corto. ${infoTip('Se arma con las señales ya calculadas de cada activo — clic en cualquier fila para ver su informe.')}</div>
     ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : !items.length ? `<div class="card watch-empty">Sin movimientos destacados en el universo por ahora — mercado tranquilo.</div>` : `
     <div class="card agenda-card">
@@ -2535,14 +2530,13 @@ function agendaWidgetHTML(loaded) {
     </div>`}`;
 }
 
-function ideaWidgetHTML(loaded) {
+function ideaWidgetBody(loaded) {
   const idea = ideaOfTheDay(loaded);
-  if (!loaded.length) return `${sectionTitleHTML('Idea del Día', 'zap')}<div class="card watch-empty">Cargando universo curado…</div>`;
-  if (!idea) return `${sectionTitleHTML('Idea del Día', 'zap')}<div class="card watch-empty">No hay una oportunidad de convicción alta en el universo hoy — no forzamos una idea si el mercado no la ofrece.</div>`;
+  if (!loaded.length) return `<div class="card watch-empty">Cargando universo curado…</div>`;
+  if (!idea) return `<div class="card watch-empty">No hay una oportunidad de convicción alta en el universo hoy — no forzamos una idea si el mercado no la ofrece.</div>`;
   const d = idea.d, pr = d.planRaw;
   const col = idea.conv.verdict === 'alta' ? GREEN : AMBER;
   return `
-    ${sectionTitleHTML('Idea del Día', 'zap')}
     <div class="card idea-card" data-dash-ticker="${esc(idea.ticker)}">
       <div class="idea-head">
         <div>
@@ -2566,7 +2560,7 @@ function ideaWidgetHTML(loaded) {
     </div>`;
 }
 
-function moversWidgetHTML(loaded) {
+function moversWidgetBody(loaded) {
   const byChange = loaded.slice().sort((a, b) => b.d.changePct - a.d.changePct);
   const gainers = byChange.slice(0, 3), losers = byChange.slice(-3).reverse();
   const moverRow = (e, up) => `
@@ -2579,7 +2573,6 @@ function moversWidgetHTML(loaded) {
       ${e.d.highlight ? `<div class="mover-why">${esc(e.d.highlight)}</div>` : ''}
     </div>`;
   return `
-    ${sectionTitleHTML('Destacados del Día', 'trend')}
     <div class="dash-intro" style="margin-bottom:14px;">Las mayores subas y bajas del universo, con el motivo técnico de cada una. ${infoTip('% del día, mini-gráfico de los últimos ~30 cierres y el titular técnico ya calculado.')}</div>
     ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `
     <div class="movers-cols">
@@ -2663,148 +2656,223 @@ function dashboardHTML() {
         ${tape.map(t => `<div class="dash-tape-item"><span class="dash-tape-label">${esc(t.label)}</span><span class="dash-tape-chg ${t.changePct >= 0 ? 'up' : 'down'}">${fmtPct(t.changePct)}</span></div>`).join('')}
         ${cclVal != null ? `<div class="dash-tape-item"><span class="dash-tape-label">Dólar CCL</span><span class="dash-tape-chg">${fmtArs(cclVal)}${cclChg != null ? ` <span class="${cclChg >= 0 ? 'up' : 'down'}">${fmtPct(cclChg)}</span>` : ''}</span></div>` : ''}
       </div>` : ''}
-      <div class="dash-hero-stats">
-        ${heroStat(`${loaded.length}/${DASHBOARD_UNIVERSE.length}`, 'Activos en vivo')}
-        ${heroStat(buyZone.length, 'En zona de compra', false, 'Activos cuyo precio está en zona de compra según el análisis técnico (mismo criterio que las alertas).')}
-        ${heroStat(avgScore ?? '—', 'Score promedio', false, 'Promedio del score compuesto (0-100) de todo el universo curado. Arriba de 55 es sesgo comprador.')}
-        ${heroStat(esc(topSignal ?? '—'), 'Señal dominante', true)}
+      <div class="dash-hero-main">
+        <div class="dash-hero-stats">
+          ${heroStat(`${loaded.length}/${DASHBOARD_UNIVERSE.length}`, 'Activos en vivo')}
+          ${heroStat(buyZone.length, 'En zona de compra', false, 'Activos cuyo precio está en zona de compra según el análisis técnico (mismo criterio que las alertas).')}
+          ${heroStat(avgScore ?? '—', 'Score promedio', false, 'Promedio del score compuesto (0-100) de todo el universo curado. Arriba de 55 es sesgo comprador.')}
+          ${heroStat(esc(topSignal ?? '—'), 'Señal dominante', true)}
+        </div>
+        ${climate ? dashHeroClimateHTML(climate) : ''}
       </div>
     </div>
     ${sectionTitleHTML('Dashboard', 'grid')}
     <div class="dash-intro">Oportunidades del día y radar del mercado sobre un universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos (acciones US, CEDEARs argentinos, ETFs y cripto) — no es todo el universo buscable, para no exceder el límite de requests del proveedor de datos gratuito. Elegí cualquiera para ver el informe completo, o buscá otro activo arriba.</div>
 
-    ${climate ? climateCardHTML(climate) : ''}
+    ${dashChipsHTML()}
 
     ${dashCustomizeButtonHTML()}
     ${dashWidgetState.customizeOpen ? dashCustomizePanelHTML() : ''}
 
-    ${(() => {
-      const widgetHtml = {
-        idea: ideaWidgetHTML(loaded),
-        agenda: agendaWidgetHTML(loaded),
-        breadth: marketBreadthWidgetHTML(loaded),
-        movers: moversWidgetHTML(loaded),
-        opportunities: `
-          ${sectionTitleHTML('Oportunidades del Día', 'trend', 'margin-top:28px;')}
-          ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
-          ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}
-        `,
-        buyzone: `
-          ${sectionTitleHTML('En Zona de Compra Ahora', 'target')}
-          <div class="dash-intro" style="margin-bottom:14px;">Activos del universo curado cuyo precio está, ahora mismo, en zona de compra o recién rompió el soporte según el análisis técnico (mismo criterio que las alertas de Seguimiento) — no es una recomendación, es dónde está el precio respecto al plan operativo de cada uno.</div>
-          ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : !buyZone.length ? `<div class="card watch-empty">Ningún activo del universo curado está en zona de compra en este momento.</div>` : `<div class="watch-grid">${buyZone.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
-        `,
-        argentina: (() => {
-          const arRows = loaded.filter(e => AR_TICKERS.has(e.ticker)).sort((a, b) => b.d.changePct - a.d.changePct);
-          const rp = dashState.macro?.riesgoPaisArg;
-          const cclRef = dashState.ccl?.value ?? arRows.find(e => e.d.cclRef)?.d.cclRef ?? null;
-          return `
-          ${sectionTitleHTML('Panel Argentina', 'flag')}
-          <div class="dash-intro" style="margin-bottom:14px;">Todas las empresas argentinas con cotización real en NYSE/Nasdaq (análisis sobre el ADR en USD, precio local BYMA en vivo cuando está disponible).${rp != null ? ` Riesgo país: <strong>${Math.round(rp)} pb</strong>.` : ''}${cclRef ? ` CCL de referencia: <strong>${fmtArs(cclRef)}</strong>.` : ''} El "dólar implícito" es a cuánto está comprando dólar quien paga el precio en pesos de cada papel — si está muy por encima del CCL, el papel está caro en pesos hoy.</div>
-          ${!arRows.length ? `<div class="card watch-empty">Cargando panel argentino…</div>` : `
-          <div class="card bt-table-card">
-            <div class="bt-table-wrap">
-              <table class="bt-table">
-                <thead><tr><th>Ticker</th><th>USD</th><th>% día</th><th>ARS (BYMA)</th><th>Dólar implícito</th><th>Señal</th></tr></thead>
-                <tbody>
-                  ${arRows.map(({ ticker, d }) => {
-                    const sig = scoreLabelColor(d.scoreLabel);
-                    const spread = d.cclImplied != null && cclRef ? (d.cclImplied / cclRef - 1) * 100 : null;
-                    return `<tr class="port-row" data-dash-ticker="${esc(ticker)}">
-                      <td class="bt-label-cell" style="font-weight:700;">${esc(ticker)} <span class="port-pnl-abs">${esc(d.name)}</span></td>
-                      <td>${fmtUsd(d.price)}</td>
-                      <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
-                      <td>${d.cedearArs != null ? `${fmtArs(d.cedearArs)} ${d.cedearSource === 'live' ? '●' : '≈'}` : '—'}</td>
-                      <td>${d.cclImplied != null ? `${fmtArs(d.cclImplied)}${spread != null ? ` <span class="${Math.abs(spread) < 1.5 ? 'bt-nd' : spread > 0 ? 'bt-neg' : 'bt-pos'}" title="Diferencia vs CCL de referencia — positivo: caro en pesos; negativo: barato en pesos">(${spread >= 0 ? '+' : ''}${spread.toFixed(1)}%)</span>` : ''}` : '—'}
-                      <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</span></td>
-                    </tr>`;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
-          </div>`}
-        `;
-        })(),
-        cripto: (() => {
-          const rows = loaded.filter(e => CRYPTO_RELATED.has(e.ticker));
-          const btc = dashState.data['BTC'];
-          const ordered = rows.slice().sort((a, b) => (a.ticker === 'BTC' ? -1 : b.ticker === 'BTC' ? 1 : b.d.score - a.d.score));
-          return `
-          ${sectionTitleHTML('Termómetro Cripto', 'zap')}
-          <div class="dash-intro" style="margin-bottom:14px;">Bitcoin/Ethereum, los CEDEARs de empresas cripto que operan en BYMA (MSTR, RIOT, HUT, IREN) y los ETFs spot. La correlación y el beta vs BTC (últimas ~220 ruedas) miden cuánto amplifica cada acción los movimientos de bitcoin — beta 2 significa que históricamente se movió ~2% por cada 1% de BTC.</div>
-          ${!ordered.length ? `<div class="card watch-empty">Cargando activos cripto…</div>` : `
-          <div class="card bt-table-card">
-            <div class="bt-table-wrap">
-              <table class="bt-table">
-                <thead><tr><th>Activo</th><th>Precio</th><th>% día</th><th>Correlación vs BTC</th><th>Beta vs BTC</th><th>Señal</th></tr></thead>
-                <tbody>
-                  ${ordered.map(({ ticker, d }) => {
-                    const sig = scoreLabelColor(d.scoreLabel);
-                    const cb = ticker !== 'BTC' && btc?.closes && d.closes ? correlationAndBeta(d.closes, btc.closes) : null;
-                    return `<tr class="port-row" data-dash-ticker="${esc(ticker)}">
-                      <td class="bt-label-cell" style="font-weight:700;">${esc(ticker)} <span class="port-pnl-abs">${esc(d.name)}</span></td>
-                      <td>${fmtUsd(d.price)}</td>
-                      <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
-                      <td>${ticker === 'BTC' ? '<span class="bt-nd">—</span>' : cb?.correlation != null ? cb.correlation.toFixed(2) : '<span class="bt-nd">N/D</span>'}</td>
-                      <td>${ticker === 'BTC' ? '<span class="bt-nd">—</span>' : cb?.beta != null ? `<span class="${Math.abs(cb.beta) >= 1.5 ? 'bt-neg' : ''}">${cb.beta.toFixed(2)}</span>` : '<span class="bt-nd">N/D</span>'}</td>
-                      <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</span></td>
-                    </tr>`;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
-          </div>`}
-        `;
-        })(),
-        heatmap: `
-          ${sectionTitleHTML('Heatmap Sectorial', 'grid')}
-          <div class="dash-intro" style="margin-bottom:14px;">Performance promedio del día por sector, sobre el mismo universo curado — panorama de rotación sectorial de un vistazo (qué sectores lideran/rezagan hoy, no el score).</div>
-          ${!heatmapRows.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `
-          <div class="heatmap-grid">
-            ${heatmapRows.map(s => {
-              const pct = clampNum(s.avgChange, -5, 5);
-              const intensity = Math.min(1, Math.abs(pct) / 5);
-              const bg = s.avgChange >= 0 ? `oklch(${0.30 + intensity * 0.12} ${0.05 + intensity * 0.10} 152)` : `oklch(${0.30 + intensity * 0.12} ${0.05 + intensity * 0.12} 23)`;
-              const fg = s.avgChange >= 0 ? `oklch(${0.80 + intensity * 0.08} ${0.10 + intensity * 0.08} 152)` : `oklch(${0.80 + intensity * 0.08} ${0.10 + intensity * 0.08} 23)`;
-              return `<div class="heatmap-cell" style="background:${bg}; color:${fg};">
-                <div class="heatmap-cell-sector">${esc(s.sector)}</div>
-                <div class="heatmap-cell-pct">${s.avgChange >= 0 ? '+' : ''}${s.avgChange.toFixed(1)}%</div>
-                <div class="heatmap-cell-count">${s.count} activo${s.count === 1 ? '' : 's'}</div>
-              </div>`;
-            }).join('')}
-          </div>`}
-        `,
-        radar: `
-          ${sectionTitleHTML('Radar del Mercado', 'radar')}
-          <div class="dash-radar-grid">
-            <div class="card dash-radar-card">
-              <div class="dash-radar-title">Señales</div>
-              ${['Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'].map(label => {
-                const sig = scoreLabelColor(label);
-                return `<div class="dash-radar-row"><span class="dash-radar-dot" style="background:${sig.color};"></span><span class="dash-radar-label">${label}</span><span class="dash-radar-count">${bySignal[label] || 0}</span></div>`;
-              }).join('')}
-            </div>
-            <div class="card dash-radar-card">
-              <div class="dash-radar-title">Score promedio por sector</div>
-              ${sectorRows.length ? sectorRows.map(s => radarRow(esc(s.sector), s.avg)).join('') : '<div class="dash-loading-note">Cargando…</div>'}
-            </div>
-            <div class="card dash-radar-card">
-              <div class="dash-radar-title">Mayores subas</div>
-              ${gainers.length ? gainers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count up">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
-            </div>
-            <div class="card dash-radar-card">
-              <div class="dash-radar-title">Mayores bajas</div>
-              ${losers.length ? losers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count down">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
-            </div>
-          </div>
-        `,
-      };
-      return dashWidgetState.order
-        .filter(k => widgetHtml[k] && !dashWidgetState.hidden.has(k))
-        .map(k => widgetHtml[k]).join('');
-    })()}
+    ${dashBentoHTML({ loaded, opportunities, buyZone, loadingCount, heatmapRows, sectorRows, bySignal, gainers, losers })}`;
+}
 
-    ${dashBottomWidgetsHTML()}`;
+/* ── Bento del Dashboard: cada widget va en una tarjeta con cabecera de acento,
+ *    plegable, y con anclaje para los chips de navegación. Los widgets "full"
+ *    ocupan las dos columnas; los demás se empaquetan de a dos. ── */
+function dashVisibleWidgets() {
+  return dashWidgetState.order
+    .map(k => DASH_WIDGETS.find(w => w.key === k))
+    .filter(w => w && !dashWidgetState.hidden.has(w.key));
+}
+
+function dashChipsHTML() {
+  const widgets = dashVisibleWidgets();
+  if (!widgets.length) return '';
+  return `<div class="dash-chips" id="dash-chips">
+    ${widgets.map(w => `<button class="dash-chip" data-chip="${w.key}" style="--chip-accent:${DASH_ACCENTS[w.accent]}">${esc(w.label)}</button>`).join('')}
+  </div>`;
+}
+
+function dashBentoHTML(ctx) {
+  const widgets = dashVisibleWidgets();
+  if (!widgets.length) return '<div class="card watch-empty">No hay secciones visibles — activá alguna desde "Personalizar Dashboard".</div>';
+  const animate = ctx.loaded.length > 0 && !dashWidgetState.animated;
+  if (animate) dashWidgetState.animated = true;
+  return `<div class="dash-bento ${animate ? 'dash-bento-animate' : ''}">
+    ${widgets.map((w, i) => dashWidgetWrapper(w, ctx, i)).join('')}
+  </div>`;
+}
+
+function dashWidgetWrapper(w, ctx, i) {
+  const body = dashWidgetBody(w.key, ctx);
+  if (body == null) return '';
+  const collapsed = dashWidgetState.collapsed.has(w.key);
+  const accent = DASH_ACCENTS[w.accent] ?? DASH_ACCENTS.violet;
+  return `
+    <section class="dash-widget accent-${w.accent} ${w.full ? 'is-full' : ''} ${collapsed ? 'is-collapsed' : ''}" id="dash-w-${w.key}" data-widget-key="${w.key}" style="--accent:${accent}; ${i < 10 ? `--stagger:${i * 55}ms` : ''}">
+      <div class="dash-widget-head" data-widget-collapse="${w.key}">
+        <div class="dash-widget-title">${ICONS[w.icon] ?? ''}<span>${esc(w.label)}</span></div>
+        <button class="dash-widget-chevron" aria-expanded="${!collapsed}" aria-label="Plegar o desplegar ${esc(w.label)}" tabindex="-1">▾</button>
+      </div>
+      <div class="dash-widget-body">${body}</div>
+    </section>`;
+}
+
+/** Cuerpo (sin título — lo pone el wrapper) de cada widget del Dashboard. */
+function dashWidgetBody(key, ctx) {
+  const { loaded, opportunities, buyZone, loadingCount, heatmapRows, sectorRows, bySignal, gainers, losers } = ctx;
+  switch (key) {
+    case 'idea': return ideaWidgetBody(loaded);
+    case 'agenda': return agendaWidgetBody(loaded);
+    case 'breadth': return marketBreadthWidgetBody(loaded);
+    case 'movers': return moversWidgetBody(loaded);
+    case 'opportunities': return `
+      ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
+      ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}`;
+    case 'buyzone': return `
+      <div class="dash-intro" style="margin-bottom:14px;">Activos del universo curado cuyo precio está, ahora mismo, en zona de compra o recién rompió el soporte según el análisis técnico (mismo criterio que las alertas de Seguimiento) — no es una recomendación, es dónde está el precio respecto al plan operativo de cada uno.</div>
+      ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : !buyZone.length ? `<div class="card watch-empty">Ningún activo del universo curado está en zona de compra en este momento.</div>` : `<div class="watch-grid">${buyZone.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}`;
+    case 'argentina': {
+      const arRows = loaded.filter(e => AR_TICKERS.has(e.ticker)).sort((a, b) => b.d.changePct - a.d.changePct);
+      const rp = dashState.macro?.riesgoPaisArg;
+      const cclRef = dashState.ccl?.value ?? arRows.find(e => e.d.cclRef)?.d.cclRef ?? null;
+      return `
+      <div class="dash-intro" style="margin-bottom:14px;">Todas las empresas argentinas con cotización real en NYSE/Nasdaq (análisis sobre el ADR en USD, precio local BYMA en vivo cuando está disponible).${rp != null ? ` Riesgo país: <strong>${Math.round(rp)} pb</strong>.` : ''}${cclRef ? ` CCL de referencia: <strong>${fmtArs(cclRef)}</strong>.` : ''} El "dólar implícito" es a cuánto está comprando dólar quien paga el precio en pesos de cada papel — si está muy por encima del CCL, el papel está caro en pesos hoy.</div>
+      ${!arRows.length ? `<div class="card watch-empty">Cargando panel argentino…</div>` : `
+      <div class="card bt-table-card">
+        <div class="bt-table-wrap">
+          <table class="bt-table">
+            <thead><tr><th>Ticker</th><th>USD</th><th>% día</th><th>ARS (BYMA)</th><th>Dólar implícito</th><th>Señal</th></tr></thead>
+            <tbody>
+              ${arRows.map(({ ticker, d }) => {
+                const sig = scoreLabelColor(d.scoreLabel);
+                const spread = d.cclImplied != null && cclRef ? (d.cclImplied / cclRef - 1) * 100 : null;
+                return `<tr class="port-row" data-dash-ticker="${esc(ticker)}">
+                  <td class="bt-label-cell" style="font-weight:700;">${esc(ticker)} <span class="port-pnl-abs">${esc(d.name)}</span></td>
+                  <td>${fmtUsd(d.price)}</td>
+                  <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
+                  <td>${d.cedearArs != null ? `${fmtArs(d.cedearArs)} ${d.cedearSource === 'live' ? '●' : '≈'}` : '—'}</td>
+                  <td>${d.cclImplied != null ? `${fmtArs(d.cclImplied)}${spread != null ? ` <span class="${Math.abs(spread) < 1.5 ? 'bt-nd' : spread > 0 ? 'bt-neg' : 'bt-pos'}" title="Diferencia vs CCL de referencia — positivo: caro en pesos; negativo: barato en pesos">(${spread >= 0 ? '+' : ''}${spread.toFixed(1)}%)</span>` : ''}` : '—'}
+                  <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</span></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`}`;
+    }
+    case 'cripto': {
+      const rows = loaded.filter(e => CRYPTO_RELATED.has(e.ticker));
+      const btc = dashState.data['BTC'];
+      const ordered = rows.slice().sort((a, b) => (a.ticker === 'BTC' ? -1 : b.ticker === 'BTC' ? 1 : b.d.score - a.d.score));
+      return `
+      <div class="dash-intro" style="margin-bottom:14px;">Bitcoin/Ethereum, los CEDEARs de empresas cripto que operan en BYMA (MSTR, RIOT, HUT, IREN) y los ETFs spot. La correlación y el beta vs BTC (últimas ~220 ruedas) miden cuánto amplifica cada acción los movimientos de bitcoin — beta 2 significa que históricamente se movió ~2% por cada 1% de BTC.</div>
+      ${!ordered.length ? `<div class="card watch-empty">Cargando activos cripto…</div>` : `
+      <div class="card bt-table-card">
+        <div class="bt-table-wrap">
+          <table class="bt-table">
+            <thead><tr><th>Activo</th><th>Precio</th><th>% día</th><th>Correlación vs BTC</th><th>Beta vs BTC</th><th>Señal</th></tr></thead>
+            <tbody>
+              ${ordered.map(({ ticker, d }) => {
+                const sig = scoreLabelColor(d.scoreLabel);
+                const cb = ticker !== 'BTC' && btc?.closes && d.closes ? correlationAndBeta(d.closes, btc.closes) : null;
+                return `<tr class="port-row" data-dash-ticker="${esc(ticker)}">
+                  <td class="bt-label-cell" style="font-weight:700;">${esc(ticker)} <span class="port-pnl-abs">${esc(d.name)}</span></td>
+                  <td>${fmtUsd(d.price)}</td>
+                  <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
+                  <td>${ticker === 'BTC' ? '<span class="bt-nd">—</span>' : cb?.correlation != null ? cb.correlation.toFixed(2) : '<span class="bt-nd">N/D</span>'}</td>
+                  <td>${ticker === 'BTC' ? '<span class="bt-nd">—</span>' : cb?.beta != null ? `<span class="${Math.abs(cb.beta) >= 1.5 ? 'bt-neg' : ''}">${cb.beta.toFixed(2)}</span>` : '<span class="bt-nd">N/D</span>'}</td>
+                  <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</span></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`}`;
+    }
+    case 'heatmap': return `
+      <div class="dash-intro" style="margin-bottom:14px;">Performance promedio del día por sector, sobre el mismo universo curado — panorama de rotación sectorial de un vistazo (qué sectores lideran/rezagan hoy, no el score).</div>
+      ${!heatmapRows.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `
+      <div class="heatmap-grid">
+        ${heatmapRows.map(s => {
+          const pct = clampNum(s.avgChange, -5, 5);
+          const intensity = Math.min(1, Math.abs(pct) / 5);
+          const bg = s.avgChange >= 0 ? `oklch(${0.30 + intensity * 0.12} ${0.05 + intensity * 0.10} 152)` : `oklch(${0.30 + intensity * 0.12} ${0.05 + intensity * 0.12} 23)`;
+          const fg = s.avgChange >= 0 ? `oklch(${0.80 + intensity * 0.08} ${0.10 + intensity * 0.08} 152)` : `oklch(${0.80 + intensity * 0.08} ${0.10 + intensity * 0.08} 23)`;
+          return `<div class="heatmap-cell" style="background:${bg}; color:${fg};">
+            <div class="heatmap-cell-sector">${esc(s.sector)}</div>
+            <div class="heatmap-cell-pct">${s.avgChange >= 0 ? '+' : ''}${s.avgChange.toFixed(1)}%</div>
+            <div class="heatmap-cell-count">${s.count} activo${s.count === 1 ? '' : 's'}</div>
+          </div>`;
+        }).join('')}
+      </div>`}`;
+    case 'radar': {
+      const radarRow = (label, valueHtml) => `<div class="dash-radar-row"><span class="dash-radar-label">${label}</span><span class="dash-radar-count">${valueHtml}</span></div>`;
+      return `
+      <div class="dash-radar-grid">
+        <div class="card dash-radar-card">
+          <div class="dash-radar-title">Señales</div>
+          ${['Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'].map(label => {
+            const sig = scoreLabelColor(label);
+            return `<div class="dash-radar-row"><span class="dash-radar-dot" style="background:${sig.color};"></span><span class="dash-radar-label">${label}</span><span class="dash-radar-count">${bySignal[label] || 0}</span></div>`;
+          }).join('')}
+        </div>
+        <div class="card dash-radar-card">
+          <div class="dash-radar-title">Score promedio por sector</div>
+          ${sectorRows.length ? sectorRows.map(s => radarRow(esc(s.sector), s.avg)).join('') : '<div class="dash-loading-note">Cargando…</div>'}
+        </div>
+        <div class="card dash-radar-card">
+          <div class="dash-radar-title">Mayores subas</div>
+          ${gainers.length ? gainers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count up">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
+        </div>
+        <div class="card dash-radar-card">
+          <div class="dash-radar-title">Mayores bajas</div>
+          ${losers.length ? losers.map(({ ticker, d }) => `<div class="dash-radar-row"><span class="dash-radar-label">${esc(ticker)}</span><span class="dash-radar-count down">${fmtPct(d.changePct)}</span></div>`).join('') : '<div class="dash-loading-note">Cargando…</div>'}
+        </div>
+      </div>`;
+    }
+    case 'watchlist': return dashWatchlistBody();
+    case 'portfolio': return dashPortfolioBody();
+    default: return null;
+  }
+}
+
+function dashHeroClimateHTML(climate) {
+  return `
+    <div class="dash-hero-climate climate-${climate.tone}">
+      <div class="dhc-top">
+        <span class="dhc-icon">${climate.icon}</span>
+        <div>
+          <div class="dhc-verdict">${esc(climate.verdict)} ${infoTip('Lectura de sentimiento que combina amplitud del universo, VIX, tendencia del S&P 500 y Fear&Greed. No es una predicción.')}</div>
+          <div class="dhc-score">${climate.score}<span>/100 risk-on</span></div>
+        </div>
+      </div>
+      <div class="dhc-factors">${climate.factors.slice(0, 3).map(f => `<span class="dhc-chip ${f.good ? 'good' : 'bad'}">${f.good ? '✓' : '✕'} ${f.t}</span>`).join('')}</div>
+    </div>`;
+}
+
+function dashWatchlistBody() {
+  const watchTickers = getWatchlist().slice(0, 6);
+  return `
+    <div class="dash-widget-link-row"><a class="dash-widget-link" data-goto-view="watchlist">Ver Watchlist completa ›</a></div>
+    ${!watchTickers.length ? emptyStateHTML('bookmark', 'Todavía no agregaste activos a tu Watchlist.') : `
+    <div class="watch-grid watch-grid-compact">${watchTickers.map(watchCardHTML).join('')}</div>`}`;
+}
+
+function dashPortfolioBody() {
+  const holdings = getPortfolio();
+  const stats = holdings.length ? computePortfolioStats(holdings) : null;
+  return `
+    <div class="dash-widget-link-row"><a class="dash-widget-link" data-goto-view="portfolio">Ver Portfolio ›</a></div>
+    ${!holdings.length ? emptyStateHTML('briefcase', 'Todavía no cargaste tenencias en Portfolio Advisor.') : `
+    <div class="card port-mini-summary">
+      <div class="port-mini-row"><span class="port-mini-label">Valor total</span><span class="port-mini-value">${fmtUsd(stats.totalValue)}</span></div>
+      ${stats.totalGainUsd != null ? `<div class="port-mini-row"><span class="port-mini-label">Ganancia (costo USD)</span><span class="port-mini-value ${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${fmtUsd(stats.totalGainUsd)}</span></div>` : ''}
+      ${stats.totalGainArs != null ? `<div class="port-mini-row"><span class="port-mini-label">Ganancia (costo ARS)</span><span class="port-mini-value ${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${fmtArs(stats.totalGainArs)}</span></div>` : ''}
+      <div class="port-mini-row"><span class="port-mini-label">Score ponderado</span><span class="port-mini-value">${stats.weightedScore ?? 'N/D'}</span></div>
+      <div class="port-mini-row"><span class="port-mini-label">Posiciones</span><span class="port-mini-value">${holdings.length}</span></div>
+    </div>`}`;
 }
 
 function dashCustomizeButtonHTML() {
@@ -2836,52 +2904,6 @@ function dashCustomizePanelHTML() {
     </div>
     <button class="dash-customize-reset" id="dash-customize-reset">Restablecer orden y visibilidad</button>
   </div>`;
-}
-
-function dashBottomWidgetsHTML() {
-  const watchTickers = getWatchlist().slice(0, 6);
-  const holdings = getPortfolio();
-  const stats = holdings.length ? computePortfolioStats(holdings) : null;
-
-  const blocks = {
-    watchlist: `
-      <div>
-        <div class="panel-header">
-          ${sectionTitleHTML('Watchlist Rápido', 'bookmark', 'margin-bottom:0;')}
-          <a class="dash-widget-link" data-goto-view="watchlist">Ver Watchlist completa ›</a>
-        </div>
-        ${!watchTickers.length ? emptyStateHTML('bookmark', 'Todavía no agregaste activos a tu Watchlist.') : `
-        <div class="watch-grid watch-grid-compact">${watchTickers.map(watchCardHTML).join('')}</div>`}
-      </div>`,
-    portfolio: `
-      <div>
-        <div class="panel-header">
-          ${sectionTitleHTML('Mi Portfolio', 'briefcase', 'margin-bottom:0;')}
-          <a class="dash-widget-link" data-goto-view="portfolio">Ver Portfolio ›</a>
-        </div>
-        ${!holdings.length ? emptyStateHTML('briefcase', 'Todavía no cargaste tenencias en Portfolio Advisor.') : `
-        <div class="card port-mini-summary">
-          <div class="port-mini-row">
-            <span class="port-mini-label">Valor total</span>
-            <span class="port-mini-value">${fmtUsd(stats.totalValue)}</span>
-          </div>
-          ${stats.totalGainUsd != null ? `<div class="port-mini-row"><span class="port-mini-label">Ganancia (costo USD)</span><span class="port-mini-value ${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${fmtUsd(stats.totalGainUsd)}</span></div>` : ''}
-          ${stats.totalGainArs != null ? `<div class="port-mini-row"><span class="port-mini-label">Ganancia (costo ARS)</span><span class="port-mini-value ${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${fmtArs(stats.totalGainArs)}</span></div>` : ''}
-          <div class="port-mini-row">
-            <span class="port-mini-label">Score ponderado</span>
-            <span class="port-mini-value">${stats.weightedScore ?? 'N/D'}</span>
-          </div>
-          <div class="port-mini-row">
-            <span class="port-mini-label">Posiciones</span>
-            <span class="port-mini-value">${holdings.length}</span>
-          </div>
-        </div>`}
-      </div>`,
-  };
-
-  const visible = dashWidgetState.order.filter(k => blocks[k] && !dashWidgetState.hidden.has(k));
-  if (!visible.length) return '';
-  return `<div class="grid2 ${visible.length === 1 ? 'grid2-single' : ''}">${visible.map(k => blocks[k]).join('')}</div>`;
 }
 
 function wireDashboardEvents() {
@@ -2952,6 +2974,40 @@ function wireDashboardEvents() {
     saveDashWidgetState();
     renderReport();
   });
+
+  // Colapsar/expandir cada widget del bento — toggle directo en el DOM (sin
+  // re-render, para que sea instantáneo y no titile), estado persistido.
+  els.report.querySelectorAll('[data-widget-collapse]').forEach(head => {
+    head.addEventListener('click', () => {
+      const key = head.dataset.widgetCollapse;
+      const section = head.closest('.dash-widget');
+      if (!section) return;
+      const collapsed = section.classList.toggle('is-collapsed');
+      const chevron = head.querySelector('.dash-widget-chevron');
+      if (chevron) chevron.setAttribute('aria-expanded', String(!collapsed));
+      if (collapsed) dashWidgetState.collapsed.add(key); else dashWidgetState.collapsed.delete(key);
+      saveDashCollapsed();
+    });
+  });
+
+  // Chips de navegación: clic → scroll a la sección; y resaltado de la sección
+  // visible mientras se scrollea (scroll-spy con IntersectionObserver).
+  const chips = els.report.querySelectorAll('.dash-chip');
+  chips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      const target = document.getElementById('dash-w-' + chip.dataset.chip);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+  if (dashState._io) { try { dashState._io.disconnect(); } catch { /* noop */ } dashState._io = null; }
+  if (chips.length && 'IntersectionObserver' in window) {
+    const setActive = (key) => chips.forEach(c => c.classList.toggle('active', c.dataset.chip === key));
+    dashState._io = new IntersectionObserver((entries) => {
+      const visible = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+      if (visible[0]) setActive(visible[0].target.dataset.widgetKey);
+    }, { rootMargin: '-45% 0px -50% 0px', threshold: [0, 0.25, 0.5] });
+    els.report.querySelectorAll('.dash-widget').forEach(sec => dashState._io.observe(sec));
+  }
 }
 
 /** Página de Screener: filtra/ordena el mismo universo curado del Dashboard
