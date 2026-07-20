@@ -710,6 +710,35 @@ compra" con la nota, el motivo en criollo y el desglose ✓/✕ de cada
 confirmación (marcando las CLAVE). Las notificaciones (browser/Telegram) avisan
 solo en grados A/B e incluyen grado + R:R + motivo.
 
+## Efectivo & Compras inteligentes (liquidez → ideas con sizing por riesgo)
+
+Nueva sección en el Portfolio Advisor (pestaña Operar). El usuario declara el
+**valor total de su cuenta en pesos** y el motor (`computeLiquidityPlan`)
+calcula:
+
+- **Liquidez** = total declarado − valor invertido (toda la cartera valuada al
+  CCL), con una barra de exposición invertido/líquido y sus porcentajes. Avisa
+  si el total ingresado es menor que lo invertido.
+- **Sugerencias de compra de calidad** para esa liquidez, tomadas del **universo
+  curado + tus tenencias**, filtradas por **grado A/B de zona de compra** o
+  señal de compra del motor, y rankeadas por grado + convicción + score +
+  **diversificación** (prefiere sectores poco pesados, penaliza los ya
+  cargados). Cada idea muestra **cuántos CEDEARs comprar, el costo, el peso que
+  quedaría** en la cuenta y **cuánto perdés si toca el stop** (en pesos y % de
+  la cuenta).
+- **Dimensionamiento por riesgo (1R)**: las compras se reparten sin exceder el
+  **tope por posición** de tu perfil de riesgo (Configuración) y el motor
+  calcula el riesgo real de cada compra contra el stop del Plan Operativo
+  (~1% de la cuenta como referencia). Reserva la liquidez que no entra sin
+  pasar el tope.
+- **Reglas de gestión** (colapsable, honestas): cortar pérdidas / dejar correr
+  ganancias, arriesgar poco por operación, diversificar, mantener liquidez, no
+  perseguir. Con disclaimer explícito: **ninguna señal garantiza ganancias** —
+  esto maximiza la ventaja y controla el riesgo.
+
+El valor total de la cuenta se guarda en el navegador. Reemplaza al asignador
+simple anterior ("¿qué compro con AR$X?"), que solo miraba tus tenencias.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente
