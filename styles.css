@@ -1609,6 +1609,43 @@ select.port-input { cursor: pointer; }
 .agc-foot { font-size: 11px; color: var(--text-faint); line-height: 1.5; margin-top: 14px; }
 @media (max-width: 640px) { .agc-factors { grid-template-columns: 1fr; } }
 
+/* ---------- Confiabilidad histórica de la señal (backtest en la alerta) ---------- */
+.reliab-card { padding: 20px 22px; }
+.reliab-lead { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin-bottom: 16px; }
+.reliab-lead strong { color: var(--text); }
+.reliab-bt { margin-bottom: 18px; }
+.reliab-bt-loading { font-size: 12.5px; color: var(--text-mute); font-style: italic; padding: 10px 0; }
+.reliab-bt-note { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; padding: 6px 0; }
+.reliab-agg-note { font-size: 11px; color: var(--text-faint); line-height: 1.5; margin-top: 8px; }
+/* Tiles grandes de la estadística histórica */
+.reliab-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.reliab-tile { padding: 14px 16px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft); box-shadow: var(--hairline); border-left-width: 3px; }
+.reliab-tile-v { font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.05; }
+.reliab-tile-k { font-size: 11px; color: var(--text-dim); margin-top: 6px; font-weight: 600; }
+.reliab-tile-sub { font-size: 10px; color: var(--text-faint); margin-top: 2px; }
+.reliab-tone-good { border-left-color: var(--up); }
+.reliab-tone-good .reliab-tile-v, .reliab-tone-good .reliab-read-v { color: var(--up-text); }
+.reliab-tone-warn { border-left-color: var(--amber); }
+.reliab-tone-warn .reliab-tile-v, .reliab-tone-warn .reliab-read-v { color: var(--amber-text); }
+.reliab-tone-mut { border-left-color: var(--border-strong); }
+.reliab-tone-mut .reliab-tile-v, .reliab-tone-mut .reliab-read-v { color: var(--text); }
+/* Tabla de horizontes */
+.reliab-htable { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 14px; }
+.reliab-htable th { text-align: right; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-mute); padding: 8px 12px; border-bottom: 1px solid var(--border-soft); }
+.reliab-htable th:first-child, .reliab-htable td:first-child { text-align: left; }
+.reliab-htable td { text-align: right; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); font-family: 'IBM Plex Mono', monospace; }
+.reliab-htable tr:last-child td { border-bottom: none; }
+.reliab-htable tbody tr { transition: background 0.12s; }
+.reliab-htable tbody tr:hover { background: var(--surface-2); }
+/* Lectura de indicadores clave */
+.reliab-subtitle { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-mute); font-weight: 600; margin: 20px 0 10px; }
+.reliab-reads { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.reliab-read { padding: 11px 13px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border-soft); border-left: 3px solid var(--border-strong); }
+.reliab-read-k { font-size: 10px; color: var(--text-mute); text-transform: uppercase; letter-spacing: 0.4px; }
+.reliab-read-v { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 700; margin-top: 4px; color: var(--text); }
+.reliab-read-sub { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; }
+.reliab-foot { font-size: 11px; color: var(--text-faint); line-height: 1.5; margin-top: 16px; border-top: 1px solid var(--border-soft); padding-top: 12px; }
+
 /* ---------- Portfolio: Efectivo & Compras inteligentes ---------- */
 .liq-card { padding: 18px 20px; }
 .liq-bars { margin: 4px 0 16px; }
