@@ -619,6 +619,27 @@ Todo se calcula sobre el universo curado ya cargado, sin requests extra, y las
 cuatro secciones nuevas (Idea del Día, Qué Mirar Hoy, Amplitud, Destacados) se
 integran al sistema de personalización del Dashboard (mostrar/ocultar/reordenar).
 
+## Universo ampliado: +160 CEDEARs y ETFs nuevos (407 activos)
+
+Se agregaron ~135 CEDEARs y ~27 ETFs que cotizan en BYMA y faltaban en el
+universo buscable — incluidos **SNDK (SanDisk)**, ASML, ARM, ANET, RACE
+(Ferrari), NVO (Novo Nordisk), NVS, TM (Toyota), SONY, SAP, SHEL, TTE, RIO,
+BHP, FCX, SCCO, NEM, CCJ, OKLO, NU, XP, STNE, HIMS, CRWV (CoreWeave), NBIS,
+RKLB, ASTS, TEM, y ETFs sectoriales (XLV, XLI, XLP, XLU, XLY, XLB, XLC, XLRE),
+temáticos (SMH semiconductores, GDX oro, SLV plata, URA uranio, COPX cobre,
+ICLN energía limpia, CIBR ciberseguridad, ITA defensa, IBB biotech) y
+regionales (FXI China, EWJ Japón, EWY Corea, ILF LatAm, VEA, ACWI, RSP, VIG).
+
+Método (el mismo de la tanda anterior, nada inventado): para cada ticker se
+midió el **ratio implícito real** = precio USD (Yahoo) × CCL ÷ precio BYMA en
+pesos (data912), y se ajustó al ratio estándar más cercano — con ratios
+fraccionarios donde corresponde (SAN, SBS, SPCE, NG: 1 CEDEAR = varias
+acciones). El ratio se sigue autocorrigiendo en vivo en `api/quote`.
+
+Limpieza: se eliminó el ticker muerto **SQ** (Block cotiza como **XYZ** desde
+enero 2025; el CEDEAR en BYMA también es XYZ) y se sumó **BMNR** al set de
+activos relacionados con cripto (tesorería de ETH).
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

@@ -1,1 +1,3260 @@
-[{"ticker":"MSFT","name":"Microsoft","sector":"Tecnología","refPriceUsd":467.2,"ratio":30,"category":"CEDEAR"},{"ticker":"AAPL","name":"Apple","sector":"Tecnología","refPriceUsd":214.3,"ratio":20,"category":"CEDEAR"},{"ticker":"NVDA","name":"Nvidia","sector":"Semiconductores","refPriceUsd":126.4,"ratio":24,"category":"CEDEAR"},{"ticker":"AMZN","name":"Amazon","sector":"Consumo","refPriceUsd":247.49,"ratio":150,"category":"CEDEAR"},{"ticker":"GOOGL","name":"Alphabet","sector":"Tecnología","refPriceUsd":359.51,"ratio":60,"category":"CEDEAR"},{"ticker":"META","name":"Meta Platforms","sector":"Tecnología","refPriceUsd":498.2,"ratio":24,"category":"CEDEAR"},{"ticker":"TSLA","name":"Tesla","sector":"Automotriz","refPriceUsd":248.5,"ratio":15,"category":"CEDEAR"},{"ticker":"KO","name":"Coca-Cola","sector":"Consumo","refPriceUsd":62.4,"ratio":5,"category":"CEDEAR"},{"ticker":"MELI","name":"MercadoLibre","sector":"Tecnología","refPriceUsd":1873.88,"ratio":120,"category":"CEDEAR"},{"ticker":"BABA","name":"Alibaba","sector":"Consumo","refPriceUsd":78.9,"ratio":9,"category":"CEDEAR"},{"ticker":"AMD","name":"Adv. Micro Devices","sector":"Semiconductores","refPriceUsd":162.7,"ratio":10,"category":"CEDEAR"},{"ticker":"JNJ","name":"Johnson & Johnson","sector":"Salud","refPriceUsd":253.85,"ratio":15,"category":"CEDEAR"},{"ticker":"WMT","name":"Walmart","sector":"Consumo","refPriceUsd":113.7,"ratio":18,"category":"CEDEAR"},{"ticker":"DIS","name":"Disney","sector":"Comunicación","refPriceUsd":101.4,"ratio":4,"category":"CEDEAR"},{"ticker":"PYPL","name":"PayPal","sector":"Fintech","refPriceUsd":47.37,"ratio":8,"category":"CEDEAR"},{"ticker":"NFLX","name":"Netflix","sector":"Comunicación","refPriceUsd":73.53,"ratio":50,"category":"CEDEAR"},{"ticker":"V","name":"Visa","sector":"Fintech","refPriceUsd":356.02,"ratio":18,"category":"CEDEAR"},{"ticker":"JPM","name":"JPMorgan","sector":"Bancos","refPriceUsd":342.89,"ratio":15,"category":"CEDEAR"},{"ticker":"XOM","name":"Exxon Mobil","sector":"Energía","refPriceUsd":145.09,"ratio":10,"category":"CEDEAR"},{"ticker":"PFE","name":"Pfizer","sector":"Salud","refPriceUsd":24.25,"ratio":4,"category":"CEDEAR"},{"ticker":"BA","name":"Boeing","sector":"Industrial","refPriceUsd":217.11,"ratio":24,"category":"CEDEAR"},{"ticker":"INTC","name":"Intel","sector":"Semiconductores","refPriceUsd":107.76,"ratio":5,"category":"CEDEAR"},{"ticker":"QCOM","name":"Qualcomm","sector":"Semiconductores","refPriceUsd":201.6,"ratio":9,"category":"CEDEAR"},{"ticker":"NKE","name":"Nike","sector":"Consumo","refPriceUsd":42.86,"ratio":12,"category":"CEDEAR"},{"ticker":"SBUX","name":"Starbucks","sector":"Consumo","refPriceUsd":106.17,"ratio":12,"category":"CEDEAR"},{"ticker":"GOLD","name":"Barrick Gold","sector":"Materiales","refPriceUsd":16.4,"ratio":1,"category":"CEDEAR"},{"ticker":"GGAL","name":"Grupo Galicia","sector":"Bancos","refPriceUsd":48.6,"ratio":10,"category":"CEDEAR"},{"ticker":"YPF","name":"YPF","sector":"Energía","refPriceUsd":23.8,"ratio":1,"category":"CEDEAR"},{"ticker":"PAM","name":"Pampa Energía","sector":"Energía","refPriceUsd":68.4,"ratio":25,"category":"CEDEAR"},{"ticker":"BMA","name":"Banco Macro","sector":"Bancos","refPriceUsd":82.1,"ratio":10,"category":"CEDEAR"},{"ticker":"CEPU","name":"Central Puerto","sector":"Energía","refPriceUsd":14.87,"ratio":10,"category":"CEDEAR"},{"ticker":"TX","name":"Ternium","sector":"Materiales","refPriceUsd":44.78,"ratio":null,"category":"CEDEAR"},{"ticker":"BBD","name":"Banco Bradesco","sector":"Bancos","refPriceUsd":2.7,"ratio":1,"category":"CEDEAR"},{"ticker":"VALE","name":"Vale","sector":"Materiales","refPriceUsd":14.59,"ratio":2,"category":"CEDEAR"},{"ticker":"VIST","name":"Vista Energy","sector":"Energía","refPriceUsd":65.73,"ratio":3,"category":"CEDEAR"},{"ticker":"SUPV","name":"Grupo Supervielle","sector":"Bancos","refPriceUsd":12.4,"ratio":5,"category":"CEDEAR"},{"ticker":"CRM","name":"Salesforce","sector":"Tecnología","refPriceUsd":167.56,"ratio":18,"category":"CEDEAR"},{"ticker":"ORCL","name":"Oracle","sector":"Tecnología","refPriceUsd":127.94,"ratio":3,"category":"CEDEAR"},{"ticker":"CSCO","name":"Cisco","sector":"Tecnología","refPriceUsd":117.09,"ratio":5,"category":"CEDEAR"},{"ticker":"IBM","name":"IBM","sector":"Tecnología","refPriceUsd":217.07,"ratio":15,"category":"CEDEAR"},{"ticker":"ADBE","name":"Adobe","sector":"Tecnología","refPriceUsd":548.7,"ratio":24,"category":"CEDEAR"},{"ticker":"PG","name":"Procter & Gamble","sector":"Consumo","refPriceUsd":146.08,"ratio":15,"category":"CEDEAR"},{"ticker":"MCD","name":"McDonald’s","sector":"Consumo","refPriceUsd":268.94,"ratio":24,"category":"CEDEAR"},{"ticker":"PEP","name":"PepsiCo","sector":"Consumo","refPriceUsd":135.45,"ratio":18,"category":"CEDEAR"},{"ticker":"ABBV","name":"AbbVie","sector":"Salud","refPriceUsd":244.78,"ratio":10,"category":"CEDEAR"},{"ticker":"MRK","name":"Merck","sector":"Salud","refPriceUsd":120.78,"ratio":5,"category":"CEDEAR"},{"ticker":"UNH","name":"UnitedHealth","sector":"Salud","refPriceUsd":492.1,"ratio":30,"category":"CEDEAR"},{"ticker":"LLY","name":"Eli Lilly","sector":"Salud","refPriceUsd":812.4,"ratio":40,"category":"CEDEAR"},{"ticker":"BAC","name":"Bank of America","sector":"Bancos","refPriceUsd":39.8,"ratio":4,"category":"CEDEAR"},{"ticker":"C","name":"Citigroup","sector":"Bancos","refPriceUsd":133.27,"ratio":3,"category":"CEDEAR"},{"ticker":"GS","name":"Goldman Sachs","sector":"Bancos","refPriceUsd":468.2,"ratio":30,"category":"CEDEAR"},{"ticker":"MS","name":"Morgan Stanley","sector":"Bancos","refPriceUsd":98.7,"ratio":8,"category":"CEDEAR"},{"ticker":"WFC","name":"Wells Fargo","sector":"Bancos","refPriceUsd":59.4,"ratio":5,"category":"CEDEAR"},{"ticker":"MA","name":"Mastercard","sector":"Fintech","refPriceUsd":452.8,"ratio":20,"category":"CEDEAR"},{"ticker":"CVX","name":"Chevron","sector":"Energía","refPriceUsd":181.76,"ratio":16,"category":"CEDEAR"},{"ticker":"T","name":"AT&T","sector":"Comunicación","refPriceUsd":21.28,"ratio":3,"category":"CEDEAR"},{"ticker":"VZ","name":"Verizon","sector":"Comunicación","refPriceUsd":42.47,"ratio":4,"category":"CEDEAR"},{"ticker":"CAT","name":"Caterpillar","sector":"Industrial","refPriceUsd":342.7,"ratio":20,"category":"CEDEAR"},{"ticker":"GE","name":"General Electric","sector":"Industrial","refPriceUsd":353.73,"ratio":8,"category":"CEDEAR"},{"ticker":"MMM","name":"3M","sector":"Industrial","refPriceUsd":156.58,"ratio":10,"category":"CEDEAR"},{"ticker":"F","name":"Ford","sector":"Automotriz","refPriceUsd":12.1,"ratio":1,"category":"CEDEAR"},{"ticker":"GM","name":"General Motors","sector":"Automotriz","refPriceUsd":76.87,"ratio":6,"category":"CEDEAR"},{"ticker":"MU","name":"Micron","sector":"Semiconductores","refPriceUsd":983.12,"ratio":5,"category":"CEDEAR"},{"ticker":"TSM","name":"Taiwan Semi","sector":"Semiconductores","refPriceUsd":420.39,"ratio":9,"category":"CEDEAR"},{"ticker":"AVGO","name":"Broadcom","sector":"Semiconductores","refPriceUsd":389.11,"ratio":40,"category":"CEDEAR"},{"ticker":"TGT","name":"Target","sector":"Consumo","refPriceUsd":134.0,"ratio":24,"category":"CEDEAR"},{"ticker":"COST","name":"Costco","sector":"Consumo","refPriceUsd":921.75,"ratio":50,"category":"CEDEAR"},{"ticker":"HD","name":"Home Depot","sector":"Consumo","refPriceUsd":358.1,"ratio":20,"category":"CEDEAR"},{"ticker":"SHOP","name":"Shopify","sector":"Tecnología","refPriceUsd":64.5,"ratio":3,"category":"CEDEAR"},{"ticker":"UBER","name":"Uber","sector":"Tecnología","refPriceUsd":72.08,"ratio":2,"category":"CEDEAR"},{"ticker":"SPOT","name":"Spotify","sector":"Comunicación","refPriceUsd":481.06,"ratio":29,"category":"CEDEAR"},{"ticker":"ABNB","name":"Airbnb","sector":"Tecnología","refPriceUsd":146.54,"ratio":15,"category":"CEDEAR"},{"ticker":"COIN","name":"Coinbase","sector":"Fintech","refPriceUsd":242.7,"ratio":10,"category":"CEDEAR"},{"ticker":"SPY","name":"SPDR S&P 500","sector":"ETF","refPriceUsd":751.83,"ratio":60,"category":"ETF"},{"ticker":"QQQ","name":"Invesco Nasdaq 100","sector":"ETF","refPriceUsd":478.5,"ratio":20,"category":"ETF"},{"ticker":"DIA","name":"SPDR Dow Jones","sector":"ETF","refPriceUsd":392.4,"ratio":20,"category":"ETF"},{"ticker":"EEM","name":"iShares Emerging Mkts","sector":"ETF","refPriceUsd":65.67,"ratio":5,"category":"ETF"},{"ticker":"ARKK","name":"ARK Innovation","sector":"ETF","refPriceUsd":79.52,"ratio":10,"category":"ETF"},{"ticker":"NOW","name":"ServiceNow","sector":"Tecnología","refPriceUsd":104.85,"ratio":180,"category":"CEDEAR"},{"ticker":"INTU","name":"Intuit","sector":"Tecnología","refPriceUsd":648.2,"ratio":24,"category":"CEDEAR"},{"ticker":"WDAY","name":"Workday","sector":"Tecnología","refPriceUsd":232.6,"ratio":12,"category":"CEDEAR"},{"ticker":"TEAM","name":"Atlassian","sector":"Tecnología","refPriceUsd":188.4,"ratio":8,"category":"CEDEAR"},{"ticker":"PANW","name":"Palo Alto Networks","sector":"Tecnología","refPriceUsd":352.89,"ratio":50,"category":"CEDEAR"},{"ticker":"CRWD","name":"CrowdStrike","sector":"Tecnología","refPriceUsd":210.73,"ratio":80,"category":"CEDEAR"},{"ticker":"FTNT","name":"Fortinet","sector":"Tecnología","refPriceUsd":62.8,"ratio":3,"category":"CEDEAR"},{"ticker":"NET","name":"Cloudflare","sector":"Tecnología","refPriceUsd":82.4,"ratio":4,"category":"CEDEAR"},{"ticker":"DDOG","name":"Datadog","sector":"Tecnología","refPriceUsd":128.9,"ratio":6,"category":"CEDEAR"},{"ticker":"ZS","name":"Zscaler","sector":"Tecnología","refPriceUsd":192.3,"ratio":8,"category":"CEDEAR"},{"ticker":"SNOW","name":"Snowflake","sector":"Tecnología","refPriceUsd":275.94,"ratio":30,"category":"CEDEAR"},{"ticker":"PLTR","name":"Palantir","sector":"Tecnología","refPriceUsd":133.72,"ratio":3,"category":"CEDEAR"},{"ticker":"DELL","name":"Dell","sector":"Tecnología","refPriceUsd":138.2,"ratio":6,"category":"CEDEAR"},{"ticker":"HPQ","name":"HP","sector":"Tecnología","refPriceUsd":24.63,"ratio":1,"category":"CEDEAR"},{"ticker":"WDC","name":"Western Digital","sector":"Tecnología","refPriceUsd":68.9,"ratio":3,"category":"CEDEAR"},{"ticker":"DOCU","name":"DocuSign","sector":"Tecnología","refPriceUsd":58.3,"ratio":3,"category":"CEDEAR"},{"ticker":"ZM","name":"Zoom","sector":"Tecnología","refPriceUsd":68.7,"ratio":4,"category":"CEDEAR"},{"ticker":"SQ","name":"Block","sector":"Fintech","refPriceUsd":72.4,"ratio":4,"category":"CEDEAR"},{"ticker":"HOOD","name":"Robinhood","sector":"Fintech","refPriceUsd":113.45,"ratio":29,"category":"CEDEAR"},{"ticker":"ROKU","name":"Roku","sector":"Comunicación","refPriceUsd":62.5,"ratio":3,"category":"CEDEAR"},{"ticker":"SNAP","name":"Snap","sector":"Comunicación","refPriceUsd":14.2,"ratio":1,"category":"CEDEAR"},{"ticker":"PINS","name":"Pinterest","sector":"Comunicación","refPriceUsd":38.6,"ratio":2,"category":"CEDEAR"},{"ticker":"EA","name":"Electronic Arts","sector":"Comunicación","refPriceUsd":142.8,"ratio":8,"category":"CEDEAR"},{"ticker":"TTWO","name":"Take-Two","sector":"Comunicación","refPriceUsd":158.4,"ratio":8,"category":"CEDEAR"},{"ticker":"TXN","name":"Texas Instruments","sector":"Semiconductores","refPriceUsd":305.55,"ratio":5,"category":"CEDEAR"},{"ticker":"AMAT","name":"Applied Materials","sector":"Semiconductores","refPriceUsd":595.7,"ratio":5,"category":"CEDEAR"},{"ticker":"ADI","name":"Analog Devices","sector":"Semiconductores","refPriceUsd":392.75,"ratio":15,"category":"CEDEAR"},{"ticker":"LRCX","name":"Lam Research","sector":"Semiconductores","refPriceUsd":92.3,"ratio":2,"category":"CEDEAR"},{"ticker":"KLAC","name":"KLA Corp","sector":"Semiconductores","refPriceUsd":748.2,"ratio":20,"category":"CEDEAR"},{"ticker":"MRVL","name":"Marvell","sector":"Semiconductores","refPriceUsd":72.6,"ratio":3,"category":"CEDEAR"},{"ticker":"NXPI","name":"NXP Semiconductors","sector":"Semiconductores","refPriceUsd":242.8,"ratio":8,"category":"CEDEAR"},{"ticker":"MCHP","name":"Microchip","sector":"Semiconductores","refPriceUsd":88.4,"ratio":4,"category":"CEDEAR"},{"ticker":"ON","name":"ON Semiconductor","sector":"Semiconductores","refPriceUsd":74.2,"ratio":3,"category":"CEDEAR"},{"ticker":"SNPS","name":"Synopsys","sector":"Semiconductores","refPriceUsd":562.3,"ratio":16,"category":"CEDEAR"},{"ticker":"AMGN","name":"Amgen","sector":"Salud","refPriceUsd":355.25,"ratio":30,"category":"CEDEAR"},{"ticker":"GILD","name":"Gilead","sector":"Salud","refPriceUsd":130.04,"ratio":4,"category":"CEDEAR"},{"ticker":"BMY","name":"Bristol Myers Squibb","sector":"Salud","refPriceUsd":56.95,"ratio":3,"category":"CEDEAR"},{"ticker":"TMO","name":"Thermo Fisher","sector":"Salud","refPriceUsd":548.6,"ratio":20,"category":"CEDEAR"},{"ticker":"DHR","name":"Danaher","sector":"Salud","refPriceUsd":252.4,"ratio":10,"category":"CEDEAR"},{"ticker":"MDT","name":"Medtronic","sector":"Salud","refPriceUsd":82.3,"ratio":4,"category":"CEDEAR"},{"ticker":"CVS","name":"CVS Health","sector":"Salud","refPriceUsd":106.18,"ratio":15,"category":"CEDEAR"},{"ticker":"BSX","name":"Boston Scientific","sector":"Salud","refPriceUsd":78.6,"ratio":4,"category":"CEDEAR"},{"ticker":"SYK","name":"Stryker","sector":"Salud","refPriceUsd":342.7,"ratio":15,"category":"CEDEAR"},{"ticker":"ISRG","name":"Intuitive Surgical","sector":"Salud","refPriceUsd":379.5,"ratio":90,"category":"CEDEAR"},{"ticker":"REGN","name":"Regeneron","sector":"Salud","refPriceUsd":1042.3,"ratio":40,"category":"CEDEAR"},{"ticker":"VRTX","name":"Vertex Pharma","sector":"Salud","refPriceUsd":476.31,"ratio":100,"category":"CEDEAR"},{"ticker":"BIIB","name":"Biogen","sector":"Salud","refPriceUsd":218.4,"ratio":8,"category":"CEDEAR"},{"ticker":"MRNA","name":"Moderna","sector":"Salud","refPriceUsd":102.6,"ratio":4,"category":"CEDEAR"},{"ticker":"ZTS","name":"Zoetis","sector":"Salud","refPriceUsd":172.5,"ratio":8,"category":"CEDEAR"},{"ticker":"AXP","name":"American Express","sector":"Fintech","refPriceUsd":355.06,"ratio":15,"category":"CEDEAR"},{"ticker":"BLK","name":"BlackRock","sector":"Bancos","refPriceUsd":842.3,"ratio":40,"category":"CEDEAR"},{"ticker":"SCHW","name":"Charles Schwab","sector":"Bancos","refPriceUsd":101.1,"ratio":16,"category":"CEDEAR"},{"ticker":"USB","name":"US Bancorp","sector":"Bancos","refPriceUsd":62.14,"ratio":5,"category":"CEDEAR"},{"ticker":"PNC","name":"PNC Financial","sector":"Bancos","refPriceUsd":178.3,"ratio":10,"category":"CEDEAR"},{"ticker":"COF","name":"Capital One","sector":"Bancos","refPriceUsd":142.8,"ratio":6,"category":"CEDEAR"},{"ticker":"BK","name":"Bank of NY Mellon","sector":"Bancos","refPriceUsd":62.7,"ratio":3,"category":"CEDEAR"},{"ticker":"SPGI","name":"S&P Global","sector":"Fintech","refPriceUsd":452.6,"ratio":20,"category":"CEDEAR"},{"ticker":"CB","name":"Chubb","sector":"Bancos","refPriceUsd":262.4,"ratio":12,"category":"CEDEAR"},{"ticker":"PGR","name":"Progressive","sector":"Bancos","refPriceUsd":218.6,"ratio":10,"category":"CEDEAR"},{"ticker":"MET","name":"MetLife","sector":"Bancos","refPriceUsd":74.3,"ratio":4,"category":"CEDEAR"},{"ticker":"BRKB","name":"Berkshire Hathaway","sector":"Bancos","refPriceUsd":428.5,"ratio":20,"category":"CEDEAR"},{"ticker":"DE","name":"John Deere","sector":"Industrial","refPriceUsd":584.4,"ratio":40,"category":"CEDEAR"},{"ticker":"LMT","name":"Lockheed Martin","sector":"Industrial","refPriceUsd":514.99,"ratio":20,"category":"CEDEAR"},{"ticker":"RTX","name":"RTX Corp","sector":"Industrial","refPriceUsd":193.39,"ratio":5,"category":"CEDEAR"},{"ticker":"NOC","name":"Northrop Grumman","sector":"Industrial","refPriceUsd":482.6,"ratio":24,"category":"CEDEAR"},{"ticker":"GD","name":"General Dynamics","sector":"Industrial","refPriceUsd":288.5,"ratio":15,"category":"CEDEAR"},{"ticker":"UPS","name":"United Parcel","sector":"Industrial","refPriceUsd":138.7,"ratio":6,"category":"CEDEAR"},{"ticker":"FDX","name":"FedEx","sector":"Industrial","refPriceUsd":313.66,"ratio":10,"category":"CEDEAR"},{"ticker":"UNP","name":"Union Pacific","sector":"Industrial","refPriceUsd":288.3,"ratio":20,"category":"CEDEAR"},{"ticker":"CSX","name":"CSX Corp","sector":"Industrial","refPriceUsd":33.8,"ratio":2,"category":"CEDEAR"},{"ticker":"EMR","name":"Emerson Electric","sector":"Industrial","refPriceUsd":112.4,"ratio":6,"category":"CEDEAR"},{"ticker":"ITW","name":"Illinois Tool Works","sector":"Industrial","refPriceUsd":248.7,"ratio":12,"category":"CEDEAR"},{"ticker":"ETN","name":"Eaton","sector":"Industrial","refPriceUsd":312.5,"ratio":15,"category":"CEDEAR"},{"ticker":"HON","name":"Honeywell","sector":"Industrial","refPriceUsd":222.68,"ratio":8,"category":"CEDEAR"},{"ticker":"COP","name":"ConocoPhillips","sector":"Energía","refPriceUsd":111.87,"ratio":25,"category":"CEDEAR"},{"ticker":"SLB","name":"Schlumberger","sector":"Energía","refPriceUsd":47.54,"ratio":3,"category":"CEDEAR"},{"ticker":"EOG","name":"EOG Resources","sector":"Energía","refPriceUsd":128.4,"ratio":6,"category":"CEDEAR"},{"ticker":"OXY","name":"Occidental","sector":"Energía","refPriceUsd":54.57,"ratio":5,"category":"CEDEAR"},{"ticker":"PSX","name":"Phillips 66","sector":"Energía","refPriceUsd":138.5,"ratio":6,"category":"CEDEAR"},{"ticker":"VLO","name":"Valero","sector":"Energía","refPriceUsd":152.4,"ratio":8,"category":"CEDEAR"},{"ticker":"MPC","name":"Marathon Petroleum","sector":"Energía","refPriceUsd":172.6,"ratio":8,"category":"CEDEAR"},{"ticker":"KMI","name":"Kinder Morgan","sector":"Energía","refPriceUsd":20.4,"ratio":1,"category":"CEDEAR"},{"ticker":"DUK","name":"Duke Energy","sector":"Energía","refPriceUsd":102.6,"ratio":6,"category":"CEDEAR"},{"ticker":"SO","name":"Southern Co","sector":"Energía","refPriceUsd":82.4,"ratio":4,"category":"CEDEAR"},{"ticker":"NEE","name":"NextEra Energy","sector":"Energía","refPriceUsd":72.8,"ratio":3,"category":"CEDEAR"},{"ticker":"D","name":"Dominion Energy","sector":"Energía","refPriceUsd":52.6,"ratio":3,"category":"CEDEAR"},{"ticker":"AEP","name":"American Electric","sector":"Energía","refPriceUsd":92.4,"ratio":4,"category":"CEDEAR"},{"ticker":"MO","name":"Altria","sector":"Consumo","refPriceUsd":70.16,"ratio":4,"category":"CEDEAR"},{"ticker":"PM","name":"Philip Morris","sector":"Consumo","refPriceUsd":175.95,"ratio":18,"category":"CEDEAR"},{"ticker":"CL","name":"Colgate-Palmolive","sector":"Consumo","refPriceUsd":91.03,"ratio":3,"category":"CEDEAR"},{"ticker":"KMB","name":"Kimberly-Clark","sector":"Consumo","refPriceUsd":138.4,"ratio":6,"category":"CEDEAR"},{"ticker":"GIS","name":"General Mills","sector":"Consumo","refPriceUsd":68.5,"ratio":3,"category":"CEDEAR"},{"ticker":"MDLZ","name":"Mondelez","sector":"Consumo","refPriceUsd":58.8,"ratio":15,"category":"CEDEAR"},{"ticker":"KHC","name":"Kraft Heinz","sector":"Consumo","refPriceUsd":34.6,"ratio":2,"category":"CEDEAR"},{"ticker":"HSY","name":"Hershey","sector":"Consumo","refPriceUsd":171.46,"ratio":20,"category":"CEDEAR"},{"ticker":"STZ","name":"Constellation Brands","sector":"Consumo","refPriceUsd":248.6,"ratio":10,"category":"CEDEAR"},{"ticker":"EL","name":"Estee Lauder","sector":"Consumo","refPriceUsd":102.7,"ratio":4,"category":"CEDEAR"},{"ticker":"KR","name":"Kroger","sector":"Consumo","refPriceUsd":56.8,"ratio":3,"category":"CEDEAR"},{"ticker":"SYY","name":"Sysco","sector":"Consumo","refPriceUsd":82.85,"ratio":8,"category":"CEDEAR"},{"ticker":"LOW","name":"Lowe","sector":"Consumo","refPriceUsd":242.6,"ratio":10,"category":"CEDEAR"},{"ticker":"TJX","name":"TJX Companies","sector":"Consumo","refPriceUsd":112.4,"ratio":5,"category":"CEDEAR"},{"ticker":"ROST","name":"Ross Stores","sector":"Consumo","refPriceUsd":220.93,"ratio":4,"category":"CEDEAR"},{"ticker":"LULU","name":"Lululemon","sector":"Consumo","refPriceUsd":312.5,"ratio":12,"category":"CEDEAR"},{"ticker":"MAR","name":"Marriott","sector":"Consumo","refPriceUsd":248.7,"ratio":10,"category":"CEDEAR"},{"ticker":"HLT","name":"Hilton","sector":"Consumo","refPriceUsd":218.4,"ratio":8,"category":"CEDEAR"},{"ticker":"BKNG","name":"Booking Holdings","sector":"Consumo","refPriceUsd":3842.5,"ratio":150,"category":"CEDEAR"},{"ticker":"DAL","name":"Delta Air Lines","sector":"Industrial","refPriceUsd":85.51,"ratio":8,"category":"CEDEAR"},{"ticker":"UAL","name":"United Airlines","sector":"Industrial","refPriceUsd":120.35,"ratio":5,"category":"CEDEAR"},{"ticker":"CCL","name":"Carnival","sector":"Consumo","refPriceUsd":26.5,"ratio":3,"category":"CEDEAR"},{"ticker":"RCL","name":"Royal Caribbean","sector":"Consumo","refPriceUsd":162.8,"ratio":6,"category":"CEDEAR"},{"ticker":"LVS","name":"Las Vegas Sands","sector":"Consumo","refPriceUsd":46.7,"ratio":2,"category":"CEDEAR"},{"ticker":"MGM","name":"MGM Resorts","sector":"Consumo","refPriceUsd":42.8,"ratio":2,"category":"CEDEAR"},{"ticker":"YUM","name":"Yum Brands","sector":"Consumo","refPriceUsd":132.6,"ratio":6,"category":"CEDEAR"},{"ticker":"CMG","name":"Chipotle","sector":"Consumo","refPriceUsd":58.4,"ratio":2,"category":"CEDEAR"},{"ticker":"ORLY","name":"OReilly Automotive","sector":"Consumo","refPriceUsd":1042.3,"ratio":40,"category":"CEDEAR"},{"ticker":"CMCSA","name":"Comcast","sector":"Comunicación","refPriceUsd":38.6,"ratio":2,"category":"CEDEAR"},{"ticker":"CHTR","name":"Charter Comms","sector":"Comunicación","refPriceUsd":342.7,"ratio":15,"category":"CEDEAR"},{"ticker":"TMUS","name":"T-Mobile US","sector":"Comunicación","refPriceUsd":182.4,"ratio":8,"category":"CEDEAR"},{"ticker":"WBD","name":"Warner Bros Discovery","sector":"Comunicación","refPriceUsd":8.4,"ratio":1,"category":"CEDEAR"},{"ticker":"PDD","name":"PDD Holdings","sector":"Consumo","refPriceUsd":83.91,"ratio":25,"category":"CEDEAR"},{"ticker":"JD","name":"JD.com","sector":"Consumo","refPriceUsd":28.84,"ratio":4,"category":"CEDEAR"},{"ticker":"BIDU","name":"Baidu","sector":"Tecnología","refPriceUsd":92.4,"ratio":4,"category":"CEDEAR"},{"ticker":"NTES","name":"NetEase","sector":"Comunicación","refPriceUsd":98.6,"ratio":4,"category":"CEDEAR"},{"ticker":"SE","name":"Sea Limited","sector":"Tecnología","refPriceUsd":72.8,"ratio":3,"category":"CEDEAR"},{"ticker":"NIO","name":"Nio","sector":"Automotriz","refPriceUsd":5.01,"ratio":4,"category":"CEDEAR"},{"ticker":"XPEV","name":"XPeng","sector":"Automotriz","refPriceUsd":13.36,"ratio":4,"category":"CEDEAR"},{"ticker":"LI","name":"Li Auto","sector":"Automotriz","refPriceUsd":22.4,"ratio":1,"category":"CEDEAR"},{"ticker":"ABEV","name":"Ambev","sector":"Consumo","refPriceUsd":2.4,"ratio":1,"category":"CEDEAR"},{"ticker":"ITUB","name":"Itau Unibanco","sector":"Bancos","refPriceUsd":6.2,"ratio":1,"category":"CEDEAR"},{"ticker":"PBR","name":"Petrobras","sector":"Energía","refPriceUsd":14.6,"ratio":1,"category":"CEDEAR"},{"ticker":"SID","name":"Cia Siderurgica","sector":"Materiales","refPriceUsd":3.8,"ratio":1,"category":"CEDEAR"},{"ticker":"GGB","name":"Gerdau","sector":"Materiales","refPriceUsd":3.2,"ratio":1,"category":"CEDEAR"},{"ticker":"ERJ","name":"Embraer","sector":"Industrial","refPriceUsd":32.6,"ratio":2,"category":"CEDEAR"},{"ticker":"BSBR","name":"Santander Brasil","sector":"Bancos","refPriceUsd":4.8,"ratio":1,"category":"CEDEAR"},{"ticker":"GLOB","name":"Globant","sector":"Tecnología","refPriceUsd":30.92,"ratio":18,"category":"CEDEAR"},{"ticker":"DESP","name":"Despegar","sector":"Tecnología","refPriceUsd":18.6,"ratio":1,"category":"CEDEAR"},{"ticker":"BIOX","name":"Bioceres Crop","sector":"Materiales","refPriceUsd":8.4,"ratio":1,"category":"CEDEAR"},{"ticker":"CRESY","name":"Cresud","sector":"Consumo","refPriceUsd":10.91,"ratio":10,"category":"CEDEAR"},{"ticker":"LOMA","name":"Loma Negra","sector":"Materiales","refPriceUsd":11.37,"ratio":5,"category":"CEDEAR"},{"ticker":"TGS","name":"Transportadora Gas Sur","sector":"Energía","refPriceUsd":31.33,"ratio":5,"category":"CEDEAR"},{"ticker":"EDN","name":"Edenor","sector":"Energía","refPriceUsd":25.2,"ratio":20,"category":"CEDEAR"},{"ticker":"IRS","name":"IRSA","sector":"Consumo","refPriceUsd":15.36,"ratio":10,"category":"CEDEAR"},{"ticker":"TEO","name":"Telecom Argentina","sector":"Comunicación","refPriceUsd":13.85,"ratio":5,"category":"CEDEAR"},{"ticker":"AGRO","name":"Adecoagro","sector":"Consumo","refPriceUsd":11.2,"ratio":1,"category":"CEDEAR"},{"ticker":"CAAP","name":"Corp America Airports","sector":"Industrial","refPriceUsd":19.4,"ratio":1,"category":"CEDEAR"},{"ticker":"IWM","name":"iShares Russell 2000","sector":"ETF","refPriceUsd":218.6,"ratio":10,"category":"ETF"},{"ticker":"EFA","name":"iShares MSCI EAFE","sector":"ETF","refPriceUsd":103.96,"ratio":18,"category":"ETF"},{"ticker":"GLD","name":"SPDR Gold","sector":"ETF","refPriceUsd":372.15,"ratio":50,"category":"ETF"},{"ticker":"XLF","name":"Financial Select","sector":"ETF","refPriceUsd":44.6,"ratio":2,"category":"ETF"},{"ticker":"XLE","name":"Energy Select","sector":"ETF","refPriceUsd":56.95,"ratio":2,"category":"ETF"},{"ticker":"XLK","name":"Technology Select","sector":"ETF","refPriceUsd":232.4,"ratio":10,"category":"ETF"},{"ticker":"EWZ","name":"iShares Brazil","sector":"ETF","refPriceUsd":32.6,"ratio":2,"category":"ETF"},{"ticker":"BTC","name":"Bitcoin","sector":"Cripto","category":"Cripto","coingeckoId":"bitcoin","ratio":null,"refPriceUsd":60000},{"ticker":"ETH","name":"Ethereum","sector":"Cripto","category":"Cripto","coingeckoId":"ethereum","ratio":null,"refPriceUsd":3000},{"ticker":"IBIT","name":"iShares Bitcoin Trust ETF","sector":"ETF","refPriceUsd":36.23,"ratio":10,"category":"ETF"},{"ticker":"ETHA","name":"iShares Ethereum Trust ETF","sector":"ETF","refPriceUsd":13.53,"ratio":5,"category":"ETF"},{"ticker":"SPXL","name":"Direxion Daily S&P500 Bull 3X","sector":"ETF","refPriceUsd":279.2,"ratio":25,"category":"ETF"},{"ticker":"TQQQ","name":"ProShares UltraPro QQQ","sector":"ETF","refPriceUsd":77.03,"ratio":25,"category":"ETF"},{"ticker":"SPCX","name":"Space Exploration Technologies Corp.","sector":"Tecnología","refPriceUsd":145.3,"ratio":50,"category":"CEDEAR"},{"ticker":"RBLX","name":"Roblox Corporation","sector":"Tecnología","refPriceUsd":55.37,"ratio":2,"category":"CEDEAR"},{"ticker":"MSTR","name":"Strategy (MicroStrategy)","sector":"Cripto (acciones)","refPriceUsd":97.58,"ratio":20,"category":"CEDEAR"},{"ticker":"RIOT","name":"Riot Platforms","sector":"Cripto (acciones)","refPriceUsd":20.19,"ratio":3,"category":"CEDEAR"},{"ticker":"HUT","name":"Hut 8","sector":"Cripto (acciones)","refPriceUsd":98.33,"ratio":5,"category":"CEDEAR"},{"ticker":"IREN","name":"IREN (Iris Energy)","sector":"Cripto (acciones)","refPriceUsd":38.59,"ratio":12,"category":"CEDEAR"},{"ticker":"BBAR","name":"BBVA Argentina","sector":"Bancos","refPriceUsd":20.05,"ratio":3,"category":"CEDEAR"},{"ticker":"TS","name":"Tenaris","sector":"Energía","refPriceUsd":56.31,"ratio":2,"category":"CEDEAR"},{"ticker":"ARCO","name":"Arcos Dorados","sector":"Consumo","refPriceUsd":8.2,"ratio":0.5,"category":"CEDEAR"},{"ticker":"SATL","name":"Satellogic","sector":"Tecnología","refPriceUsd":4.31,"ratio":1,"category":"CEDEAR"}]
+[
+ {
+  "ticker": "MSFT",
+  "name": "Microsoft",
+  "sector": "Tecnología",
+  "refPriceUsd": 467.2,
+  "ratio": 30,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AAPL",
+  "name": "Apple",
+  "sector": "Tecnología",
+  "refPriceUsd": 214.3,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NVDA",
+  "name": "Nvidia",
+  "sector": "Semiconductores",
+  "refPriceUsd": 126.4,
+  "ratio": 24,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AMZN",
+  "name": "Amazon",
+  "sector": "Consumo",
+  "refPriceUsd": 247.49,
+  "ratio": 150,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GOOGL",
+  "name": "Alphabet",
+  "sector": "Tecnología",
+  "refPriceUsd": 359.51,
+  "ratio": 60,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "META",
+  "name": "Meta Platforms",
+  "sector": "Tecnología",
+  "refPriceUsd": 498.2,
+  "ratio": 24,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TSLA",
+  "name": "Tesla",
+  "sector": "Automotriz",
+  "refPriceUsd": 248.5,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "KO",
+  "name": "Coca-Cola",
+  "sector": "Consumo",
+  "refPriceUsd": 62.4,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MELI",
+  "name": "MercadoLibre",
+  "sector": "Tecnología",
+  "refPriceUsd": 1873.88,
+  "ratio": 120,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BABA",
+  "name": "Alibaba",
+  "sector": "Consumo",
+  "refPriceUsd": 78.9,
+  "ratio": 9,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AMD",
+  "name": "Adv. Micro Devices",
+  "sector": "Semiconductores",
+  "refPriceUsd": 162.7,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "JNJ",
+  "name": "Johnson & Johnson",
+  "sector": "Salud",
+  "refPriceUsd": 253.85,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "WMT",
+  "name": "Walmart",
+  "sector": "Consumo",
+  "refPriceUsd": 113.7,
+  "ratio": 18,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DIS",
+  "name": "Disney",
+  "sector": "Comunicación",
+  "refPriceUsd": 101.4,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PYPL",
+  "name": "PayPal",
+  "sector": "Fintech",
+  "refPriceUsd": 47.37,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NFLX",
+  "name": "Netflix",
+  "sector": "Comunicación",
+  "refPriceUsd": 73.53,
+  "ratio": 50,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "V",
+  "name": "Visa",
+  "sector": "Fintech",
+  "refPriceUsd": 356.02,
+  "ratio": 18,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "JPM",
+  "name": "JPMorgan",
+  "sector": "Bancos",
+  "refPriceUsd": 342.89,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "XOM",
+  "name": "Exxon Mobil",
+  "sector": "Energía",
+  "refPriceUsd": 145.09,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PFE",
+  "name": "Pfizer",
+  "sector": "Salud",
+  "refPriceUsd": 24.25,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BA",
+  "name": "Boeing",
+  "sector": "Industrial",
+  "refPriceUsd": 217.11,
+  "ratio": 24,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "INTC",
+  "name": "Intel",
+  "sector": "Semiconductores",
+  "refPriceUsd": 107.76,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "QCOM",
+  "name": "Qualcomm",
+  "sector": "Semiconductores",
+  "refPriceUsd": 201.6,
+  "ratio": 9,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NKE",
+  "name": "Nike",
+  "sector": "Consumo",
+  "refPriceUsd": 42.86,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SBUX",
+  "name": "Starbucks",
+  "sector": "Consumo",
+  "refPriceUsd": 106.17,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GOLD",
+  "name": "Barrick Gold",
+  "sector": "Materiales",
+  "refPriceUsd": 16.4,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GGAL",
+  "name": "Grupo Galicia",
+  "sector": "Bancos",
+  "refPriceUsd": 48.6,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "YPF",
+  "name": "YPF",
+  "sector": "Energía",
+  "refPriceUsd": 23.8,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PAM",
+  "name": "Pampa Energía",
+  "sector": "Energía",
+  "refPriceUsd": 68.4,
+  "ratio": 25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BMA",
+  "name": "Banco Macro",
+  "sector": "Bancos",
+  "refPriceUsd": 82.1,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CEPU",
+  "name": "Central Puerto",
+  "sector": "Energía",
+  "refPriceUsd": 14.87,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TX",
+  "name": "Ternium",
+  "sector": "Materiales",
+  "refPriceUsd": 44.78,
+  "ratio": null,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BBD",
+  "name": "Banco Bradesco",
+  "sector": "Bancos",
+  "refPriceUsd": 2.7,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "VALE",
+  "name": "Vale",
+  "sector": "Materiales",
+  "refPriceUsd": 14.59,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "VIST",
+  "name": "Vista Energy",
+  "sector": "Energía",
+  "refPriceUsd": 65.73,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SUPV",
+  "name": "Grupo Supervielle",
+  "sector": "Bancos",
+  "refPriceUsd": 12.4,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CRM",
+  "name": "Salesforce",
+  "sector": "Tecnología",
+  "refPriceUsd": 167.56,
+  "ratio": 18,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ORCL",
+  "name": "Oracle",
+  "sector": "Tecnología",
+  "refPriceUsd": 127.94,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CSCO",
+  "name": "Cisco",
+  "sector": "Tecnología",
+  "refPriceUsd": 117.09,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "IBM",
+  "name": "IBM",
+  "sector": "Tecnología",
+  "refPriceUsd": 217.07,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ADBE",
+  "name": "Adobe",
+  "sector": "Tecnología",
+  "refPriceUsd": 548.7,
+  "ratio": 24,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PG",
+  "name": "Procter & Gamble",
+  "sector": "Consumo",
+  "refPriceUsd": 146.08,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MCD",
+  "name": "McDonald’s",
+  "sector": "Consumo",
+  "refPriceUsd": 268.94,
+  "ratio": 24,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PEP",
+  "name": "PepsiCo",
+  "sector": "Consumo",
+  "refPriceUsd": 135.45,
+  "ratio": 18,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ABBV",
+  "name": "AbbVie",
+  "sector": "Salud",
+  "refPriceUsd": 244.78,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MRK",
+  "name": "Merck",
+  "sector": "Salud",
+  "refPriceUsd": 120.78,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "UNH",
+  "name": "UnitedHealth",
+  "sector": "Salud",
+  "refPriceUsd": 492.1,
+  "ratio": 30,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LLY",
+  "name": "Eli Lilly",
+  "sector": "Salud",
+  "refPriceUsd": 812.4,
+  "ratio": 40,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BAC",
+  "name": "Bank of America",
+  "sector": "Bancos",
+  "refPriceUsd": 39.8,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "C",
+  "name": "Citigroup",
+  "sector": "Bancos",
+  "refPriceUsd": 133.27,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GS",
+  "name": "Goldman Sachs",
+  "sector": "Bancos",
+  "refPriceUsd": 468.2,
+  "ratio": 30,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MS",
+  "name": "Morgan Stanley",
+  "sector": "Bancos",
+  "refPriceUsd": 98.7,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "WFC",
+  "name": "Wells Fargo",
+  "sector": "Bancos",
+  "refPriceUsd": 59.4,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MA",
+  "name": "Mastercard",
+  "sector": "Fintech",
+  "refPriceUsd": 452.8,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CVX",
+  "name": "Chevron",
+  "sector": "Energía",
+  "refPriceUsd": 181.76,
+  "ratio": 16,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "T",
+  "name": "AT&T",
+  "sector": "Comunicación",
+  "refPriceUsd": 21.28,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "VZ",
+  "name": "Verizon",
+  "sector": "Comunicación",
+  "refPriceUsd": 42.47,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CAT",
+  "name": "Caterpillar",
+  "sector": "Industrial",
+  "refPriceUsd": 342.7,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GE",
+  "name": "General Electric",
+  "sector": "Industrial",
+  "refPriceUsd": 353.73,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MMM",
+  "name": "3M",
+  "sector": "Industrial",
+  "refPriceUsd": 156.58,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "F",
+  "name": "Ford",
+  "sector": "Automotriz",
+  "refPriceUsd": 12.1,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GM",
+  "name": "General Motors",
+  "sector": "Automotriz",
+  "refPriceUsd": 76.87,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MU",
+  "name": "Micron",
+  "sector": "Semiconductores",
+  "refPriceUsd": 983.12,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TSM",
+  "name": "Taiwan Semi",
+  "sector": "Semiconductores",
+  "refPriceUsd": 420.39,
+  "ratio": 9,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AVGO",
+  "name": "Broadcom",
+  "sector": "Semiconductores",
+  "refPriceUsd": 389.11,
+  "ratio": 40,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TGT",
+  "name": "Target",
+  "sector": "Consumo",
+  "refPriceUsd": 134.0,
+  "ratio": 24,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "COST",
+  "name": "Costco",
+  "sector": "Consumo",
+  "refPriceUsd": 921.75,
+  "ratio": 50,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HD",
+  "name": "Home Depot",
+  "sector": "Consumo",
+  "refPriceUsd": 358.1,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SHOP",
+  "name": "Shopify",
+  "sector": "Tecnología",
+  "refPriceUsd": 64.5,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "UBER",
+  "name": "Uber",
+  "sector": "Tecnología",
+  "refPriceUsd": 72.08,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SPOT",
+  "name": "Spotify",
+  "sector": "Comunicación",
+  "refPriceUsd": 481.06,
+  "ratio": 29,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ABNB",
+  "name": "Airbnb",
+  "sector": "Tecnología",
+  "refPriceUsd": 146.54,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "COIN",
+  "name": "Coinbase",
+  "sector": "Fintech",
+  "refPriceUsd": 242.7,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SPY",
+  "name": "SPDR S&P 500",
+  "sector": "ETF",
+  "refPriceUsd": 751.83,
+  "ratio": 60,
+  "category": "ETF"
+ },
+ {
+  "ticker": "QQQ",
+  "name": "Invesco Nasdaq 100",
+  "sector": "ETF",
+  "refPriceUsd": 478.5,
+  "ratio": 20,
+  "category": "ETF"
+ },
+ {
+  "ticker": "DIA",
+  "name": "SPDR Dow Jones",
+  "sector": "ETF",
+  "refPriceUsd": 392.4,
+  "ratio": 20,
+  "category": "ETF"
+ },
+ {
+  "ticker": "EEM",
+  "name": "iShares Emerging Mkts",
+  "sector": "ETF",
+  "refPriceUsd": 65.67,
+  "ratio": 5,
+  "category": "ETF"
+ },
+ {
+  "ticker": "ARKK",
+  "name": "ARK Innovation",
+  "sector": "ETF",
+  "refPriceUsd": 79.52,
+  "ratio": 10,
+  "category": "ETF"
+ },
+ {
+  "ticker": "NOW",
+  "name": "ServiceNow",
+  "sector": "Tecnología",
+  "refPriceUsd": 104.85,
+  "ratio": 180,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "INTU",
+  "name": "Intuit",
+  "sector": "Tecnología",
+  "refPriceUsd": 648.2,
+  "ratio": 24,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "WDAY",
+  "name": "Workday",
+  "sector": "Tecnología",
+  "refPriceUsd": 232.6,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TEAM",
+  "name": "Atlassian",
+  "sector": "Tecnología",
+  "refPriceUsd": 188.4,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PANW",
+  "name": "Palo Alto Networks",
+  "sector": "Tecnología",
+  "refPriceUsd": 352.89,
+  "ratio": 50,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CRWD",
+  "name": "CrowdStrike",
+  "sector": "Tecnología",
+  "refPriceUsd": 210.73,
+  "ratio": 80,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "FTNT",
+  "name": "Fortinet",
+  "sector": "Tecnología",
+  "refPriceUsd": 62.8,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NET",
+  "name": "Cloudflare",
+  "sector": "Tecnología",
+  "refPriceUsd": 82.4,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DDOG",
+  "name": "Datadog",
+  "sector": "Tecnología",
+  "refPriceUsd": 128.9,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ZS",
+  "name": "Zscaler",
+  "sector": "Tecnología",
+  "refPriceUsd": 192.3,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SNOW",
+  "name": "Snowflake",
+  "sector": "Tecnología",
+  "refPriceUsd": 275.94,
+  "ratio": 30,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PLTR",
+  "name": "Palantir",
+  "sector": "Tecnología",
+  "refPriceUsd": 133.72,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DELL",
+  "name": "Dell",
+  "sector": "Tecnología",
+  "refPriceUsd": 138.2,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HPQ",
+  "name": "HP",
+  "sector": "Tecnología",
+  "refPriceUsd": 24.63,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "WDC",
+  "name": "Western Digital",
+  "sector": "Tecnología",
+  "refPriceUsd": 68.9,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DOCU",
+  "name": "DocuSign",
+  "sector": "Tecnología",
+  "refPriceUsd": 58.3,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ZM",
+  "name": "Zoom",
+  "sector": "Tecnología",
+  "refPriceUsd": 68.7,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HOOD",
+  "name": "Robinhood",
+  "sector": "Fintech",
+  "refPriceUsd": 113.45,
+  "ratio": 29,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ROKU",
+  "name": "Roku",
+  "sector": "Comunicación",
+  "refPriceUsd": 62.5,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SNAP",
+  "name": "Snap",
+  "sector": "Comunicación",
+  "refPriceUsd": 14.2,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PINS",
+  "name": "Pinterest",
+  "sector": "Comunicación",
+  "refPriceUsd": 38.6,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EA",
+  "name": "Electronic Arts",
+  "sector": "Comunicación",
+  "refPriceUsd": 142.8,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TTWO",
+  "name": "Take-Two",
+  "sector": "Comunicación",
+  "refPriceUsd": 158.4,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TXN",
+  "name": "Texas Instruments",
+  "sector": "Semiconductores",
+  "refPriceUsd": 305.55,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AMAT",
+  "name": "Applied Materials",
+  "sector": "Semiconductores",
+  "refPriceUsd": 595.7,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ADI",
+  "name": "Analog Devices",
+  "sector": "Semiconductores",
+  "refPriceUsd": 392.75,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LRCX",
+  "name": "Lam Research",
+  "sector": "Semiconductores",
+  "refPriceUsd": 92.3,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "KLAC",
+  "name": "KLA Corp",
+  "sector": "Semiconductores",
+  "refPriceUsd": 748.2,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MRVL",
+  "name": "Marvell",
+  "sector": "Semiconductores",
+  "refPriceUsd": 72.6,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NXPI",
+  "name": "NXP Semiconductors",
+  "sector": "Semiconductores",
+  "refPriceUsd": 242.8,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MCHP",
+  "name": "Microchip",
+  "sector": "Semiconductores",
+  "refPriceUsd": 88.4,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ON",
+  "name": "ON Semiconductor",
+  "sector": "Semiconductores",
+  "refPriceUsd": 74.2,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SNPS",
+  "name": "Synopsys",
+  "sector": "Semiconductores",
+  "refPriceUsd": 562.3,
+  "ratio": 16,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AMGN",
+  "name": "Amgen",
+  "sector": "Salud",
+  "refPriceUsd": 355.25,
+  "ratio": 30,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GILD",
+  "name": "Gilead",
+  "sector": "Salud",
+  "refPriceUsd": 130.04,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BMY",
+  "name": "Bristol Myers Squibb",
+  "sector": "Salud",
+  "refPriceUsd": 56.95,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TMO",
+  "name": "Thermo Fisher",
+  "sector": "Salud",
+  "refPriceUsd": 548.6,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DHR",
+  "name": "Danaher",
+  "sector": "Salud",
+  "refPriceUsd": 252.4,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MDT",
+  "name": "Medtronic",
+  "sector": "Salud",
+  "refPriceUsd": 82.3,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CVS",
+  "name": "CVS Health",
+  "sector": "Salud",
+  "refPriceUsd": 106.18,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BSX",
+  "name": "Boston Scientific",
+  "sector": "Salud",
+  "refPriceUsd": 78.6,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SYK",
+  "name": "Stryker",
+  "sector": "Salud",
+  "refPriceUsd": 342.7,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ISRG",
+  "name": "Intuitive Surgical",
+  "sector": "Salud",
+  "refPriceUsd": 379.5,
+  "ratio": 90,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "REGN",
+  "name": "Regeneron",
+  "sector": "Salud",
+  "refPriceUsd": 1042.3,
+  "ratio": 40,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "VRTX",
+  "name": "Vertex Pharma",
+  "sector": "Salud",
+  "refPriceUsd": 476.31,
+  "ratio": 100,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BIIB",
+  "name": "Biogen",
+  "sector": "Salud",
+  "refPriceUsd": 218.4,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MRNA",
+  "name": "Moderna",
+  "sector": "Salud",
+  "refPriceUsd": 102.6,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ZTS",
+  "name": "Zoetis",
+  "sector": "Salud",
+  "refPriceUsd": 172.5,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AXP",
+  "name": "American Express",
+  "sector": "Fintech",
+  "refPriceUsd": 355.06,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BLK",
+  "name": "BlackRock",
+  "sector": "Bancos",
+  "refPriceUsd": 842.3,
+  "ratio": 40,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SCHW",
+  "name": "Charles Schwab",
+  "sector": "Bancos",
+  "refPriceUsd": 101.1,
+  "ratio": 16,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "USB",
+  "name": "US Bancorp",
+  "sector": "Bancos",
+  "refPriceUsd": 62.14,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PNC",
+  "name": "PNC Financial",
+  "sector": "Bancos",
+  "refPriceUsd": 178.3,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "COF",
+  "name": "Capital One",
+  "sector": "Bancos",
+  "refPriceUsd": 142.8,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BK",
+  "name": "Bank of NY Mellon",
+  "sector": "Bancos",
+  "refPriceUsd": 62.7,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SPGI",
+  "name": "S&P Global",
+  "sector": "Fintech",
+  "refPriceUsd": 452.6,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CB",
+  "name": "Chubb",
+  "sector": "Bancos",
+  "refPriceUsd": 262.4,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PGR",
+  "name": "Progressive",
+  "sector": "Bancos",
+  "refPriceUsd": 218.6,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MET",
+  "name": "MetLife",
+  "sector": "Bancos",
+  "refPriceUsd": 74.3,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BRKB",
+  "name": "Berkshire Hathaway",
+  "sector": "Bancos",
+  "refPriceUsd": 428.5,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DE",
+  "name": "John Deere",
+  "sector": "Industrial",
+  "refPriceUsd": 584.4,
+  "ratio": 40,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LMT",
+  "name": "Lockheed Martin",
+  "sector": "Industrial",
+  "refPriceUsd": 514.99,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "RTX",
+  "name": "RTX Corp",
+  "sector": "Industrial",
+  "refPriceUsd": 193.39,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NOC",
+  "name": "Northrop Grumman",
+  "sector": "Industrial",
+  "refPriceUsd": 482.6,
+  "ratio": 24,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GD",
+  "name": "General Dynamics",
+  "sector": "Industrial",
+  "refPriceUsd": 288.5,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "UPS",
+  "name": "United Parcel",
+  "sector": "Industrial",
+  "refPriceUsd": 138.7,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "FDX",
+  "name": "FedEx",
+  "sector": "Industrial",
+  "refPriceUsd": 313.66,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "UNP",
+  "name": "Union Pacific",
+  "sector": "Industrial",
+  "refPriceUsd": 288.3,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CSX",
+  "name": "CSX Corp",
+  "sector": "Industrial",
+  "refPriceUsd": 33.8,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EMR",
+  "name": "Emerson Electric",
+  "sector": "Industrial",
+  "refPriceUsd": 112.4,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ITW",
+  "name": "Illinois Tool Works",
+  "sector": "Industrial",
+  "refPriceUsd": 248.7,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ETN",
+  "name": "Eaton",
+  "sector": "Industrial",
+  "refPriceUsd": 312.5,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HON",
+  "name": "Honeywell",
+  "sector": "Industrial",
+  "refPriceUsd": 222.68,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "COP",
+  "name": "ConocoPhillips",
+  "sector": "Energía",
+  "refPriceUsd": 111.87,
+  "ratio": 25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SLB",
+  "name": "Schlumberger",
+  "sector": "Energía",
+  "refPriceUsd": 47.54,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EOG",
+  "name": "EOG Resources",
+  "sector": "Energía",
+  "refPriceUsd": 128.4,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "OXY",
+  "name": "Occidental",
+  "sector": "Energía",
+  "refPriceUsd": 54.57,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PSX",
+  "name": "Phillips 66",
+  "sector": "Energía",
+  "refPriceUsd": 138.5,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "VLO",
+  "name": "Valero",
+  "sector": "Energía",
+  "refPriceUsd": 152.4,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MPC",
+  "name": "Marathon Petroleum",
+  "sector": "Energía",
+  "refPriceUsd": 172.6,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "KMI",
+  "name": "Kinder Morgan",
+  "sector": "Energía",
+  "refPriceUsd": 20.4,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DUK",
+  "name": "Duke Energy",
+  "sector": "Energía",
+  "refPriceUsd": 102.6,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SO",
+  "name": "Southern Co",
+  "sector": "Energía",
+  "refPriceUsd": 82.4,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NEE",
+  "name": "NextEra Energy",
+  "sector": "Energía",
+  "refPriceUsd": 72.8,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "D",
+  "name": "Dominion Energy",
+  "sector": "Energía",
+  "refPriceUsd": 52.6,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AEP",
+  "name": "American Electric",
+  "sector": "Energía",
+  "refPriceUsd": 92.4,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MO",
+  "name": "Altria",
+  "sector": "Consumo",
+  "refPriceUsd": 70.16,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PM",
+  "name": "Philip Morris",
+  "sector": "Consumo",
+  "refPriceUsd": 175.95,
+  "ratio": 18,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CL",
+  "name": "Colgate-Palmolive",
+  "sector": "Consumo",
+  "refPriceUsd": 91.03,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "KMB",
+  "name": "Kimberly-Clark",
+  "sector": "Consumo",
+  "refPriceUsd": 138.4,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GIS",
+  "name": "General Mills",
+  "sector": "Consumo",
+  "refPriceUsd": 68.5,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MDLZ",
+  "name": "Mondelez",
+  "sector": "Consumo",
+  "refPriceUsd": 58.8,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "KHC",
+  "name": "Kraft Heinz",
+  "sector": "Consumo",
+  "refPriceUsd": 34.6,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HSY",
+  "name": "Hershey",
+  "sector": "Consumo",
+  "refPriceUsd": 171.46,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "STZ",
+  "name": "Constellation Brands",
+  "sector": "Consumo",
+  "refPriceUsd": 248.6,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EL",
+  "name": "Estee Lauder",
+  "sector": "Consumo",
+  "refPriceUsd": 102.7,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "KR",
+  "name": "Kroger",
+  "sector": "Consumo",
+  "refPriceUsd": 56.8,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SYY",
+  "name": "Sysco",
+  "sector": "Consumo",
+  "refPriceUsd": 82.85,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LOW",
+  "name": "Lowe",
+  "sector": "Consumo",
+  "refPriceUsd": 242.6,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TJX",
+  "name": "TJX Companies",
+  "sector": "Consumo",
+  "refPriceUsd": 112.4,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ROST",
+  "name": "Ross Stores",
+  "sector": "Consumo",
+  "refPriceUsd": 220.93,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LULU",
+  "name": "Lululemon",
+  "sector": "Consumo",
+  "refPriceUsd": 312.5,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MAR",
+  "name": "Marriott",
+  "sector": "Consumo",
+  "refPriceUsd": 248.7,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HLT",
+  "name": "Hilton",
+  "sector": "Consumo",
+  "refPriceUsd": 218.4,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BKNG",
+  "name": "Booking Holdings",
+  "sector": "Consumo",
+  "refPriceUsd": 3842.5,
+  "ratio": 150,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DAL",
+  "name": "Delta Air Lines",
+  "sector": "Industrial",
+  "refPriceUsd": 85.51,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "UAL",
+  "name": "United Airlines",
+  "sector": "Industrial",
+  "refPriceUsd": 120.35,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CCL",
+  "name": "Carnival",
+  "sector": "Consumo",
+  "refPriceUsd": 26.5,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "RCL",
+  "name": "Royal Caribbean",
+  "sector": "Consumo",
+  "refPriceUsd": 162.8,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LVS",
+  "name": "Las Vegas Sands",
+  "sector": "Consumo",
+  "refPriceUsd": 46.7,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MGM",
+  "name": "MGM Resorts",
+  "sector": "Consumo",
+  "refPriceUsd": 42.8,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "YUM",
+  "name": "Yum Brands",
+  "sector": "Consumo",
+  "refPriceUsd": 132.6,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CMG",
+  "name": "Chipotle",
+  "sector": "Consumo",
+  "refPriceUsd": 58.4,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ORLY",
+  "name": "OReilly Automotive",
+  "sector": "Consumo",
+  "refPriceUsd": 1042.3,
+  "ratio": 40,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CMCSA",
+  "name": "Comcast",
+  "sector": "Comunicación",
+  "refPriceUsd": 38.6,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CHTR",
+  "name": "Charter Comms",
+  "sector": "Comunicación",
+  "refPriceUsd": 342.7,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TMUS",
+  "name": "T-Mobile US",
+  "sector": "Comunicación",
+  "refPriceUsd": 182.4,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "WBD",
+  "name": "Warner Bros Discovery",
+  "sector": "Comunicación",
+  "refPriceUsd": 8.4,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PDD",
+  "name": "PDD Holdings",
+  "sector": "Consumo",
+  "refPriceUsd": 83.91,
+  "ratio": 25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "JD",
+  "name": "JD.com",
+  "sector": "Consumo",
+  "refPriceUsd": 28.84,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BIDU",
+  "name": "Baidu",
+  "sector": "Tecnología",
+  "refPriceUsd": 92.4,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NTES",
+  "name": "NetEase",
+  "sector": "Comunicación",
+  "refPriceUsd": 98.6,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SE",
+  "name": "Sea Limited",
+  "sector": "Tecnología",
+  "refPriceUsd": 72.8,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NIO",
+  "name": "Nio",
+  "sector": "Automotriz",
+  "refPriceUsd": 5.01,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "XPEV",
+  "name": "XPeng",
+  "sector": "Automotriz",
+  "refPriceUsd": 13.36,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LI",
+  "name": "Li Auto",
+  "sector": "Automotriz",
+  "refPriceUsd": 22.4,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ABEV",
+  "name": "Ambev",
+  "sector": "Consumo",
+  "refPriceUsd": 2.4,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ITUB",
+  "name": "Itau Unibanco",
+  "sector": "Bancos",
+  "refPriceUsd": 6.2,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PBR",
+  "name": "Petrobras",
+  "sector": "Energía",
+  "refPriceUsd": 14.6,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SID",
+  "name": "Cia Siderurgica",
+  "sector": "Materiales",
+  "refPriceUsd": 3.8,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GGB",
+  "name": "Gerdau",
+  "sector": "Materiales",
+  "refPriceUsd": 3.2,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ERJ",
+  "name": "Embraer",
+  "sector": "Industrial",
+  "refPriceUsd": 32.6,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BSBR",
+  "name": "Santander Brasil",
+  "sector": "Bancos",
+  "refPriceUsd": 4.8,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GLOB",
+  "name": "Globant",
+  "sector": "Tecnología",
+  "refPriceUsd": 30.92,
+  "ratio": 18,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DESP",
+  "name": "Despegar",
+  "sector": "Tecnología",
+  "refPriceUsd": 18.6,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BIOX",
+  "name": "Bioceres Crop",
+  "sector": "Materiales",
+  "refPriceUsd": 8.4,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CRESY",
+  "name": "Cresud",
+  "sector": "Consumo",
+  "refPriceUsd": 10.91,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LOMA",
+  "name": "Loma Negra",
+  "sector": "Materiales",
+  "refPriceUsd": 11.37,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TGS",
+  "name": "Transportadora Gas Sur",
+  "sector": "Energía",
+  "refPriceUsd": 31.33,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EDN",
+  "name": "Edenor",
+  "sector": "Energía",
+  "refPriceUsd": 25.2,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "IRS",
+  "name": "IRSA",
+  "sector": "Consumo",
+  "refPriceUsd": 15.36,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TEO",
+  "name": "Telecom Argentina",
+  "sector": "Comunicación",
+  "refPriceUsd": 13.85,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AGRO",
+  "name": "Adecoagro",
+  "sector": "Consumo",
+  "refPriceUsd": 11.2,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CAAP",
+  "name": "Corp America Airports",
+  "sector": "Industrial",
+  "refPriceUsd": 19.4,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "IWM",
+  "name": "iShares Russell 2000",
+  "sector": "ETF",
+  "refPriceUsd": 218.6,
+  "ratio": 10,
+  "category": "ETF"
+ },
+ {
+  "ticker": "EFA",
+  "name": "iShares MSCI EAFE",
+  "sector": "ETF",
+  "refPriceUsd": 103.96,
+  "ratio": 18,
+  "category": "ETF"
+ },
+ {
+  "ticker": "GLD",
+  "name": "SPDR Gold",
+  "sector": "ETF",
+  "refPriceUsd": 372.15,
+  "ratio": 50,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLF",
+  "name": "Financial Select",
+  "sector": "ETF",
+  "refPriceUsd": 44.6,
+  "ratio": 2,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLE",
+  "name": "Energy Select",
+  "sector": "ETF",
+  "refPriceUsd": 56.95,
+  "ratio": 2,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLK",
+  "name": "Technology Select",
+  "sector": "ETF",
+  "refPriceUsd": 232.4,
+  "ratio": 10,
+  "category": "ETF"
+ },
+ {
+  "ticker": "EWZ",
+  "name": "iShares Brazil",
+  "sector": "ETF",
+  "refPriceUsd": 32.6,
+  "ratio": 2,
+  "category": "ETF"
+ },
+ {
+  "ticker": "BTC",
+  "name": "Bitcoin",
+  "sector": "Cripto",
+  "category": "Cripto",
+  "coingeckoId": "bitcoin",
+  "ratio": null,
+  "refPriceUsd": 60000
+ },
+ {
+  "ticker": "ETH",
+  "name": "Ethereum",
+  "sector": "Cripto",
+  "category": "Cripto",
+  "coingeckoId": "ethereum",
+  "ratio": null,
+  "refPriceUsd": 3000
+ },
+ {
+  "ticker": "IBIT",
+  "name": "iShares Bitcoin Trust ETF",
+  "sector": "ETF",
+  "refPriceUsd": 36.23,
+  "ratio": 10,
+  "category": "ETF"
+ },
+ {
+  "ticker": "ETHA",
+  "name": "iShares Ethereum Trust ETF",
+  "sector": "ETF",
+  "refPriceUsd": 13.53,
+  "ratio": 5,
+  "category": "ETF"
+ },
+ {
+  "ticker": "SPXL",
+  "name": "Direxion Daily S&P500 Bull 3X",
+  "sector": "ETF",
+  "refPriceUsd": 279.2,
+  "ratio": 25,
+  "category": "ETF"
+ },
+ {
+  "ticker": "TQQQ",
+  "name": "ProShares UltraPro QQQ",
+  "sector": "ETF",
+  "refPriceUsd": 77.03,
+  "ratio": 25,
+  "category": "ETF"
+ },
+ {
+  "ticker": "SPCX",
+  "name": "Space Exploration Technologies Corp.",
+  "sector": "Tecnología",
+  "refPriceUsd": 145.3,
+  "ratio": 50,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "RBLX",
+  "name": "Roblox Corporation",
+  "sector": "Tecnología",
+  "refPriceUsd": 55.37,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MSTR",
+  "name": "Strategy (MicroStrategy)",
+  "sector": "Cripto (acciones)",
+  "refPriceUsd": 97.58,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "RIOT",
+  "name": "Riot Platforms",
+  "sector": "Cripto (acciones)",
+  "refPriceUsd": 20.19,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HUT",
+  "name": "Hut 8",
+  "sector": "Cripto (acciones)",
+  "refPriceUsd": 98.33,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "IREN",
+  "name": "IREN (Iris Energy)",
+  "sector": "Cripto (acciones)",
+  "refPriceUsd": 38.59,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BBAR",
+  "name": "BBVA Argentina",
+  "sector": "Bancos",
+  "refPriceUsd": 20.05,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TS",
+  "name": "Tenaris",
+  "sector": "Energía",
+  "refPriceUsd": 56.31,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ARCO",
+  "name": "Arcos Dorados",
+  "sector": "Consumo",
+  "refPriceUsd": 8.2,
+  "ratio": 0.5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SATL",
+  "name": "Satellogic",
+  "sector": "Tecnología",
+  "refPriceUsd": 4.31,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AAL",
+  "name": "American Airlines",
+  "sector": "Industrial",
+  "refPriceUsd": 14.98,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AAP",
+  "name": "Advance Auto Parts",
+  "sector": "Consumo",
+  "refPriceUsd": 53.16,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ABT",
+  "name": "Abbott Laboratories",
+  "sector": "Salud",
+  "refPriceUsd": 100.68,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ACN",
+  "name": "Accenture",
+  "sector": "Tecnología",
+  "refPriceUsd": 143.57,
+  "ratio": 72,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ACWI",
+  "name": "Mundo (iShares)",
+  "sector": "ETF",
+  "refPriceUsd": 155.0,
+  "ratio": 25,
+  "category": "ETF"
+ },
+ {
+  "ticker": "ADP",
+  "name": "Automatic Data Processing",
+  "sector": "Tecnología",
+  "refPriceUsd": 255.26,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AEM",
+  "name": "Agnico Eagle Mines",
+  "sector": "Minería",
+  "refPriceUsd": 136.97,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AI",
+  "name": "C3.ai",
+  "sector": "Tecnología",
+  "refPriceUsd": 8.82,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AIG",
+  "name": "AIG",
+  "sector": "Financiero",
+  "refPriceUsd": 80.5,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ALAB",
+  "name": "Astera Labs",
+  "sector": "Semiconductores",
+  "refPriceUsd": 303.62,
+  "ratio": 44,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AMX",
+  "name": "América Móvil",
+  "sector": "Comunicación",
+  "refPriceUsd": 26.27,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ANET",
+  "name": "Arista Networks",
+  "sector": "Tecnología",
+  "refPriceUsd": 168.61,
+  "ratio": 30,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ANF",
+  "name": "Abercrombie & Fitch",
+  "sector": "Consumo",
+  "refPriceUsd": 95.24,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ARM",
+  "name": "Arm Holdings",
+  "sector": "Semiconductores",
+  "refPriceUsd": 267.19,
+  "ratio": 25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ASML",
+  "name": "ASML",
+  "sector": "Semiconductores",
+  "refPriceUsd": 1747.58,
+  "ratio": 144,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ASTS",
+  "name": "AST SpaceMobile",
+  "sector": "Comunicación",
+  "refPriceUsd": 57.8,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AVY",
+  "name": "Avery Dennison",
+  "sector": "Industrial",
+  "refPriceUsd": 160.41,
+  "ratio": 18,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "AZN",
+  "name": "AstraZeneca",
+  "sector": "Salud",
+  "refPriceUsd": 168.9,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BB",
+  "name": "BlackBerry",
+  "sector": "Tecnología",
+  "refPriceUsd": 8.99,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BHP",
+  "name": "BHP Group",
+  "sector": "Minería",
+  "refPriceUsd": 80.64,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BKR",
+  "name": "Baker Hughes",
+  "sector": "Energía",
+  "refPriceUsd": 55.95,
+  "ratio": 7,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BMNR",
+  "name": "Bitmine Immersion",
+  "sector": "Cripto (acciones)",
+  "refPriceUsd": 15.69,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BP",
+  "name": "BP",
+  "sector": "Energía",
+  "refPriceUsd": 41.9,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "BX",
+  "name": "Blackstone",
+  "sector": "Financiero",
+  "refPriceUsd": 126.91,
+  "ratio": 30,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CAH",
+  "name": "Cardinal Health",
+  "sector": "Salud",
+  "refPriceUsd": 228.52,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CAR",
+  "name": "Avis Budget Group",
+  "sector": "Consumo",
+  "refPriceUsd": 160.57,
+  "ratio": 25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CCJ",
+  "name": "Cameco",
+  "sector": "Energía",
+  "refPriceUsd": 85.62,
+  "ratio": 24,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CDE",
+  "name": "Coeur Mining",
+  "sector": "Minería",
+  "refPriceUsd": 14.35,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CEG",
+  "name": "Constellation Energy",
+  "sector": "Energía",
+  "refPriceUsd": 252.39,
+  "ratio": 48,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CIBR",
+  "name": "Ciberseguridad (First Trust)",
+  "sector": "ETF",
+  "refPriceUsd": 92.36,
+  "ratio": 10,
+  "category": "ETF"
+ },
+ {
+  "ticker": "CLS",
+  "name": "Celestica",
+  "sector": "Tecnología",
+  "refPriceUsd": 301.34,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "COPX",
+  "name": "Mineras de cobre (Global X)",
+  "sector": "ETF",
+  "refPriceUsd": 73.35,
+  "ratio": 15,
+  "category": "ETF"
+ },
+ {
+  "ticker": "CRWV",
+  "name": "CoreWeave",
+  "sector": "Tecnología",
+  "refPriceUsd": 73.21,
+  "ratio": 25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "CX",
+  "name": "Cemex",
+  "sector": "Materiales",
+  "refPriceUsd": 12.97,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DD",
+  "name": "DuPont",
+  "sector": "Materiales",
+  "refPriceUsd": 135.29,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DECK",
+  "name": "Deckers Outdoor",
+  "sector": "Consumo",
+  "refPriceUsd": 106.49,
+  "ratio": 25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DEO",
+  "name": "Diageo",
+  "sector": "Consumo",
+  "refPriceUsd": 84.0,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "DOW",
+  "name": "Dow",
+  "sector": "Materiales",
+  "refPriceUsd": 29.92,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "E",
+  "name": "Eni",
+  "sector": "Energía",
+  "refPriceUsd": 49.77,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EBAY",
+  "name": "eBay",
+  "sector": "Consumo",
+  "refPriceUsd": 112.06,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EC",
+  "name": "Ecopetrol",
+  "sector": "Energía",
+  "refPriceUsd": 16.09,
+  "ratio": 1815,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ECL",
+  "name": "Ecolab",
+  "sector": "Materiales",
+  "refPriceUsd": 272.83,
+  "ratio": 60,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EFX",
+  "name": "Equifax",
+  "sector": "Financiero",
+  "refPriceUsd": 177.08,
+  "ratio": 16,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EQNR",
+  "name": "Equinor",
+  "sector": "Energía",
+  "refPriceUsd": 37.37,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ERIC",
+  "name": "Ericsson",
+  "sector": "Comunicación",
+  "refPriceUsd": 9.82,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ETSY",
+  "name": "Etsy",
+  "sector": "Consumo",
+  "refPriceUsd": 84.1,
+  "ratio": 16,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "EWJ",
+  "name": "Japón (iShares)",
+  "sector": "ETF",
+  "refPriceUsd": 90.49,
+  "ratio": 15,
+  "category": "ETF"
+ },
+ {
+  "ticker": "EWY",
+  "name": "Corea (iShares)",
+  "sector": "ETF",
+  "refPriceUsd": 162.54,
+  "ratio": 50,
+  "category": "ETF"
+ },
+ {
+  "ticker": "FCX",
+  "name": "Freeport-McMoRan",
+  "sector": "Minería",
+  "refPriceUsd": 58.38,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "FMX",
+  "name": "FEMSA",
+  "sector": "Consumo",
+  "refPriceUsd": 129.02,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "FSLR",
+  "name": "First Solar",
+  "sector": "Energía",
+  "refPriceUsd": 211.99,
+  "ratio": 18,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "FXI",
+  "name": "China Large-Cap (iShares)",
+  "sector": "ETF",
+  "refPriceUsd": 34.13,
+  "ratio": 5,
+  "category": "ETF"
+ },
+ {
+  "ticker": "GDX",
+  "name": "Mineras de oro (VanEck)",
+  "sector": "ETF",
+  "refPriceUsd": 71.32,
+  "ratio": 10,
+  "category": "ETF"
+ },
+ {
+  "ticker": "GFI",
+  "name": "Gold Fields",
+  "sector": "Minería",
+  "refPriceUsd": 31.99,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GLNG",
+  "name": "Golar LNG",
+  "sector": "Energía",
+  "refPriceUsd": 49.65,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GLW",
+  "name": "Corning",
+  "sector": "Tecnología",
+  "refPriceUsd": 154.61,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GPRK",
+  "name": "GeoPark",
+  "sector": "Energía",
+  "refPriceUsd": 9.68,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GRMN",
+  "name": "Garmin",
+  "sector": "Tecnología",
+  "refPriceUsd": 249.56,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GSK",
+  "name": "GSK",
+  "sector": "Salud",
+  "refPriceUsd": 51.76,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "GT",
+  "name": "Goodyear",
+  "sector": "Consumo",
+  "refPriceUsd": 7.29,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HAL",
+  "name": "Halliburton",
+  "sector": "Energía",
+  "refPriceUsd": 35.22,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HDB",
+  "name": "HDFC Bank",
+  "sector": "Financiero",
+  "refPriceUsd": 26.38,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HIMS",
+  "name": "Hims & Hers Health",
+  "sector": "Salud",
+  "refPriceUsd": 32.84,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HL",
+  "name": "Hecla Mining",
+  "sector": "Minería",
+  "refPriceUsd": 14.33,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HMC",
+  "name": "Honda Motor",
+  "sector": "Automotriz",
+  "refPriceUsd": 28.16,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HMY",
+  "name": "Harmony Gold",
+  "sector": "Minería",
+  "refPriceUsd": 14.65,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HOG",
+  "name": "Harley-Davidson",
+  "sector": "Consumo",
+  "refPriceUsd": 26.58,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HSBC",
+  "name": "HSBC",
+  "sector": "Financiero",
+  "refPriceUsd": 100.61,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "HWM",
+  "name": "Howmet Aerospace",
+  "sector": "Industrial",
+  "refPriceUsd": 272.43,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "IBB",
+  "name": "Biotecnología (iShares)",
+  "sector": "ETF",
+  "refPriceUsd": 189.76,
+  "ratio": 25,
+  "category": "ETF"
+ },
+ {
+  "ticker": "IBN",
+  "name": "ICICI Bank",
+  "sector": "Financiero",
+  "refPriceUsd": 29.76,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ICLN",
+  "name": "Energía limpia (iShares)",
+  "sector": "ETF",
+  "refPriceUsd": 18.37,
+  "ratio": 5,
+  "category": "ETF"
+ },
+ {
+  "ticker": "IFF",
+  "name": "Intl. Flavors & Fragrances",
+  "sector": "Materiales",
+  "refPriceUsd": 78.2,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ILF",
+  "name": "Latinoamérica 40 (iShares)",
+  "sector": "ETF",
+  "refPriceUsd": 34.07,
+  "ratio": 6,
+  "category": "ETF"
+ },
+ {
+  "ticker": "INFY",
+  "name": "Infosys",
+  "sector": "Tecnología",
+  "refPriceUsd": 11.49,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ING",
+  "name": "ING Group",
+  "sector": "Financiero",
+  "refPriceUsd": 32.33,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "IP",
+  "name": "International Paper",
+  "sector": "Materiales",
+  "refPriceUsd": 37.56,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ITA",
+  "name": "Aeroespacial y defensa (iShares)",
+  "sector": "ETF",
+  "refPriceUsd": 230.73,
+  "ratio": 50,
+  "category": "ETF"
+ },
+ {
+  "ticker": "JCI",
+  "name": "Johnson Controls",
+  "sector": "Industrial",
+  "refPriceUsd": 140.46,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "JMIA",
+  "name": "Jumia",
+  "sector": "Consumo",
+  "refPriceUsd": 6.5,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "KB",
+  "name": "KB Financial",
+  "sector": "Financiero",
+  "refPriceUsd": 119.37,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "KEP",
+  "name": "Korea Electric Power",
+  "sector": "Energía",
+  "refPriceUsd": 11.37,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "KGC",
+  "name": "Kinross Gold",
+  "sector": "Minería",
+  "refPriceUsd": 22.57,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LAC",
+  "name": "Lithium Americas",
+  "sector": "Minería",
+  "refPriceUsd": 2.95,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "LYG",
+  "name": "Lloyds Banking",
+  "sector": "Financiero",
+  "refPriceUsd": 5.96,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MOS",
+  "name": "Mosaic",
+  "sector": "Materiales",
+  "refPriceUsd": 22.13,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MP",
+  "name": "MP Materials",
+  "sector": "Minería",
+  "refPriceUsd": 45.24,
+  "ratio": 10,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MSI",
+  "name": "Motorola Solutions",
+  "sector": "Tecnología",
+  "refPriceUsd": 413.31,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MUFG",
+  "name": "Mitsubishi UFJ",
+  "sector": "Financiero",
+  "refPriceUsd": 21.32,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "MUX",
+  "name": "McEwen Mining",
+  "sector": "Minería",
+  "refPriceUsd": 16.37,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NBIS",
+  "name": "Nebius Group",
+  "sector": "Tecnología",
+  "refPriceUsd": 177.71,
+  "ratio": 25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NEM",
+  "name": "Newmont",
+  "sector": "Minería",
+  "refPriceUsd": 89.7,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NG",
+  "name": "NovaGold",
+  "sector": "Minería",
+  "refPriceUsd": 5.18,
+  "ratio": 0.25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NGG",
+  "name": "National Grid",
+  "sector": "Energía",
+  "refPriceUsd": 83.99,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NMR",
+  "name": "Nomura",
+  "sector": "Financiero",
+  "refPriceUsd": 9.4,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NU",
+  "name": "Nu Holdings",
+  "sector": "Financiero",
+  "refPriceUsd": 13.59,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NUE",
+  "name": "Nucor",
+  "sector": "Materiales",
+  "refPriceUsd": 236.61,
+  "ratio": 16,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NVO",
+  "name": "Novo Nordisk",
+  "sector": "Salud",
+  "refPriceUsd": 50.32,
+  "ratio": 7,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NVS",
+  "name": "Novartis",
+  "sector": "Salud",
+  "refPriceUsd": 153.76,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "NXE",
+  "name": "NexGen Energy",
+  "sector": "Energía",
+  "refPriceUsd": 8.8,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "O",
+  "name": "Realty Income",
+  "sector": "Real Estate",
+  "refPriceUsd": 65.71,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "OKLO",
+  "name": "Oklo",
+  "sector": "Energía",
+  "refPriceUsd": 41.11,
+  "ratio": 30,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "ONDS",
+  "name": "Ondas Holdings",
+  "sector": "Tecnología",
+  "refPriceUsd": 6.53,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PAAS",
+  "name": "Pan American Silver",
+  "sector": "Minería",
+  "refPriceUsd": 41.77,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PAC",
+  "name": "Grupo Aeroportuario del Pacífico",
+  "sector": "Industrial",
+  "refPriceUsd": 220.91,
+  "ratio": 16,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PAGS",
+  "name": "PagSeguro",
+  "sector": "Financiero",
+  "refPriceUsd": 9.04,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PATH",
+  "name": "UiPath",
+  "sector": "Tecnología",
+  "refPriceUsd": 12.15,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PBI",
+  "name": "Pitney Bowes",
+  "sector": "Industrial",
+  "refPriceUsd": 18.51,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PCAR",
+  "name": "PACCAR",
+  "sector": "Automotriz",
+  "refPriceUsd": 126.2,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "PHG",
+  "name": "Philips",
+  "sector": "Salud",
+  "refPriceUsd": 26.95,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "RACE",
+  "name": "Ferrari",
+  "sector": "Automotriz",
+  "refPriceUsd": 376.83,
+  "ratio": 80,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "RGTI",
+  "name": "Rigetti Computing",
+  "sector": "Tecnología",
+  "refPriceUsd": 14.11,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "RIO",
+  "name": "Rio Tinto",
+  "sector": "Minería",
+  "refPriceUsd": 90.15,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "RKLB",
+  "name": "Rocket Lab",
+  "sector": "Industrial",
+  "refPriceUsd": 67.62,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "RSP",
+  "name": "S&P 500 Equal Weight",
+  "sector": "ETF",
+  "refPriceUsd": 213.37,
+  "ratio": 30,
+  "category": "ETF"
+ },
+ {
+  "ticker": "SAN",
+  "name": "Banco Santander",
+  "sector": "Financiero",
+  "refPriceUsd": 13.55,
+  "ratio": 0.25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SAP",
+  "name": "SAP",
+  "sector": "Tecnología",
+  "refPriceUsd": 159.04,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SBS",
+  "name": "Sabesp",
+  "sector": "Energía",
+  "refPriceUsd": 5.75,
+  "ratio": 0.5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SCCO",
+  "name": "Southern Copper",
+  "sector": "Minería",
+  "refPriceUsd": 172.48,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SHEL",
+  "name": "Shell",
+  "sector": "Energía",
+  "refPriceUsd": 87.32,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SLV",
+  "name": "Plata (iShares)",
+  "sector": "ETF",
+  "refPriceUsd": 50.78,
+  "ratio": 6,
+  "category": "ETF"
+ },
+ {
+  "ticker": "SMH",
+  "name": "Semiconductores (VanEck)",
+  "sector": "ETF",
+  "refPriceUsd": 556.53,
+  "ratio": 50,
+  "category": "ETF"
+ },
+ {
+  "ticker": "SNA",
+  "name": "Snap-on",
+  "sector": "Industrial",
+  "refPriceUsd": 410.99,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SNDK",
+  "name": "SanDisk",
+  "sector": "Tecnología",
+  "refPriceUsd": 1354.82,
+  "ratio": 170,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SONY",
+  "name": "Sony",
+  "sector": "Tecnología",
+  "refPriceUsd": 21.12,
+  "ratio": 8,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SPCE",
+  "name": "Virgin Galactic",
+  "sector": "Industrial",
+  "refPriceUsd": 2.56,
+  "ratio": 0.5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "STLA",
+  "name": "Stellantis",
+  "sector": "Automotriz",
+  "refPriceUsd": 5.79,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "STNE",
+  "name": "StoneCo",
+  "sector": "Financiero",
+  "refPriceUsd": 11.15,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SUZ",
+  "name": "Suzano",
+  "sector": "Materiales",
+  "refPriceUsd": 8.21,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "SWKS",
+  "name": "Skyworks Solutions",
+  "sector": "Semiconductores",
+  "refPriceUsd": 59.35,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TCOM",
+  "name": "Trip.com",
+  "sector": "Consumo",
+  "refPriceUsd": 42.45,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TEM",
+  "name": "Tempus AI",
+  "sector": "Salud",
+  "refPriceUsd": 52.47,
+  "ratio": 12,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TIMB",
+  "name": "TIM Brasil",
+  "sector": "Comunicación",
+  "refPriceUsd": 22.14,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TM",
+  "name": "Toyota Motor",
+  "sector": "Automotriz",
+  "refPriceUsd": 177.61,
+  "ratio": 15,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TRIP",
+  "name": "TripAdvisor",
+  "sector": "Consumo",
+  "refPriceUsd": 14.58,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TTE",
+  "name": "TotalEnergies",
+  "sector": "Energía",
+  "refPriceUsd": 81.39,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TV",
+  "name": "Grupo Televisa",
+  "sector": "Comunicación",
+  "refPriceUsd": 2.71,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "TWLO",
+  "name": "Twilio",
+  "sector": "Tecnología",
+  "refPriceUsd": 206.78,
+  "ratio": 36,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "UGP",
+  "name": "Ultrapar",
+  "sector": "Energía",
+  "refPriceUsd": 6.25,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "UL",
+  "name": "Unilever",
+  "sector": "Consumo",
+  "refPriceUsd": 62.39,
+  "ratio": 3,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "UPST",
+  "name": "Upstart",
+  "sector": "Financiero",
+  "refPriceUsd": 29.51,
+  "ratio": 5,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "URA",
+  "name": "Uranio (Global X)",
+  "sector": "ETF",
+  "refPriceUsd": 38.73,
+  "ratio": 5,
+  "category": "ETF"
+ },
+ {
+  "ticker": "URBN",
+  "name": "Urban Outfitters",
+  "sector": "Consumo",
+  "refPriceUsd": 72.98,
+  "ratio": 2,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "USO",
+  "name": "Petróleo WTI (USO)",
+  "sector": "ETF",
+  "refPriceUsd": 123.96,
+  "ratio": 15,
+  "category": "ETF"
+ },
+ {
+  "ticker": "VEA",
+  "name": "Desarrollados ex-US (Vanguard)",
+  "sector": "ETF",
+  "refPriceUsd": 69.7,
+  "ratio": 10,
+  "category": "ETF"
+ },
+ {
+  "ticker": "VIG",
+  "name": "Dividend Appreciation (Vanguard)",
+  "sector": "ETF",
+  "refPriceUsd": 237.61,
+  "ratio": 40,
+  "category": "ETF"
+ },
+ {
+  "ticker": "VIV",
+  "name": "Telefônica Brasil",
+  "sector": "Comunicación",
+  "refPriceUsd": 13.95,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "VOD",
+  "name": "Vodafone",
+  "sector": "Comunicación",
+  "refPriceUsd": 15.74,
+  "ratio": 1,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "VRSN",
+  "name": "VeriSign",
+  "sector": "Tecnología",
+  "refPriceUsd": 277.66,
+  "ratio": 6,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "VST",
+  "name": "Vistra",
+  "sector": "Energía",
+  "refPriceUsd": 155.44,
+  "ratio": 25,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "XLB",
+  "name": "Materiales (SPDR)",
+  "sector": "ETF",
+  "refPriceUsd": 50.53,
+  "ratio": 18,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLC",
+  "name": "Comunicación (SPDR)",
+  "sector": "ETF",
+  "refPriceUsd": 110.65,
+  "ratio": 18,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLI",
+  "name": "Industrial (SPDR)",
+  "sector": "ETF",
+  "refPriceUsd": 179.41,
+  "ratio": 30,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLP",
+  "name": "Consumo básico (SPDR)",
+  "sector": "ETF",
+  "refPriceUsd": 85.19,
+  "ratio": 16,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLRE",
+  "name": "Real Estate (SPDR)",
+  "sector": "ETF",
+  "refPriceUsd": 45.42,
+  "ratio": 9,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLU",
+  "name": "Utilities (SPDR)",
+  "sector": "ETF",
+  "refPriceUsd": 45.17,
+  "ratio": 15,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLV",
+  "name": "Salud (SPDR)",
+  "sector": "ETF",
+  "refPriceUsd": 161.09,
+  "ratio": 30,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XLY",
+  "name": "Consumo discrecional (SPDR)",
+  "sector": "ETF",
+  "refPriceUsd": 115.44,
+  "ratio": 40,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XME",
+  "name": "Metales y minería (SPDR)",
+  "sector": "ETF",
+  "refPriceUsd": 98.35,
+  "ratio": 30,
+  "category": "ETF"
+ },
+ {
+  "ticker": "XP",
+  "name": "XP Inc",
+  "sector": "Financiero",
+  "refPriceUsd": 16.67,
+  "ratio": 4,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "XYZ",
+  "name": "Block (ex Square)",
+  "sector": "Financiero",
+  "refPriceUsd": 79.94,
+  "ratio": 20,
+  "category": "CEDEAR"
+ },
+ {
+  "ticker": "YELP",
+  "name": "Yelp",
+  "sector": "Tecnología",
+  "refPriceUsd": 26.22,
+  "ratio": 2,
+  "category": "CEDEAR"
+ }
+]

@@ -96,7 +96,7 @@ const DASHBOARD_UNIVERSE = [
 // en NYSE/Nasdaq) y activos relacionados con cripto (CEDEARs de empresas
 // bitcoin-céntricas + ETFs spot + exchanges/brokers con exposición directa).
 const AR_TICKERS = new Set(['GGAL', 'BMA', 'SUPV', 'BBAR', 'YPF', 'PAM', 'CEPU', 'VIST', 'EDN', 'LOMA', 'TGS', 'TEO', 'CRESY', 'IRS', 'AGRO', 'CAAP', 'DESP', 'GLOB', 'BIOX', 'MELI', 'TS', 'TX', 'ARCO', 'SATL']);
-const CRYPTO_RELATED = new Set(['BTC', 'ETH', 'MSTR', 'RIOT', 'HUT', 'IREN', 'COIN', 'IBIT', 'ETHA']);
+const CRYPTO_RELATED = new Set(['BTC', 'ETH', 'MSTR', 'RIOT', 'HUT', 'IREN', 'COIN', 'IBIT', 'ETHA', 'BMNR']);
 const dashState = { data: {}, loading: new Set(), started: false, macro: null, ccl: null };
 // Subconjunto del universo del dashboard para el widget "Mercado Hoy" del
 // sidebar — reusa dashState.data, no dispara requests propios.
