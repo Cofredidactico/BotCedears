@@ -149,6 +149,7 @@ const portState = {
   compact: lsGetSafe('icp_port_compact', '0') === '1',
   privacy: lsGetSafe('icp_port_privacy', '0') === '1',
   allocAmount: '', allocResult: null, // asignador "¿qué compro con AR$X?"
+  accountTotalArs: (() => { const v = parseFloat(lsGetSafe('icp_port_account', '')); return isNaN(v) || v <= 0 ? null : v; })(), // valor total declarado de la cuenta (ARS) → habilita el motor de liquidez
   tab: 'resumen', // pestaña activa de la Radiografía de Cartera
   stressShock: null, // shock de mercado elegido en el panel de estrés (o null)
   optMode: 'minvar', // criterio del optimizador de cartera
@@ -4618,6 +4619,172 @@ function rebalanceCardHTML(stats) {
 }
 
 /* ── asignador: "¿qué compro con AR$ X?" ── */
+/* ═══════════════ EFECTIVO & COMPRAS INTELIGENTES ═══════════════
+ * El usuario declara el valor total de su cuenta en pesos. Calculamos la
+ * liquidez (total − valor invertido, valuado al CCL) y proponemos compras
+ * concretas de CALIDAD para esa liquidez, tomadas del universo curado + sus
+ * tenencias, filtradas por grado A/B o señal de compra, dimensionadas para:
+ *   · no pasar el tope por posición del perfil de riesgo,
+ *   · diversificar (preferir sectores poco pesados),
+ *   · y arriesgar ~1% de la cuenta al stop por operación (position sizing 1R).
+ * Nada garantiza ganancias — esto maximiza la ventaja y controla el riesgo. */
+const LIQ_RISK_PCT = 0.01;   // riesgo al stop por operación, como fracción de la cuenta
+const LIQ_MAX_SUGG = 5;      // máximo de ideas sugeridas
+function computeLiquidityPlan(stats) {
+  const total = portState.accountTotalArs;
+  const ccl = portState.ccl?.value ?? portState.macro?.dolares?.ccl ?? null;
+  if (!ccl) return { needsCcl: true, noAccount: !total };
+  const investedArs = stats.totalValue * ccl; // toda la cartera a pesos vía CCL
+  const res = { ccl, investedArs, accountTotalArs: total };
+  if (!total || total <= 0) { res.noAccount = true; return res; }
+  const liquidez = total - investedArs;
+  res.liquidez = liquidez;
+  res.investedPct = investedArs / total;
+  res.cashPct = Math.max(0, liquidez) / total;
+  if (liquidez <= 0) { res.negative = true; return res; }
+
+  const cap = (RISK_PROFILES[settingsState.riskProfile] ?? RISK_PROFILES.moderado).maxPositionPct / 100;
+  const capArs = cap * total;
+
+  // Pool de candidatos: universo curado + tenencias (dedup por ticker).
+  const pool = new Map();
+  for (const [tk, d] of Object.entries(dashState.data)) if (d) pool.set(tk, d);
+  for (const r of stats.rows) if (r.d && !pool.has(r.ticker)) pool.set(r.ticker, r.d);
+
+  const curValueArsByTicker = {};
+  for (const r of stats.rows) curValueArsByTicker[r.ticker] = (r.value ?? 0) * ccl;
+  const sectorWeight = {};
+  for (const s of stats.sectorRows) sectorWeight[s.sector] = s.pct;
+
+  const cands = [];
+  for (const [tk, d] of pool) {
+    const buyable = (d.alert?.type === 'buy' && (d.alert.grade === 'A' || d.alert.grade === 'B'))
+      || d.scoreLabel === 'Compra Fuerte' || d.scoreLabel === 'Compra Moderada';
+    if (!buyable) continue;
+    const unitArs = d.cedearArs ?? (d.price ? d.price * ccl : null);
+    if (!unitArs || unitArs <= 0) continue;
+    const curVal = curValueArsByTicker[tk] ?? 0;
+    if (curVal >= capArs) continue; // ya en el tope por posición: no sumar
+    const conv = positionConviction({ d });
+    const secW = d.sector ? (sectorWeight[d.sector] ?? 0) : 0;
+    let rank = d.score ?? 50;
+    if (d.alert?.grade === 'A') rank += 15; else if (d.alert?.grade === 'B') rank += 7;
+    if (conv?.verdict === 'alta') rank += 10; else if (conv?.verdict === 'media') rank += 4; else if (conv?.verdict === 'baja') rank -= 6;
+    if (secW < 0.12) rank += 8; else if (secW > 0.4) rank -= 10; // diversificación
+    if (d.setup?.qualifies) rank += 5;
+    cands.push({ ticker: tk, d, unitArs, isCedear: d.cedearArs != null, curVal, conv, sector: d.sector, grade: d.alert?.grade ?? null, score: d.score, scoreLabel: d.scoreLabel, rank });
+  }
+  cands.sort((a, b) => b.rank - a.rank);
+
+  // Reparto de la liquidez entre las mejores ideas, respetando el tope por
+  // posición y el capital disponible (greedy en orden de ranking).
+  const targetCount = Math.max(1, Math.min(cands.length, LIQ_MAX_SUGG));
+  const evenSlice = liquidez / targetCount;
+  let remaining = liquidez;
+  const suggestions = [];
+  for (const c of cands.slice(0, LIQ_MAX_SUGG)) {
+    if (remaining < c.unitArs) continue;
+    const roomToCap = Math.max(0, capArs - c.curVal);
+    const amount = Math.min(evenSlice, roomToCap, remaining);
+    if (amount < c.unitArs) continue;
+    const qty = c.isCedear ? Math.floor(amount / c.unitArs) : amount / c.unitArs;
+    if (qty <= 0) continue;
+    const cost = qty * c.unitArs;
+    remaining -= cost;
+    const newWeightPct = ((c.curVal + cost) / total) * 100;
+    // Riesgo real de ESTA compra: cuánto perdés (en pesos y como % de la
+    // cuenta) si el precio toca el stop sugerido del Plan Operativo. Además,
+    // el tamaño "por riesgo 1R" — cuántos CEDEARs podrías tener arriesgando
+    // ~1% de la cuenta — como referencia de position sizing.
+    let riskArs = null, riskPctAccount = null, riskQty = null;
+    const pr = c.d.planRaw;
+    if (pr?.stopLoss != null && c.d.price > pr.stopLoss) {
+      const riskUsdPerShare = c.d.price - pr.stopLoss;
+      const riskPerUnitArs = c.isCedear && c.d.ratio ? (riskUsdPerShare / c.d.ratio) * ccl : riskUsdPerShare * ccl;
+      if (riskPerUnitArs > 0) {
+        riskArs = qty * riskPerUnitArs;
+        riskPctAccount = (riskArs / total) * 100;
+        riskQty = c.isCedear ? Math.floor((LIQ_RISK_PCT * total) / riskPerUnitArs) : (LIQ_RISK_PCT * total) / riskPerUnitArs;
+      }
+    }
+    suggestions.push({ ...c, qty, cost, newWeightPct, riskArs, riskPctAccount, riskQty });
+  }
+  res.suggestions = suggestions;
+  res.leftover = remaining;
+  res.cap = cap;
+  res.poolCount = cands.length;
+  res.loadingUniverse = !dashState.started || DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
+  return res;
+}
+
+function liqSuggestionHTML(s) {
+  // Badge de grado solo si es A/B (una "idea de calidad"); si entró por señal
+  // de compra sin grado alto, se muestra la señal del score, no un grado C.
+  const g = (s.grade === 'A' || s.grade === 'B') ? GRADE_META[s.grade] : null;
+  const sig = scoreLabelColor(s.scoreLabel);
+  const tag = g
+    ? `<span class="alert-grade" style="color:${g.color}; border-color:${g.color};">zona ${g.label}</span>`
+    : `<span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(s.scoreLabel)} · ${s.score}</span>`;
+  return `
+    <div class="liq-sugg" data-dash-ticker="${esc(s.ticker)}">
+      <div class="liq-sugg-head">
+        <span class="liq-sugg-ticker">${esc(s.ticker)}</span>
+        <span class="liq-sugg-sub">${esc(s.d.name ?? '')}${s.sector ? ' · ' + esc(s.sector) : ''}</span>
+        ${tag}
+      </div>
+      <div class="liq-sugg-buy">Comprar <b>${s.isCedear ? s.qty : s.qty.toFixed(4)}</b> ${s.isCedear ? 'CEDEAR' + (s.qty === 1 ? '' : 's') : 'unid.'} a ${pv(fmtArs(s.unitArs))} = <b>${pv(fmtArs(s.cost))}</b></div>
+      <div class="liq-sugg-meta">Quedaría en <b>${s.newWeightPct != null ? Math.round(s.newWeightPct) : '—'}%</b> de la cuenta${s.riskArs != null ? ` · si toca el stop perdés ~<b>${pv(fmtArs(s.riskArs))}</b> (${s.riskPctAccount < 0.1 ? '<0,1' : s.riskPctAccount.toFixed(1)}% de la cuenta)` : ''}</div>
+    </div>`;
+}
+
+function liquidityCardHTML(stats) {
+  const plan = computeLiquidityPlan(stats);
+  const total = portState.accountTotalArs;
+  let body;
+  if (plan.needsCcl && !total) body = `<div class="port-note" style="color:var(--text-mute);">Ingresá el total de tu cuenta en pesos para ver tu liquidez y sugerencias de compra.</div>`;
+  else if (plan.needsCcl) body = `<div class="port-note">Cargando el CCL para valuar tu cartera en pesos…</div>`;
+  else if (plan.noAccount) body = `<div class="port-note" style="color:var(--text-mute);">Ingresá el total de tu cuenta en pesos para ver tu liquidez y sugerencias de compra.</div>`;
+  else if (plan.negative) body = `<div class="port-note risk">⚠ El total que ingresaste (${pv(fmtArs(total))}) es menor que el valor invertido de tu cartera (${pv(fmtArs(plan.investedArs))} valuado al CCL). Revisá el monto — no queda liquidez para comprar.</div>`;
+  else body = `
+    <div class="liq-bars">
+      <div class="liq-bar">
+        <div class="liq-bar-seg invested" style="width:${Math.min(100, Math.round(plan.investedPct * 100))}%" title="Invertido"></div>
+        <div class="liq-bar-seg cash" style="width:${Math.min(100, Math.round(plan.cashPct * 100))}%" title="Líquido"></div>
+      </div>
+      <div class="liq-legend">
+        <span><span class="liq-dot invested"></span>Invertido ${pv(fmtArs(plan.investedArs))} · ${Math.round(plan.investedPct * 100)}%</span>
+        <span><span class="liq-dot cash"></span>Líquido ${pv(fmtArs(plan.liquidez))} · ${Math.round(plan.cashPct * 100)}%</span>
+      </div>
+    </div>
+    ${!plan.suggestions?.length
+      ? `<div class="port-note">${plan.loadingUniverse ? 'Analizando el universo para sugerirte compras de calidad…' : 'Con tu liquidez no encontré compras de calidad (grado A/B o señal de compra) que entren en tu tope por posición ahora mismo. Volvé a probar más tarde o mirá el Radar de Trades Cortos.'}</div>`
+      : `<div class="liq-sugg-title">Con ${pv(fmtArs(plan.liquidez))} líquidos, ideas de calidad para comprar hoy:</div>
+         ${plan.suggestions.map(liqSuggestionHTML).join('')}
+         ${plan.leftover > 1000 ? `<div class="port-note" style="color:var(--text-mute);">Quedarían ~${pv(fmtArs(plan.leftover))} sin asignar (reservado para no pasar el tope por posición de tu perfil).</div>` : ''}`}
+    <div class="bt-disclaimer">Ideas de mayor grado/convicción del universo, dimensionadas para no exceder el tope de <strong>${Math.round((plan.cap || 0) * 100)}%</strong> por posición de tu perfil y arriesgar <strong>~${Math.round(LIQ_RISK_PCT * 100)}%</strong> de la cuenta al stop por operación. Montos a la última cotización del CEDEAR (≈ estimada vía CCL). <strong>No garantiza ganancias</strong> — ninguna señal lo hace.</div>
+    <details class="advanced-details" style="margin-top:8px;">
+      <summary>Reglas para que las ganancias duren (gestión)</summary>
+      <ul class="liq-rules">
+        <li><strong>Cortá las pérdidas rápido, dejá correr las ganancias.</strong> Respetá el stop siempre; movelo a favor (trailing) cuando el precio avanza, nunca en contra.</li>
+        <li><strong>Arriesgá poco por operación (1-2% de la cuenta).</strong> Ninguna idea individual debería poder hacerte daño serio — por eso el sizing por riesgo de arriba.</li>
+        <li><strong>Diversificá.</strong> No más del tope de tu perfil por activo, ni te juegues todo a un sector.</li>
+        <li><strong>Tené siempre algo de liquidez.</strong> El efectivo es una posición: te deja comprar barato cuando aparece la oportunidad.</li>
+        <li><strong>No persigas.</strong> Si ya se fue, esperá el próximo setup — el mercado siempre da otra.</li>
+      </ul>
+    </details>`;
+  return `
+    <div class="card port-notes-card liq-card">
+      <div class="dash-radar-title">Efectivo & Compras inteligentes</div>
+      <div class="mc-intro">Poné el valor total de tu cuenta en pesos: calculo cuánto tenés <strong>líquido</strong> (total − lo invertido, valuado al CCL) y te sugiero compras concretas de calidad para esa liquidez — cuántos CEDEARs, el costo, el peso que quedaría y cuánto arriesgás. No es asesoramiento financiero.</div>
+      <div class="port-form" style="margin-bottom:14px;">
+        <input type="number" id="port-account-total" class="port-input" placeholder="Valor total de la cuenta en AR$ (ej. 5000000)" aria-label="Valor total de la cuenta en pesos" min="0" step="any" value="${total ? esc(String(Math.round(total))) : ''}" />
+        <button class="port-add-btn" id="port-account-save">Calcular</button>
+        ${total ? `<button class="port-csv-btn" id="port-account-clear" title="Borrar el total de la cuenta">Borrar</button>` : ''}
+      </div>
+      ${body}
+    </div>`;
+}
+
 function computeAllocation(amountArs, stats, ccl) {
   if (!amountArs || amountArs <= 0) return null;
   const cap = RISK_PROFILES[settingsState.riskProfile].maxPositionPct / 100;
@@ -5557,10 +5724,10 @@ function portfolioHTML() {
           </div>`;
         }).join('') || '<div class="dash-loading-note">Cargando análisis de cada posición…</div>'}
       </div>
+      ${liquidityCardHTML(stats)}
       ${convictionCardHTML(stats)}
       ${optimizerCardHTML(stats)}
       ${rebalanceCardHTML(stats)}
-      ${allocatorCardHTML(stats)}
       ${taxImpactCardHTML(stats.totalValue, portState.ccl)}
       ${portfolioDividendsCardHTML(stats)}
       ${opsCardHTML(stats)}
@@ -5794,21 +5961,27 @@ function wirePortfolioEvents() {
     renderReport();
   });
 
-  // Asignador "¿qué compro con AR$ X?"
-  const allocBtn = document.getElementById('port-alloc-run');
-  const allocInput = document.getElementById('port-alloc-amount');
-  if (allocBtn && allocInput) {
+  // Efectivo & Compras inteligentes: valor total de la cuenta en pesos
+  const accountBtn = document.getElementById('port-account-save');
+  const accountInput = document.getElementById('port-account-total');
+  if (accountInput) {
     const run = () => {
-      portState.allocAmount = allocInput.value;
-      const amount = parseFloat(allocInput.value);
-      const holdingsNow = getPortfolio();
-      const statsNow = holdingsNow.length ? computePortfolioStats(holdingsNow) : null;
-      portState.allocResult = statsNow ? computeAllocation(amount, statsNow, portState.ccl) : null;
+      const v = parseFloat(accountInput.value);
+      portState.accountTotalArs = isNaN(v) || v <= 0 ? null : v;
+      lsSetSafe('icp_port_account', portState.accountTotalArs ? String(portState.accountTotalArs) : '');
+      // El CCL puede no haberse cargado si no hay tenencias — pedirlo ahora
+      // para poder valuar la cartera y calcular la liquidez.
+      if (!portState.ccl) { getCCL().then(c => { portState.ccl = c; if (!state.asset && state.view === 'portfolio') renderReport(); }).catch(() => {}); }
       renderReport();
     };
-    allocBtn.addEventListener('click', run);
-    allocInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+    if (accountBtn) accountBtn.addEventListener('click', run);
+    accountInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
   }
+  document.getElementById('port-account-clear')?.addEventListener('click', () => {
+    portState.accountTotalArs = null;
+    lsSetSafe('icp_port_account', '');
+    renderReport();
+  });
 
   // Registrar venta: reduce (o cierra) la posición y loguea el P&L realizado
   // contra el costo promedio cargado. Solo en este navegador.
@@ -5844,6 +6017,10 @@ function wirePortfolioEvents() {
 // llamar a renderReport(), que vuelve a llamar a esta función, en loop.
 async function loadPortfolioData() {
   const holdings = getPortfolio();
+  // Universo curado como fuente de ideas nuevas para el motor de "Compras con
+  // la liquidez" (además de tus tenencias): se carga en segundo plano si la
+  // página de Portfolio se abrió sin pasar antes por el Dashboard.
+  if (!dashState.started) loadDashboardData();
   const macro = await getMacro();
   portState.macro = macro; // referencia sincrónica para computePortfolioRiskMetrics (necesita la tasa de la FED)
   if (!portState.inflacion && holdings.some(h => h.purchaseDate)) {
