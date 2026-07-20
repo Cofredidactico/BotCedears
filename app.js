@@ -2391,10 +2391,28 @@ function sparklineSVG(closes, up) {
   </svg>`;
 }
 
+// Etiqueta de origen de la tarjeta de oportunidad: distingue de un vistazo las
+// oportunidades locales (empresas argentinas) de los CEDEARs de empresas
+// extranjeras, ETFs y cripto. El público es argentino y opera ambos mundos, así
+// que saber si un papel es local o un CEDEAR importa para el timing y la moneda.
+function dashCardOrigin(ticker, d) {
+  if (d.category === 'Cripto') return { label: 'Cripto', cls: 'crypto' };
+  if (d.category === 'ETF') return { label: 'ETF', cls: 'etf' };
+  if (AR_TICKERS.has(ticker)) return { label: '🇦🇷 Argentina', cls: 'arg' };
+  return { label: 'CEDEAR', cls: 'cedear' };
+}
+
 function dashCardHTML(ticker, d) {
   const up = d.changePct >= 0;
   const sig = scoreLabelColor(d.scoreLabel);
   const am = d.alert ? ALERT_META[d.alert.type] : null;
+  const origin = dashCardOrigin(ticker, d);
+  // Precio en pesos: para CEDEARs de empresas extranjeras es el precio del
+  // CEDEAR; para empresas argentinas, la referencia local. 'live' = precio real
+  // BYMA, 'estimated' = derivado del dólar CCL. Cripto no tiene y queda oculto.
+  const arsLine = d.cedearArs != null
+    ? `<div class="dcv-ars" title="Precio en pesos ${d.cedearSource === 'live' ? '(precio real de BYMA)' : '(estimado vía dólar CCL)'}"><span class="dcv-ars-val">${fmtArs(d.cedearArs)}</span><span class="dcv-ars-src ${d.cedearSource === 'live' ? 'live' : 'est'}">${d.cedearSource === 'live' ? '● en vivo' : '≈ estimado'}</span></div>`
+    : '';
   // Badge de convicción: solo cuando es alta o media (una señal débil no aporta).
   const conv = positionConviction({ d });
   const convBadge = conv && conv.verdict !== 'baja'
@@ -2404,7 +2422,7 @@ function dashCardHTML(ticker, d) {
   return `<div class="dash-card ${am ? 'has-alert' : ''} ${d.alert?.pending ? 'is-pending' : ''}" data-dash-ticker="${esc(ticker)}" style="${am ? `--card-accent:${am.color};` : `--card-accent:${sig.color};`}">
     <div class="dcv-head">
       <div class="dcv-id">
-        <div class="dcv-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
+        <div class="dcv-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''} <span class="dcv-cat dcv-cat-${origin.cls}">${origin.label}</span></div>
         <div class="dcv-name">${esc(d.name ?? '')}</div>
       </div>
       <div class="dcv-ring" style="background:conic-gradient(${sig.color} ${ringDeg}deg, var(--surface-2, rgba(255,255,255,0.08)) 0deg);" title="${esc(d.scoreLabel)} · score ${d.score}/100">
@@ -2415,6 +2433,7 @@ function dashCardHTML(ticker, d) {
       <span class="dcv-price">${fmtUsd(d.price)}</span>
       <span class="dcv-change ${up ? 'up' : 'down'}">${up ? '▲' : '▼'} ${fmtPct(d.changePct)}</span>
     </div>
+    ${arsLine}
     <div class="dcv-spark">${sparklineSVG(d.sparkline, up)}</div>
     <div class="dcv-sigrow">
       <span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)}</span>
