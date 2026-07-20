@@ -322,6 +322,147 @@ function alertGradeCardHTML(a) {
       <div class="agc-foot">El grado combina, con distinto peso, la reversión del precio, el filtro de tendencia, el volumen, la confluencia del nivel y el riesgo/beneficio — no es una recomendación, es cuán alineadas están las señales técnicas ahora.</div>
     </div>`;
 }
+/* ── Confiabilidad histórica de la señal de alerta ──────────────────────────
+ * El grado A/B/C dice cuán alineadas están las señales HOY; esto responde la
+ * otra mitad: cuando el motor dio esta MISMA señal (tipo + confianza) en el
+ * pasado de ESTE activo, ¿qué pasó después? Reusa el backtester walk-forward
+ * (sin look-ahead) — no dispara pedidos extra más allá de las velas del ticker,
+ * y cachea el resultado por activo. Es lo que convierte una lectura cualitativa
+ * ("zona de compra grado A") en una con respaldo empírico ("acertó 68% con
+ * retorno medio +4% a 20 ruedas, n=31"). No garantiza nada a futuro: describe
+ * el comportamiento pasado del precio tras señales equivalentes. */
+const alertReliabilityCache = {}; // ticker -> { at, promise?, result?, error? }
+const RELIAB_HORIZON = 20; // ~1 mes de rueda — horizonte principal de lectura
+const RELIAB_MIN_N = 12;   // debajo de esto la muestra es chica: se avisa
+
+function ensureBacktestFor(ticker) {
+  const c = alertReliabilityCache[ticker];
+  if (c?.result && Date.now() - c.at < 30 * 60 * 1000) return Promise.resolve(c.result);
+  if (c?.promise) return c.promise;
+  const promise = runBacktest(ticker)
+    .then(res => { alertReliabilityCache[ticker] = { at: Date.now(), result: res }; return res; })
+    .catch(err => { alertReliabilityCache[ticker] = { at: Date.now(), error: err }; throw err; });
+  alertReliabilityCache[ticker] = { at: Date.now(), promise };
+  return promise;
+}
+
+const fmtSignedPct = (x, dp = 1) => x == null || isNaN(x) ? 'N/D' : `${x >= 0 ? '+' : ''}${x.toFixed(dp)}%`;
+
+// Lectura numérica de los indicadores más importantes — todo ya calculado en
+// `technical`, sin pedidos extra. Da "más estadísticas de indicadores" a la vista.
+function keyIndicatorReadouts(t, plan, price, alert) {
+  const out = [];
+  const atrPct = t.atr && price ? (t.atr / price) * 100 : null;
+  const distStop = plan?.raw?.stopLoss && price ? ((price - plan.raw.stopLoss) / price) * 100 : null;
+  if (!isNaN(t.rsi)) {
+    const z = t.rsi >= 70 ? { s: 'sobrecomprado', tone: 'warn' } : t.rsi <= 30 ? { s: 'sobrevendido', tone: 'good' }
+      : t.rsi >= 55 ? { s: 'con fuerza', tone: 'good' } : t.rsi <= 45 ? { s: 'flojo', tone: 'warn' } : { s: 'neutral', tone: 'mut' };
+    out.push({ k: 'RSI (14)', v: t.rsi.toFixed(0), sub: z.s, tone: z.tone });
+  }
+  if (!isNaN(t.adx)) {
+    const z = t.adx >= 40 ? { s: 'muy fuerte', tone: 'good' } : t.adx >= 25 ? { s: 'fuerte', tone: 'good' }
+      : t.adx >= 20 ? { s: 'incipiente', tone: 'mut' } : { s: 'sin tendencia', tone: 'warn' };
+    out.push({ k: 'ADX (tendencia)', v: t.adx.toFixed(0), sub: z.s, tone: z.tone });
+  }
+  if (atrPct != null) out.push({ k: 'Volatilidad (ATR)', v: `${atrPct.toFixed(1)}%`, sub: atrPct >= 4 ? 'alta' : atrPct <= 1.5 ? 'baja' : 'media', tone: 'mut' });
+  if (t.relVolume != null) out.push({ k: 'Volumen vs. prom.', v: `${t.relVolume.toFixed(1)}×`, sub: t.relVolume >= 1.5 ? 'clímax' : t.relVolume >= 1 ? 'normal-alto' : 'flojo', tone: t.relVolume >= 1.5 ? 'good' : 'mut' });
+  if (alert?.rr != null) out.push({ k: 'Riesgo / Beneficio', v: `${alert.rr}:1`, sub: alert.rr >= 2 ? 'muy favorable' : alert.rr >= 1.5 ? 'favorable' : 'ajustado', tone: alert.rr >= 1.5 ? 'good' : 'warn' });
+  if (distStop != null) out.push({ k: 'Distancia al stop', v: `${Math.abs(distStop).toFixed(1)}%`, sub: 'riesgo si falla', tone: 'mut' });
+  return out;
+}
+
+// Tarjeta sincrónica: cabecera + lectura de indicadores + un hueco (#alert-bt-slot)
+// que se completa con la estadística histórica cuando termina el backtest.
+function alertReliabilityCardHTML(alert, t, plan, price, ticker) {
+  if (!alert || (alert.type !== 'buy' && alert.type !== 'sell') || !alert.grade) return '';
+  const reads = keyIndicatorReadouts(t, plan, price, alert);
+  const readGrid = reads.length ? `<div class="reliab-reads">${reads.map(r => `<div class="reliab-read reliab-tone-${r.tone}"><div class="reliab-read-k">${esc(r.k)}</div><div class="reliab-read-v">${esc(r.v)}</div><div class="reliab-read-sub">${esc(r.sub)}</div></div>`).join('')}</div>` : '';
+  return `
+    ${sectionTitleHTML('Confiabilidad histórica de la señal', 'award')}
+    <div class="card reliab-card">
+      <div class="reliab-lead">Cuando el motor dio esta misma señal (<strong>${alert.type === 'buy' ? 'zona de compra' : 'zona de venta'} · confianza ${esc(alert.pending ? 'tentativa' : alert.confidence)}</strong>) en el pasado de ${esc(ticker)}, ¿qué pasó después? Medido sobre sus velas diarias reales, sin mirar el futuro.</div>
+      <div id="alert-bt-slot" class="reliab-bt reliab-bt-loading">Midiendo la confiabilidad histórica…</div>
+      <div class="reliab-subtitle">Lectura de indicadores clave ahora</div>
+      ${readGrid}
+      <div class="reliab-foot">La estadística histórica describe el comportamiento pasado del precio tras señales equivalentes; no garantiza resultados futuros. Usala junto al grado de la zona y a tu propia gestión de riesgo.</div>
+    </div>`;
+}
+
+// Agrega varias filas de alerta del mismo tipo (distintas confianzas) ponderando
+// por nº de casos — para cuando la confianza exacta no tiene muestra suficiente.
+function aggregateAlertRows(rows) {
+  const type = rows[0].type;
+  const horizons = BACKTEST_HORIZONS.map(h => {
+    let n = 0, sumRet = 0, sumWin = 0;
+    for (const r of rows) {
+      const x = r.horizons.find(z => z.h === h);
+      if (x && x.n) { n += x.n; sumRet += x.avgPct * x.n; sumWin += x.winRate * x.n; }
+    }
+    if (!n) return { h, n: 0, avgPct: null, winRate: null };
+    return { h, n, avgPct: sumRet / n, winRate: Math.round(sumWin / n) };
+  });
+  return { type, confidence: 'todas', horizons };
+}
+
+function reliabBtBodyHTML(row, alert, price, plan, aggregated) {
+  const pick = row.horizons.find(h => h.h === RELIAB_HORIZON && h.n)
+    || row.horizons.slice().sort((a, b) => (b.n || 0) - (a.n || 0))[0];
+  if (!pick || !pick.n) return `<div class="reliab-bt-note">Sin casos históricos suficientes para esta señal.</div>`;
+  const buy = alert.type === 'buy';
+  const favor = buy ? pick.avgPct >= 0 : pick.avgPct <= 0; // retorno del precio a favor de la señal
+  const riskPct = plan?.raw?.stopLoss && price ? Math.abs((price - plan.raw.stopLoss) / price) * 100 : null;
+  const expR = (buy && riskPct && pick.avgPct != null) ? pick.avgPct / riskPct : null;
+  const small = pick.n < RELIAB_MIN_N;
+  const tiles = [
+    { k: 'Acierto histórico', v: `${pick.winRate}%`, tone: pick.winRate >= 55 ? 'good' : pick.winRate >= 45 ? 'mut' : 'warn', sub: buy ? 'subió después' : 'bajó después' },
+    { k: `Retorno medio a ${pick.h} ruedas`, v: fmtSignedPct(pick.avgPct), tone: favor ? 'good' : 'warn', sub: 'del precio, por señal' },
+    { k: 'Casos analizados', v: `${pick.n}`, tone: small ? 'warn' : 'mut', sub: small ? 'muestra chica' : 'histórico real' },
+  ];
+  if (expR != null) tiles.push({ k: 'Expectativa', v: `${expR >= 0 ? '+' : ''}${expR.toFixed(2)} R`, tone: expR >= 0.3 ? 'good' : expR >= 0 ? 'mut' : 'warn', sub: 'ganancia / riesgo por señal' });
+  const table = `<table class="reliab-htable"><thead><tr><th>Horizonte</th><th>Acierto</th><th>Retorno medio</th><th>Casos</th></tr></thead><tbody>
+    ${row.horizons.map(h => h.n ? `<tr><td>${h.h} ruedas</td><td class="${h.winRate >= 50 ? 'bt-pos' : 'bt-neg'}">${h.winRate}%</td><td class="${(buy ? h.avgPct >= 0 : h.avgPct <= 0) ? 'bt-pos' : 'bt-neg'}">${fmtSignedPct(h.avgPct)}</td><td>${h.n}</td></tr>` : '').join('')}
+  </tbody></table>`;
+  return `
+    <div class="reliab-tiles">${tiles.map(t => `<div class="reliab-tile reliab-tone-${t.tone}"><div class="reliab-tile-v">${esc(t.v)}</div><div class="reliab-tile-k">${esc(t.k)}</div><div class="reliab-tile-sub">${esc(t.sub)}</div></div>`).join('')}</div>
+    ${aggregated ? `<div class="reliab-agg-note">Muestra agregada de todas las confianzas de ${buy ? 'compra' : 'venta'} (no hubo suficientes casos de confianza ${esc(alert.confidence)} sola).</div>` : ''}
+    ${table}
+    ${expR != null ? `<div class="reliab-agg-note">Expectativa en R = retorno medio ÷ riesgo al stop (${riskPct.toFixed(1)}%): cuánto se ganó o perdió, en múltiplos del riesgo asumido, por señal.</div>` : ''}
+    ${small ? `<div class="reliab-bt-note">Ojo: con pocos casos la estadística es orientativa, no concluyente.</div>` : ''}`;
+}
+
+async function hydrateAlertReliability(ticker, alert, technical, price, plan) {
+  const slot = document.getElementById('alert-bt-slot');
+  if (!slot) return;
+  let res;
+  try { res = await ensureBacktestFor(ticker); }
+  catch (e) {
+    if (!state.asset || state.asset.ticker !== ticker) return;
+    slot.classList.remove('reliab-bt-loading');
+    slot.innerHTML = `<div class="reliab-bt-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>`;
+    return;
+  }
+  if (!state.asset || state.asset.ticker !== ticker) return; // el usuario cambió de activo
+  slot.classList.remove('reliab-bt-loading');
+  if (res.insufficientData) {
+    slot.innerHTML = `<div class="reliab-bt-note">Todavía no hay suficiente historial (${res.candleCount}/${res.needed} velas) para medir la confiabilidad de las señales en ${esc(ticker)}.</div>`;
+    return;
+  }
+  const rows = res.alertRows ?? [];
+  const conf = alert.pending ? null : alert.confidence;
+  let row = conf ? rows.find(r => r.type === alert.type && r.confidence === conf) : null;
+  let aggregated = false;
+  const exactN = row ? (row.horizons.find(h => h.h === RELIAB_HORIZON)?.n ?? 0) : 0;
+  if (!row || exactN < RELIAB_MIN_N) {
+    const same = rows.filter(r => r.type === alert.type);
+    if (same.length) { row = aggregateAlertRows(same); aggregated = true; }
+  }
+  if (!row) {
+    slot.innerHTML = `<div class="reliab-bt-note">El motor no disparó señales de ${alert.type === 'buy' ? 'compra' : 'venta'} suficientes en el histórico de ${esc(ticker)} para medir su precisión.</div>`;
+    return;
+  }
+  slot.innerHTML = reliabBtBodyHTML(row, alert, price, plan, aggregated);
+}
+
 let alertsEnabled = lsGetSafe('icp_alerts_enabled', '0') === '1';
 const lastAlertByTicker = {}; // ticker -> 'buy'|'sell'|'stop'|null, para notificar solo en la transición
 const lastStructureByTicker = {}; // ticker -> structure.short ('BOS alcista'|'BOS bajista'|'CHoCH'|'Rango'), para notificar solo en el cambio
@@ -1414,10 +1555,16 @@ async function runBacktest(ticker) {
     const byH = alertBuckets[key];
     const horizons = BACKTEST_HORIZONS.map(h => {
       const arr = byH[h] || [];
-      if (!arr.length) return { h, n: 0, avgPct: null, winRate: null };
+      if (!arr.length) return { h, n: 0, avgPct: null, winRate: null, avgWinPct: null, avgLossPct: null };
       const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-      const wins = arr.filter(r => alertBacktestWin(type, r)).length;
-      return { h, n: arr.length, avgPct: avg * 100, winRate: Math.round((wins / arr.length) * 100) };
+      const winsArr = arr.filter(r => alertBacktestWin(type, r));
+      const lossArr = arr.filter(r => !alertBacktestWin(type, r));
+      const mean = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+      const mw = mean(winsArr), ml = mean(lossArr);
+      return {
+        h, n: arr.length, avgPct: avg * 100, winRate: Math.round((winsArr.length / arr.length) * 100),
+        avgWinPct: mw != null ? mw * 100 : null, avgLossPct: ml != null ? ml * 100 : null,
+      };
     });
     return {
       type, confidence, label: `${ALERT_BT_TYPE_LABEL[type] ?? type} · confianza ${confidence}`,
@@ -1844,6 +1991,7 @@ function renderReportImpl() {
     </div>
 
     ${alertGradeCardHTML(priceAlert)}
+    ${alertReliabilityCardHTML(priceAlert, t, plan, quote.usd, asset.ticker)}
 
     ${sectionTitleHTML('Conclusión', 'check')}
     <div class="card conclusion-card">
@@ -1852,6 +2000,13 @@ function renderReportImpl() {
 
     ${cedearNote}
   `;
+
+  // Confiabilidad histórica de la señal: corre (una vez, cacheado) el backtester
+  // walk-forward del activo y completa el hueco de la tarjeta. No bloquea el
+  // primer paint del informe; se autocancela si el usuario cambia de activo.
+  if (priceAlert && (priceAlert.type === 'buy' || priceAlert.type === 'sell') && priceAlert.grade) {
+    hydrateAlertReliability(asset.ticker, priceAlert, t, quote.usd, plan);
+  }
 
   const starBtn = document.getElementById('exec-star');
   if (starBtn) {
