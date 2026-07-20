@@ -672,6 +672,44 @@ Refactor interno: el sistema de widgets se unificó en un registro
 (`dashWidgetBody`) envueltos por `dashWidgetWrapper` — Watchlist y Portfolio
 también entraron al bento y a "Personalizar".
 
+## Señales de zona de compra profesionales (grado A/B/C)
+
+`detectPriceAlert` pasó de contar confirmaciones planas a un motor de
+**confirmaciones ponderadas con grado**, que separa una zona de compra de
+calidad de un "cuchillo cayendo". Sobre las mismas señales ya calculadas (sin
+requests extra):
+
+- **Gatillo de reversión (anti-cuchillo)** — la más pesada: ya no alcanza con
+  que el precio *toque* el soporte; se exige que **ya esté girando al alza**
+  (vela de reversión, o cierre > cierre previo rebotando). Si no giró, el grado
+  se degrada.
+- **Filtro de tendencia** — degrada a grado C si el activo está en tendencia
+  bajista fuerte (bajo EMA200, EMAs bajistas y ADX>22): comprar contra la
+  corriente fuerte es baja probabilidad.
+- **Clímax de volumen** — confirma si el rebote trae un pico de volumen
+  (nuevo campo `relVolume` en `computeTechnical`: volumen vs. promedio de 20
+  ruedas ≥1.5).
+- **Soporte confluente** — sube la calidad cuando el soporte coincide con
+  EMA50/EMA200, el POC del Volume Profile o un número redondo.
+- **Filtro de Riesgo/Beneficio** — calcula el R:R hasta la resistencia vs. el
+  riesgo al stop; si es <1 (poco recorrido) capa el grado a C, aunque el resto
+  dé verde.
+- **Contexto de squeeze** — un rebote con compresión de volatilidad a punto de
+  liberarse suma calidad.
+- **Grado compuesto A/B/C** — reemplaza el "alta/media/baja" plano por un grado
+  ponderado (reversión y tendencia pesan 3, volumen y confluencia 2, R:R 2,
+  divergencia 1.5, RSI/OBV/squeeze 1), con **gates duros** que degradan aunque
+  el % sea alto (sin reversión → máx B; tendencia en contra o R:R<1 → C).
+- **Calibración por peso** — cada confirmación pesa según su valor predictivo,
+  no todas cuentan igual (la parte accionable de la calibración por backtest).
+
+En la UI: badge de **grado A/B/C · R:R** en cada card y en la ficha, la sección
+"En Zona de Compra Ahora" del Dashboard ahora **ordena por grado** (las de mayor
+calidad primero), y la ficha suma una tarjeta didáctica "Calidad de la zona de
+compra" con la nota, el motivo en criollo y el desglose ✓/✕ de cada
+confirmación (marcando las CLAVE). Las notificaciones (browser/Telegram) avisan
+solo en grados A/B e incluyen grado + R:R + motivo.
+
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
 Este proyecto calcula todo con datos reales donde pudo conectar una fuente

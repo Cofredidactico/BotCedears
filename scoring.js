@@ -301,11 +301,13 @@ export function computePlan(technical, score) {
  * en vez de confirmada. */
 export function detectPriceAlert(price, technical, opts = {}) {
   const { confluence = null, recentCloses = null } = opts;
-  const { support, resistance, atr, rsi, obvConfirms, divergence } = technical;
+  const { support, resistance, atr, rsi, obvConfirms, divergence,
+    relVolume, ema50, ema200, volumeProfile, squeeze, candlePattern,
+    bullishAlign, bearishAlign, adx } = technical;
   const safeAtr = atr && atr > 0 && !isNaN(atr) ? atr : price * 0.02;
 
   if (price <= support - safeAtr) {
-    return { type: 'stop', label: 'Rompió el soporte', confidence: 'alta', confirmations: [], pending: false };
+    return { type: 'stop', label: 'Rompió el soporte', confidence: 'alta', grade: null, quality: null, rr: null, confirmations: [], factors: [], confirmationsAvailable: 0, pending: false };
   }
 
   const inBuyZone = price <= support + 0.6 * safeAtr;
@@ -316,31 +318,119 @@ export function detectPriceAlert(price, technical, opts = {}) {
   // Anti-whipsaw: un solo cierre tocando la zona no confirma nada — se
   // exige que el cierre previo también haya estado ahí.
   let pending = false;
+  let turningUp = null, turningDown = null;
   if (recentCloses && recentCloses.length >= 2) {
     const prevClose = recentCloses[recentCloses.length - 2];
+    const lastClose = recentCloses[recentCloses.length - 1];
     const prevInZone = direction === 'buy' ? prevClose <= support + 0.6 * safeAtr : prevClose >= resistance - 0.6 * safeAtr;
     pending = !prevInZone;
+    turningUp = lastClose > prevClose;   // el precio ya rebotó hacia arriba
+    turningDown = lastClose < prevClose; // el precio ya giró hacia abajo
   }
 
-  // Confirmaciones: cada una es una señal YA calculada, independiente del
-  // precio tocando el nivel — cuantas más coincidan, más confiable la señal.
-  const checks = direction === 'buy' ? [
-    ['RSI no sobrecomprado', isNaN(rsi) ? null : rsi < 65],
-    ['Volumen no contradice', obvConfirms === false ? false : (obvConfirms === true ? true : null)],
-    ['Sin divergencia bajista activa', divergence?.type === 'bearish' ? false : true],
-    confluence ? ['Semanal alcista', confluence.weeklyBias === 'up'] : null,
-  ] : [
-    ['RSI no sobrevendido', isNaN(rsi) ? null : rsi > 35],
-    ['Volumen no sigue empujando al alza', obvConfirms === true ? false : (obvConfirms === false ? true : null)],
-    ['Sin divergencia alcista activa', divergence?.type === 'bullish' ? false : true],
-    confluence ? ['Semanal no fuerte alcista', confluence.weeklyBias !== 'up'] : null,
-  ];
-  const applicable = checks.filter(c => c && c[1] != null);
-  const confirmations = applicable.filter(c => c[1] === true).map(c => c[0]);
-  if (confirmations.length === 0) return null; // ni una sola confirmación real: se descarta, es ruido de precio puro
+  // ── Riesgo/Beneficio de la zona ──
+  // Compra: stop debajo del soporte, objetivo en la resistencia.
+  // Venta: stop arriba de la resistencia, objetivo en el soporte.
+  let rr = null;
+  if (direction === 'buy') {
+    const stop = support - safeAtr, risk = price - stop, reward = resistance - price;
+    if (risk > 0 && reward > 0) rr = reward / risk;
+  } else {
+    const stop = resistance + safeAtr, risk = stop - price, reward = price - support;
+    if (risk > 0 && reward > 0) rr = reward / risk;
+  }
 
-  const ratio = confirmations.length / applicable.length;
-  const confidence = pending ? 'tentativa' : ratio >= 0.75 ? 'alta' : ratio >= 0.5 ? 'media' : 'baja';
+  // ── Confluencia del nivel: ¿el soporte/resistencia coincide con otro nivel
+  // relevante (EMA50/200, POC del Volume Profile, número redondo)? ──
+  const level = direction === 'buy' ? support : resistance;
+  const near = (a, b) => a != null && b != null && !isNaN(a) && !isNaN(b) && Math.abs(a - b) <= 0.5 * safeAtr;
+  const roundStep = Math.pow(10, Math.floor(Math.log10(Math.max(1, level))));
+  const roundLevel = Math.round(level / (roundStep / 2)) * (roundStep / 2);
+  const confluences = [];
+  if (near(level, ema50)) confluences.push('EMA50');
+  if (near(level, ema200)) confluences.push('EMA200');
+  if (volumeProfile?.hasData && near(level, volumeProfile.poc)) confluences.push('POC de volumen');
+  if (Math.abs(level - roundLevel) <= 0.25 * safeAtr) confluences.push('número redondo');
+
+  // ── Trigger de reversión (anti-cuchillo): ¿el precio YA está girando, o hay
+  // una vela de reversión?, en vez de solo tocar el nivel en caída/subida libre. ──
+  const reversalCandle = direction === 'buy' ? candlePattern?.bias === 'bullish' : candlePattern?.bias === 'bearish';
+  const reversal = direction === 'buy'
+    ? (reversalCandle || turningUp === true ? true : (turningUp === false ? false : null))
+    : (reversalCandle || turningDown === true ? true : (turningDown === false ? false : null));
+
+  // ── Filtro de tendencia: comprar en una tendencia bajista fuerte (o vender
+  // en una alcista fuerte) es baja probabilidad. ──
+  const strongDown = bearishAlign === true && !isNaN(adx) && adx > 22;
+  const strongUp = bullishAlign === true && !isNaN(adx) && adx > 22;
+  const trendOk = direction === 'buy' ? !strongDown : !strongUp;
+
+  const volClimax = relVolume != null ? relVolume >= 1.5 : null;
+  const squeezeActive = squeeze?.justFired || squeeze?.active ? true : null;
+
+  // Confirmaciones PONDERADAS: no todas valen lo mismo. La reversión y el
+  // filtro de tendencia son los de mayor valor predictivo (evitan el
+  // "cuchillo cayendo" y la compra contra la corriente); el volumen y la
+  // confluencia de nivel, intermedios; RSI/OBV/divergencia, de apoyo.
+  const checks = direction === 'buy' ? [
+    { label: 'Precio girando al alza (reversión)', ok: reversal, w: 3, primary: true },
+    { label: 'Tendencia no bajista fuerte', ok: trendOk, w: 3, primary: true },
+    { label: 'Clímax de volumen en el soporte', ok: volClimax, w: 2, primary: true },
+    { label: confluences.length ? `Soporte confluente (${confluences.join(', ')})` : 'Soporte confluente', ok: confluences.length ? true : null, w: 2, primary: true },
+    { label: 'Riesgo/beneficio favorable', ok: rr != null ? rr >= 1.5 : null, w: 2 },
+    { label: 'Sin divergencia bajista activa', ok: divergence?.type === 'bearish' ? false : true, w: 1.5 },
+    { label: 'RSI no sobrecomprado', ok: isNaN(rsi) ? null : rsi < 65, w: 1 },
+    { label: 'Volumen no contradice', ok: obvConfirms === false ? false : (obvConfirms === true ? true : null), w: 1 },
+    { label: 'Compresión de volatilidad (posible envión)', ok: squeezeActive, w: 1 },
+    confluence ? { label: 'Semanal alcista', ok: confluence.weeklyBias === 'up', w: 1.5 } : null,
+  ] : [
+    { label: 'Precio girando a la baja (reversión)', ok: reversal, w: 3, primary: true },
+    { label: 'Tendencia no alcista fuerte', ok: trendOk, w: 3, primary: true },
+    { label: 'Clímax de volumen en la resistencia', ok: volClimax, w: 2, primary: true },
+    { label: confluences.length ? `Resistencia confluente (${confluences.join(', ')})` : 'Resistencia confluente', ok: confluences.length ? true : null, w: 2, primary: true },
+    { label: 'Riesgo/beneficio favorable', ok: rr != null ? rr >= 1.5 : null, w: 2 },
+    { label: 'Sin divergencia alcista activa', ok: divergence?.type === 'bullish' ? false : true, w: 1.5 },
+    { label: 'RSI no sobrevendido', ok: isNaN(rsi) ? null : rsi > 35, w: 1 },
+    { label: 'Volumen no sigue empujando', ok: obvConfirms === true ? false : (obvConfirms === false ? true : null), w: 1 },
+    confluence ? { label: 'Semanal no fuerte alcista', ok: confluence.weeklyBias !== 'up', w: 1.5 } : null,
+  ];
+  const factors = checks.filter(Boolean).filter(c => c.ok != null);
+  const confirmations = factors.filter(c => c.ok === true).map(c => c.label);
+  if (confirmations.length === 0) return null; // ni una confirmación real: ruido de precio puro
+
+  const passedW = factors.filter(c => c.ok === true).reduce((s, c) => s + c.w, 0);
+  const totalW = factors.reduce((s, c) => s + c.w, 0);
+  let quality = totalW > 0 ? passedW / totalW : 0;
+
+  // Grado de la zona (A/B/C). Gates duros que degradan aunque el % sea alto:
+  //  · reversión explícitamente ausente → "cuchillo cayendo": máx B.
+  //  · tendencia en contra fuerte → máx C.
+  //  · R:R < 1 (poco recorrido hasta el nivel opuesto) → máx C.
+  let grade = quality >= 0.72 ? 'A' : quality >= 0.5 ? 'B' : 'C';
+  const caps = [];
+  if (reversal === false) { if (grade === 'A') grade = 'B'; caps.push('todavía sin girar'); }
+  if (trendOk === false) { grade = 'C'; caps.push('tendencia en contra'); }
+  if (rr != null && rr < 1) { grade = 'C'; caps.push('poco recorrido (R:R bajo)'); }
+  if (pending) { grade = 'C'; }
+
+  const gradeOrder = { A: 0, B: 1, C: 2 };
+  const confidence = pending ? 'tentativa' : grade === 'A' ? 'alta' : grade === 'B' ? 'media' : 'baja';
   const label = direction === 'buy' ? 'En zona de compra' : 'En zona de venta';
-  return { type: direction, label, confidence, confirmations, confirmationsAvailable: applicable.length, pending };
+
+  // Motivo en criollo: los disparadores primarios presentes + advertencias.
+  const primaryOn = factors.filter(c => c.primary && c.ok === true).map(c => c.label.toLowerCase());
+  let reason;
+  if (pending) reason = `El precio recién toca la zona — esperá a que confirme con un segundo cierre.`;
+  else if (grade === 'A') reason = `Zona de compra de calidad: ${primaryOn.slice(0, 3).join(', ') || 'varias señales alineadas'}.`;
+  else if (grade === 'B') reason = `Zona de compra decente${caps.length ? `, con reparos: ${caps.join(', ')}` : ''}.`;
+  else reason = `Zona de compra de baja calidad${caps.length ? `: ${caps.join(', ')}` : ' — pocas confirmaciones'} — esperá una mejor señal.`;
+  if (direction === 'sell') reason = reason.replace('compra', 'venta');
+
+  return {
+    type: direction, label, confidence, grade, quality: Math.round(quality * 100),
+    rr: rr != null ? Math.round(rr * 10) / 10 : null,
+    confluences, reason,
+    confirmations, factors, confirmationsAvailable: factors.length, pending,
+    gradeRank: gradeOrder[grade],
+  };
 }

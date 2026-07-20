@@ -500,6 +500,16 @@ export function computeTechnical(candles) {
 
   const obvSlope = ov[last] - ov[Math.max(0, last - 10)];
   const hasVolume = v.some(x => x > 0);
+  // Volumen relativo: volumen de la última rueda vs. el promedio de las 20
+  // previas (excluyendo la actual). >1.5 indica un pico de volumen —
+  // capitulación/absorción en un rebote de soporte, o empuje real en una
+  // ruptura. null si no hay datos de volumen.
+  let relVolume = null;
+  if (hasVolume && last >= 5) {
+    const win = v.slice(Math.max(0, last - 20), last).filter(x => x > 0);
+    const avgVol = win.length ? win.reduce((a, b) => a + b, 0) / win.length : 0;
+    if (avgVol > 0 && v[last] > 0) relVolume = v[last] / avgVol;
+  }
   const priceSlope = price - c[Math.max(0, last - 10)];
   // Confirmación de volumen: un movimiento de precio sin que el OBV
   // acompañe en la misma dirección es la causa más común de rupturas
@@ -523,7 +533,7 @@ export function computeTechnical(candles) {
     adx: a[last], atr: tr[last], vwap: vwap[last],
     bbUpper: bb.upper[last], bbMid: bb.mid[last], bbLower: bb.lower[last], bbPos,
     obvTrend: ov.length > 10 ? (obvSlope > 0 ? 'Ascendente — acumulación' : obvSlope < 0 ? 'Descendente — distribución' : 'Lateral') : 'N/D',
-    obvConfirms, hasVolume, divergence,
+    obvConfirms, hasVolume, relVolume, divergence,
     support: sr.support, resistance: sr.resistance,
     fib, structure,
     priceAction: priceActionLabel(c, trSeries),
