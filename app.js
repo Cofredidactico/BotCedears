@@ -1,4 +1,4 @@
-import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, isLive } from './dataSource.js';
+import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, getRecommendations, isLive } from './dataSource.js';
 import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged, macd, rsi } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
@@ -230,6 +230,20 @@ function showOnboarding() {
   renderOnboarding();
 }
 els.helpBtn?.addEventListener('click', () => showOnboarding());
+
+/* ── Tema claro/oscuro ──────────────────────────────────────────────────────
+ * La preferencia ya se aplicó en index.html (antes de pintar, sin flash); acá
+ * solo cableamos el toggle y actualizamos el color de la barra del navegador. */
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  try { localStorage.setItem('icp_theme', theme); } catch (e) {}
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'light' ? '#f6f7fb' : '#0a0b12');
+}
+document.getElementById('theme-toggle')?.addEventListener('click', () => {
+  const now = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  applyTheme(now === 'light' ? 'dark' : 'light');
+});
 els.onboardingOverlay?.addEventListener('click', (e) => { if (e.target === els.onboardingOverlay) closeOnboarding(true); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && els.onboardingOverlay?.style.display === 'flex') closeOnboarding(true);
@@ -1008,13 +1022,14 @@ async function loadReport(ticker) {
     // (CEDEARs de mineras/tenedoras y ETFs spot) — BTC se cachea 60s en
     // dataSource, así que no multiplica requests al mirar varios seguidos.
     const wantsBtcBeta = CRYPTO_RELATED.has(ticker) && ticker !== 'BTC';
-    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, btcCandles, earnings, dividends] = await Promise.all([
+    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, btcCandles, earnings, dividends, recommendations] = await Promise.all([
       getQuote(ticker), getCandles(ticker, '1day', 260), getFundamentals(ticker), getNews(ticker), getMacro(), getCCL(),
       isCripto ? Promise.resolve(null) : getCandles(ticker, '1week', 130),
       ticker === 'SPY' ? Promise.resolve(null) : getCandles('SPY', '1day', 220),
       wantsBtcBeta ? getCandles('BTC', '1day', 220) : Promise.resolve(null),
       getEarnings(ticker),
       getDividends(ticker),
+      getRecommendations(ticker).catch(() => null),
     ]);
 
     // Operar en la ventana de unos días antes de que la empresa reporte
@@ -1063,7 +1078,7 @@ async function loadReport(ticker) {
     const plan = computePlan(technical, scoreResult.score);
 
     state.report = {
-      asset, quote, candles, fundamentals, news, macro, ccl,
+      asset, quote, candles, fundamentals, news, macro, ccl, recommendations,
       technical, weeklyTechnical, confluence, marketCorrelation, relativeStrength, btcCorrelation, earnings, daysToEarnings, earningsSoon, dividends, ...scoreResult, plan,
       ts: { quote: now, candles: now, fundamentals: now, news: now },
     };
@@ -1509,6 +1524,69 @@ function analystBriefHTML(r, priceAlert, subScores, subScoreLabels) {
     </div>`;
 }
 
+/* ── Consenso de Wall Street ──────────────────────────────────────────────────
+ * Visión EXTERNA e independiente: la distribución de recomendaciones de analistas
+ * (compra/mantener/venta) y el precio objetivo, para contrastar con el score
+ * cuantitativo propio. Es un dato reportado por la fuente, no una opinión de la
+ * plataforma. Se oculta para cripto/ETF y símbolos sin cobertura. */
+const CONSENSUS_SEGMENTS = [
+  { k: 'strongBuy', label: 'Compra fuerte', color: 'oklch(0.60 0.16 152)' },
+  { k: 'buy', label: 'Compra', color: 'oklch(0.72 0.15 152)' },
+  { k: 'hold', label: 'Mantener', color: 'oklch(0.72 0.03 262)' },
+  { k: 'sell', label: 'Venta', color: 'oklch(0.70 0.15 45)' },
+  { k: 'strongSell', label: 'Venta fuerte', color: 'oklch(0.62 0.20 23)' },
+];
+function analystConsensusHTML(r) {
+  const rec = r.recommendations;
+  if (!rec) return '';
+  if (!rec.hasData || !rec.latest) {
+    return `${sectionTitleHTML('Consenso de Wall Street', 'globe')}
+    <div class="card consensus-card"><div class="consensus-empty">Sin cobertura de analistas para ${esc(r.asset.ticker)} en el proveedor de datos — habitual en CEDEARs/ADRs de menor seguimiento.</div></div>`;
+  }
+  const L = rec.latest;
+  const demo = rec.isReal === false;
+  const trendMeta = rec.trend === 'mejorando' ? { t: '▲ mejorando', cls: 'up' } : rec.trend === 'empeorando' ? { t: '▼ empeorando', cls: 'down' } : rec.trend === 'estable' ? { t: '● estable', cls: 'mut' } : null;
+  const bar = CONSENSUS_SEGMENTS.filter(s => L[s.k] > 0).map(s => `<div class="consensus-seg" style="flex:${L[s.k]}; background:${s.color};" title="${esc(s.label)}: ${L[s.k]}"></div>`).join('');
+  const legend = CONSENSUS_SEGMENTS.map(s => `<span class="consensus-leg"><i style="background:${s.color};"></i>${esc(s.label)} <b>${L[s.k]}</b></span>`).join('');
+  // Contraste con el motor propio.
+  const streetBull = L.scored >= 3.5, engineBull = r.score >= 55;
+  const streetBear = L.scored <= 2.5, engineBear = r.score < 45;
+  let contrast;
+  if ((streetBull && engineBull) || (streetBear && engineBear)) contrast = `El consenso de la calle <strong>coincide</strong> con tu motor: ambos con sesgo ${engineBull ? 'comprador' : 'vendedor/cauto'}.`;
+  else if ((streetBull && engineBear) || (streetBear && engineBull)) contrast = `Ojo: la calle y tu motor <strong>discrepan</strong> — la calle está ${streetBull ? 'más optimista' : 'más cauta'} que tu score cuantitativo (${r.score}/100). Cuando divergen, conviene entender por qué.`;
+  else contrast = `Lecturas parcialmente alineadas: tu motor da ${r.score}/100 (${esc(r.scoreLabel.toLowerCase())}) y la calle, ${esc(L.label.toLowerCase())}.`;
+  // Precio objetivo.
+  let ptHtml = '';
+  const pt = rec.priceTarget;
+  if (pt?.mean && r.quote?.usd > 0) {
+    const upside = (pt.mean / r.quote.usd - 1) * 100;
+    ptHtml = `
+      <div class="consensus-pt">
+        <div class="consensus-pt-main">
+          <div><span>Precio objetivo (promedio)</span><b>${fmtUsd(pt.mean)}</b></div>
+          <div class="consensus-pt-upside ${upside >= 0 ? 'up' : 'down'}">${upside >= 0 ? '+' : ''}${upside.toFixed(1)}% <small>vs. precio actual</small></div>
+        </div>
+        ${pt.low && pt.high ? `<div class="consensus-pt-range">Rango de objetivos: ${fmtUsd(pt.low)} — ${fmtUsd(pt.high)}</div>` : ''}
+      </div>`;
+  }
+  return `
+    ${sectionTitleHTML('Consenso de Wall Street', 'globe')}
+    <div class="card consensus-card">
+      <div class="consensus-head">
+        <div class="consensus-verdict">
+          <div class="consensus-verdict-label">${esc(L.label)}</div>
+          <div class="consensus-verdict-sub">${L.total} analista${L.total === 1 ? '' : 's'}${trendMeta ? ` · <span class="consensus-trend ${trendMeta.cls}">${trendMeta.t}</span>` : ''}</div>
+        </div>
+        <div class="consensus-bull"><b>${L.bullishPct}%</b><span>en compra</span></div>
+      </div>
+      <div class="consensus-bar">${bar}</div>
+      <div class="consensus-legend">${legend}</div>
+      ${ptHtml}
+      <div class="consensus-contrast">${contrast}</div>
+      <div class="brief-foot">${demo ? 'Datos de demostración (modo demo, sin API key). ' : ''}Distribución de recomendaciones de analistas reportada por el proveedor (Finnhub) — es una visión externa, no una recomendación de la plataforma.</div>
+    </div>`;
+}
+
 function reportSkeletonHTML() {
   const skelRow = (w = '100%') => `<div class="skel skel-line" style="width:${w};"></div>`;
   return `
@@ -1914,6 +1992,7 @@ function renderReportImpl() {
     </div>
 
     ${analystBriefHTML(r, priceAlert, subScores, subScoreLabels)}
+    ${analystConsensusHTML(r)}
 
     <div class="card thermo-card">
       <div class="thermo-labels"><span>Venta</span><span>Reducir</span><span>Mantener</span><span>Compra</span><span>Compra Fuerte</span></div>

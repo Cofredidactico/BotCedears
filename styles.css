@@ -62,6 +62,74 @@
   --ring-accent: 0 0 0 1px oklch(0.70 0.19 291 / 0.22);
 }
 
+/* ═══════════════════ TEMA CLARO ═══════════════════
+   Overridea solo los tokens: como casi toda la app usa var(--…), el modo claro
+   se propaga sin tocar componentes. Paleta "papel frío" con sesgo índigo; los
+   colores *-text y los acentos se oscurecen para contrastar sobre blanco, y las
+   superficies/overlays pasan de "claros sobre navy" a "oscuros sobre blanco". */
+:root[data-theme="light"] {
+  --bg: oklch(0.975 0.006 262);
+  --bg-card: oklch(1 0 0);
+  --bg-card-hover: oklch(0.972 0.006 262);
+  --bg-input: oklch(0.982 0.005 262);
+  --border: oklch(0.885 0.010 262);
+  --border-soft: oklch(0.925 0.007 262);
+  --border-strong: oklch(0.80 0.02 262);
+
+  --text: oklch(0.24 0.022 262);
+  --text-dim: oklch(0.40 0.022 262);
+  --text-mute: oklch(0.53 0.020 262);
+  --text-faint: oklch(0.63 0.016 262);
+
+  --accent: oklch(0.56 0.21 291);
+  --accent-2: oklch(0.60 0.15 210);
+  --accent-soft: oklch(0.93 0.045 291);
+  --accent-text: oklch(0.47 0.19 291);
+
+  --gold: oklch(0.66 0.13 85);
+  --gold-soft: oklch(0.93 0.06 85);
+  --gold-text: oklch(0.50 0.11 85);
+
+  --up: oklch(0.58 0.16 152);
+  --up-soft: oklch(0.91 0.07 152);
+  --up-text: oklch(0.45 0.15 152);
+  --down: oklch(0.55 0.21 23);
+  --down-soft: oklch(0.93 0.06 23);
+  --down-text: oklch(0.50 0.20 23);
+  --amber: oklch(0.68 0.13 70);
+  --amber-soft: oklch(0.93 0.06 70);
+  --amber-text: oklch(0.50 0.12 70);
+
+  --glow-accent: 0 0 18px oklch(0.56 0.21 291 / 0.16);
+  --glow-up: 0 0 14px oklch(0.58 0.16 152 / 0.16);
+  --glow-down: 0 0 14px oklch(0.55 0.21 23 / 0.16);
+  --glow-gold: 0 0 14px oklch(0.66 0.13 85 / 0.16);
+  --shadow-card: 0 1px 3px oklch(0.45 0.03 262 / 0.08), 0 10px 26px -14px oklch(0.45 0.03 262 / 0.18);
+  --shadow-card-hover: 0 12px 30px -14px oklch(0.45 0.03 262 / 0.22), 0 0 0 1px oklch(0.56 0.21 291 / 0.20);
+
+  --surface: oklch(0.55 0.02 262 / 0.07);
+  --surface-2: oklch(0.45 0.03 262 / 0.045);
+  --surface-3: oklch(0.45 0.03 262 / 0.085);
+  --surface-hover: oklch(0.45 0.03 262 / 0.07);
+
+  --hairline: inset 0 1px 0 oklch(1 0 0 / 0.55);
+  --shadow-sm: 0 1px 3px oklch(0.45 0.03 262 / 0.10);
+  --shadow-md: 0 8px 24px -12px oklch(0.45 0.03 262 / 0.18);
+  --shadow-lg: 0 20px 48px -16px oklch(0.45 0.03 262 / 0.24);
+  --ring-accent: 0 0 0 1px oklch(0.56 0.21 291 / 0.20);
+}
+/* En claro, la malla de fondo se atenúa (los halos sobre blanco ensucian). */
+:root[data-theme="light"] body::before { opacity: 0.5; }
+/* El hero del dashboard tiene un degradé oscuro hardcodeado para el tema oscuro;
+   en claro se reemplaza por tintes claros para no ensuciar la tarjeta. */
+:root[data-theme="light"] .dash-hero {
+  background:
+    radial-gradient(720px 240px at 8% -10%, oklch(0.70 0.19 291 / 0.10), transparent 62%),
+    radial-gradient(560px 260px at 102% 118%, oklch(0.80 0.14 199 / 0.09), transparent 60%),
+    linear-gradient(150deg, oklch(0.95 0.035 291 / 0.7), oklch(0.985 0.012 240 / 0.5)),
+    var(--bg-card);
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
@@ -1030,6 +1098,11 @@ select.port-input { cursor: pointer; }
 }
 .help-btn svg { width: 17px; height: 17px; }
 .help-btn:hover, .help-btn:focus-visible { border-color: var(--accent); color: var(--accent-text); }
+/* Toggle de tema: muestra el ícono del tema al que se cambiará. */
+.theme-toggle .theme-icon-dark { display: none; }
+.theme-toggle .theme-icon-light { display: block; }
+:root[data-theme="light"] .theme-toggle .theme-icon-light { display: none; }
+:root[data-theme="light"] .theme-toggle .theme-icon-dark { display: block; }
 .onboarding-overlay {
   position: fixed; inset: 0; z-index: 1000; background: oklch(0 0 0 / 0.62); backdrop-filter: blur(2px);
   align-items: center; justify-content: center; padding: 20px;
@@ -1792,6 +1865,33 @@ select.port-input { cursor: pointer; }
   .brief-head { grid-template-columns: 1fr; gap: 16px; }
   .brief-rc { grid-template-columns: 1fr; gap: 16px; }
 }
+
+/* ---------- Consenso de Wall Street ---------- */
+.consensus-card { padding: 22px 24px; }
+.consensus-empty { font-size: 13px; color: var(--text-mute); line-height: 1.55; }
+.consensus-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.consensus-verdict-label { font-family: 'Newsreader', serif; font-size: 24px; font-weight: 600; letter-spacing: -0.2px; }
+.consensus-verdict-sub { font-size: 12px; color: var(--text-mute); margin-top: 3px; }
+.consensus-trend.up { color: var(--up-text); } .consensus-trend.down { color: var(--down-text); } .consensus-trend.mut { color: var(--text-mute); }
+.consensus-bull { text-align: right; flex-shrink: 0; }
+.consensus-bull b { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 700; color: var(--up-text); display: block; line-height: 1; }
+.consensus-bull span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-mute); }
+.consensus-bar { display: flex; height: 12px; border-radius: 7px; overflow: hidden; gap: 2px; background: var(--surface-2); }
+.consensus-seg { min-width: 3px; transition: flex 0.3s; }
+.consensus-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; }
+.consensus-leg { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-mute); }
+.consensus-leg i { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+.consensus-leg b { color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; }
+.consensus-pt { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft); }
+.consensus-pt-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.consensus-pt-main > div:first-child span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-mute); margin-bottom: 3px; }
+.consensus-pt-main b { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 700; color: var(--text); }
+.consensus-pt-upside { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 700; }
+.consensus-pt-upside.up { color: var(--up-text); } .consensus-pt-upside.down { color: var(--down-text); }
+.consensus-pt-upside small { display: block; font-size: 10px; font-weight: 400; color: var(--text-mute); font-family: 'IBM Plex Sans', sans-serif; text-transform: uppercase; letter-spacing: 0.4px; }
+.consensus-pt-range { font-size: 11.5px; color: var(--text-mute); margin-top: 8px; font-family: 'IBM Plex Mono', monospace; }
+.consensus-contrast { margin-top: 16px; padding: 12px 15px; border-radius: 10px; background: color-mix(in oklch, var(--accent) 8%, transparent); border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent); font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+.consensus-contrast strong { color: var(--text); }
 
 /* ---------- Portfolio: Efectivo & Compras inteligentes ---------- */
 .liq-card { padding: 18px 20px; }

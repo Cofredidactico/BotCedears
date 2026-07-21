@@ -15,6 +15,16 @@
 <meta name="description" content="Análisis de acciones, CEDEARs, ETFs y cripto con datos de mercado reales: score compuesto, plan operativo, backtesting, comparador y más — instalable como app.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+  // Tema: aplica la preferencia guardada antes de pintar, para evitar el
+  // "flash" del tema equivocado en la recarga. Por defecto, oscuro (identidad).
+  (function () {
+    try {
+      var t = localStorage.getItem('icp_theme');
+      if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -63,6 +73,10 @@
           <div class="dropdown" id="dropdown" style="display:none;" role="listbox" aria-label="Resultados de búsqueda"></div>
         </div>
         <div class="topbar-right">
+          <button class="help-btn theme-toggle" id="theme-toggle" aria-label="Cambiar entre tema claro y oscuro" title="Cambiar tema claro/oscuro">
+            <svg class="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+            <svg class="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.2M12 19.8V22M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2 12h2.2M19.8 12H22M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6"/></svg>
+          </button>
           <button class="help-btn" id="help-btn" aria-label="Ver guía rápida de la plataforma" title="Guía rápida">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.2 9.3a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 1.8-2.6 3.6"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></svg>
           </button>
