@@ -160,6 +160,23 @@ const Mock = {
     };
     return { hasData: false, isReal: false, insider };
   },
+  // Consenso de analistas de demostración (determinístico por ticker) para ver
+  // la tarjeta en modo demo; en producción lo reemplaza Finnhub. Misma forma que
+  // devuelve /api/recommendations.
+  async getRecommendations(ticker) {
+    const u = await getAsset(ticker);
+    if (u && (u.category === 'Cripto' || u.category === 'ETF')) return { hasData: false, isReal: false };
+    const rnd = mulberry32(hsh(ticker) ^ 0x9e3);
+    const sum = (row) => {
+      const total = row.strongBuy + row.buy + row.hold + row.sell + row.strongSell;
+      const scored = (row.strongBuy * 5 + row.buy * 4 + row.hold * 3 + row.sell * 2 + row.strongSell) / total;
+      return { ...row, total, scored: Math.round(scored * 100) / 100, scored100: Math.round(((scored - 1) / 4) * 100), bullishPct: Math.round((row.strongBuy + row.buy) / total * 100), bearishPct: Math.round((row.sell + row.strongSell) / total * 100), label: scored >= 4.5 ? 'Compra fuerte' : scored >= 3.5 ? 'Compra' : scored >= 2.5 ? 'Mantener' : scored >= 1.5 ? 'Venta' : 'Venta fuerte' };
+    };
+    const mk = (p) => ({ period: p, strongBuy: 3 + Math.round(rnd() * 8), buy: 5 + Math.round(rnd() * 10), hold: 3 + Math.round(rnd() * 7), sell: Math.round(rnd() * 3), strongSell: Math.round(rnd() * 1) });
+    const latest = sum(mk('demo')), prev = sum(mk('demo-prev'));
+    const trend = Math.abs(latest.scored - prev.scored) < 0.05 ? 'estable' : latest.scored > prev.scored ? 'mejorando' : 'empeorando';
+    return { hasData: true, latest, prev, trend, priceTarget: null, isReal: false };
+  },
   async getNews() { return { items: [], sentimentScore: null, isReal: false }; },
   async getGeneralNews() { return { items: [], sentimentScore: null, isReal: false }; },
   async getEarnings() { return { nextDate: null, isReal: false }; },
@@ -238,6 +255,13 @@ const Live = {
     return cached('n:' + ticker, 15 * 60 * 1000, async () => {
       const r = await fetch(`${API_BASE}/news?symbol=${encodeURIComponent(ticker)}`);
       if (!r.ok) throw new Error('news ' + r.status);
+      const d = await r.json(); return { ...d, isReal: true };
+    });
+  },
+  async getRecommendations(ticker) {
+    return cached('rec:' + ticker, 6 * 60 * 60 * 1000, async () => {
+      const r = await fetch(`${API_BASE}/recommendations?symbol=${encodeURIComponent(ticker)}`);
+      if (!r.ok) throw new Error('recommendations ' + r.status);
       const d = await r.json(); return { ...d, isReal: true };
     });
   },
@@ -365,6 +389,12 @@ export async function getNews(ticker) {
 
 export async function getGeneralNews() {
   return withFallback('getGeneralNews', [], Mock.getGeneralNews.bind(Mock));
+}
+
+export async function getRecommendations(ticker) {
+  const asset = await getAsset(ticker);
+  if (asset?.category === 'Cripto' || asset?.category === 'ETF') return { hasData: false, isReal: true };
+  return withFallback('getRecommendations', [ticker], Mock.getRecommendations.bind(Mock));
 }
 
 export async function getEarnings(ticker) {
