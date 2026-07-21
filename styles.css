@@ -1696,6 +1696,61 @@ select.port-input { cursor: pointer; }
 .reliab-read-sub { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; }
 .reliab-foot { font-size: 11px; color: var(--text-faint); line-height: 1.5; margin-top: 16px; border-top: 1px solid var(--border-soft); padding-top: 12px; }
 
+/* ---------- Informe del Analista (síntesis one-pager) ---------- */
+.brief-card {
+  padding: 26px 28px; position: relative; overflow: hidden;
+  border-color: var(--border); box-shadow: var(--shadow-md), var(--hairline);
+  background:
+    radial-gradient(680px 220px at 100% -10%, color-mix(in oklch, var(--brief-accent, var(--accent)) 12%, transparent), transparent 60%),
+    var(--bg-card);
+}
+.brief-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--brief-accent, var(--accent)); }
+.brief-head { display: grid; grid-template-columns: 220px 1fr; gap: 26px; align-items: start; }
+.brief-verdict {
+  border: 1px solid color-mix(in oklch, var(--brief-accent, var(--accent)) 45%, var(--border-soft));
+  border-radius: 14px; padding: 16px 18px; background: color-mix(in oklch, var(--brief-accent, var(--accent)) 9%, transparent);
+}
+.brief-verdict-label { font-size: 13px; font-weight: 700; letter-spacing: 0.3px; color: var(--brief-accent, var(--accent-text)); text-transform: uppercase; }
+.brief-verdict-score { font-family: 'IBM Plex Mono', monospace; font-size: 46px; font-weight: 700; line-height: 1.05; letter-spacing: -1.5px; margin-top: 4px; }
+.brief-verdict-score span { font-size: 17px; color: var(--text-mute); font-weight: 500; letter-spacing: 0; }
+.brief-verdict-conf { font-size: 11.5px; color: var(--text-mute); margin-top: 8px; line-height: 1.4; }
+.brief-thesis { font-size: 14.5px; color: var(--text-dim); line-height: 1.62; }
+.brief-thesis p { margin: 0 0 10px; }
+.brief-thesis p:last-child { margin-bottom: 0; }
+.brief-thesis strong { color: var(--text); font-weight: 600; }
+/* Pilares (sub-scores) */
+.brief-pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border-soft); }
+.brief-pillar-top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin-bottom: 6px; }
+.brief-pillar-label { font-size: 11px; color: var(--text-mute); }
+.brief-pillar-val { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 700; color: var(--text); }
+.brief-pillar-bar { height: 5px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.brief-pillar-bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.brief-pillar.na .brief-pillar-val { color: var(--text-faint); }
+.brief-pillar.na .brief-pillar-bar i { background: var(--border-strong); }
+/* Riesgos y catalizadores */
+.brief-rc { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border-soft); }
+.brief-rc-title { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+.brief-rc-title svg { width: 14px; height: 14px; }
+.brief-rc-title.good { color: var(--up-text); }
+.brief-rc-title.bad { color: var(--amber-text); }
+.brief-rc-col ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.brief-rc-col li { font-size: 12.5px; color: var(--text-dim); line-height: 1.45; padding-left: 14px; position: relative; }
+.brief-rc-col li::before { content: ''; position: absolute; left: 0; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.4; }
+/* Objetivos de precio */
+.brief-targets { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border-soft); }
+.brief-target { flex: 1 1 auto; min-width: 120px; padding: 11px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border-soft); }
+.brief-target span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-mute); margin-bottom: 4px; }
+.brief-target b { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 700; color: var(--text); }
+/* Veredicto final */
+.brief-verdict-line { margin-top: 20px; padding: 14px 16px; border-radius: 12px; background: color-mix(in oklch, var(--brief-accent, var(--accent)) 10%, transparent); border: 1px solid color-mix(in oklch, var(--brief-accent, var(--accent)) 30%, transparent); font-size: 14px; color: var(--text); line-height: 1.55; }
+.brief-verdict-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--brief-accent, var(--accent-text)); margin-right: 8px; }
+.brief-foot { font-size: 11px; color: var(--text-faint); line-height: 1.5; margin-top: 16px; }
+@media (max-width: 720px) {
+  .brief-card { padding: 20px 18px; }
+  .brief-head { grid-template-columns: 1fr; gap: 16px; }
+  .brief-rc { grid-template-columns: 1fr; gap: 16px; }
+}
+
 /* ---------- Portfolio: Efectivo & Compras inteligentes ---------- */
 .liq-card { padding: 18px 20px; }
 .liq-bars { margin: 4px 0 16px; }
