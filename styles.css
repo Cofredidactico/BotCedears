@@ -921,7 +921,49 @@ select.port-input { cursor: pointer; }
 .short-plan-cell b.up { color: var(--up-text); }
 .short-plan-cell b.down { color: var(--down-text); }
 .short-risks { margin-top: 8px; font-size: 11.5px; line-height: 1.5; color: var(--amber-text); }
-@media (max-width: 600px) { .short-grid { grid-template-columns: 1fr; } }
+
+/* Filo de dirección (verde largo / rojo corto) en el borde izquierdo de la card. */
+.short-card { position: relative; overflow: hidden; }
+.short-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dir-color, var(--accent)); opacity: 0.85; }
+.short-head-right { display: flex; align-items: flex-start; gap: 12px; }
+.short-dir-badge { font-size: 10px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; white-space: nowrap; margin-top: 3px; }
+
+/* Barra de controles (filtros + orden + riesgo) */
+.short-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; margin-bottom: 10px; }
+.short-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--bg-card); }
+.short-seg-btn { background: transparent; border: none; padding: 8px 13px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12.5px; font-weight: 600; color: var(--text-mute); cursor: pointer; transition: background 0.15s, color 0.15s; }
+.short-seg-btn:not(:last-child) { border-right: 1px solid var(--border-soft); }
+.short-seg-btn:hover { color: var(--text); background: var(--surface-2); }
+.short-seg-btn.active { background: linear-gradient(135deg, oklch(0.32 0.10 291 / 0.55), oklch(0.28 0.09 199 / 0.35)); color: var(--text); box-shadow: inset 0 0 0 1px oklch(0.70 0.19 291 / 0.4); }
+.short-ctrl { display: flex; flex-direction: column; gap: 4px; }
+.short-ctrl > span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-mute); }
+.short-count { font-size: 11.5px; color: var(--text-faint); margin-bottom: 18px; }
+
+/* Gestión de la operación */
+.short-manage { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 11.5px; color: var(--text-mute); }
+.short-manage b { font-family: 'IBM Plex Mono', monospace; color: var(--text-dim); font-weight: 600; }
+/* Position sizing */
+.short-sizing { margin-top: 10px; padding: 10px 12px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border-soft); font-size: 12.5px; color: var(--text-dim); }
+.short-sizing b { font-family: 'IBM Plex Mono', monospace; color: var(--text); }
+.short-sizing-lead { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-mute); display: block; margin-bottom: 3px; }
+.short-sizing-hint { color: var(--text-mute); font-size: 11.5px; }
+/* Confiabilidad histórica del setup */
+.short-reliab { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-soft); }
+.short-reliab-btn { width: 100%; padding: 9px 12px; border-radius: 9px; border: 1px dashed var(--border-strong); background: transparent; color: var(--text-dim); font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+.short-reliab-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text); background: color-mix(in oklch, var(--accent) 8%, transparent); }
+.short-reliab-btn:disabled { opacity: 0.6; cursor: default; }
+.short-reliab-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-mute); margin-bottom: 8px; }
+.short-reliab-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.short-reliab-tile { padding: 9px 10px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border-soft); border-left-width: 3px; }
+.short-reliab-tile.reliab-tone-good { border-left-color: var(--up); }
+.short-reliab-tile.reliab-tone-warn { border-left-color: var(--amber); }
+.short-reliab-tile.reliab-tone-mut { border-left-color: var(--border-strong); }
+.short-reliab-v { font-family: 'IBM Plex Mono', monospace; font-size: 17px; font-weight: 700; color: var(--text); }
+.short-reliab-k { font-size: 9.5px; color: var(--text-mute); margin-top: 2px; line-height: 1.3; }
+.short-reliab-row { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--text-mute); }
+.short-reliab-row .up { color: var(--up-text); } .short-reliab-row .down { color: var(--down-text); }
+.short-reliab-note { font-size: 11px; color: var(--text-faint); line-height: 1.45; margin-top: 8px; }
+@media (max-width: 600px) { .short-grid { grid-template-columns: 1fr; } .short-controls { gap: 8px 10px; } }
 
 /* tarjetas didácticas de análisis (técnico/fundamental en criollo) */
 .didactic-card { padding: 8px 20px 18px; }
