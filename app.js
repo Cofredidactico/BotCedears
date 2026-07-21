@@ -5256,23 +5256,51 @@ const RECO_TONE = {
   sell: { bg: 'oklch(0.30 0.12 23)', color: 'oklch(0.88 0.16 23)' },
 };
 
+/* Recomendación PROFESIONAL por posición: combina la acción (baseRecommendation)
+ * con la convicción del motor, los factores que la sustentan (el "por qué"), los
+ * niveles concretos del plan (distancia al stop y próximo objetivo) y una guía
+ * de tamaño (cuánto operar) atada al tope del perfil de riesgo. Todo sale de
+ * datos ya calculados por posición — no se inventa nada. */
 function portfolioRecommendation(r) {
   const reco = baseRecommendation(r);
-  // El perfil de riesgo (Configuración) fija un tope real de peso por
-  // posición — se compara contra r.weight, el peso REAL que ya tiene esa
-  // tenencia en la cartera cargada, no un número inventado. Solo aplica
-  // cuando el análisis técnico sugiere sumar (tone 'buy'): frena o confirma
-  // esa sugerencia según cuánto margen quede hasta el tope del perfil.
-  if (reco && reco.tone === 'buy' && r.weight != null) {
-    const profile = RISK_PROFILES[settingsState.riskProfile] ?? RISK_PROFILES.moderado;
-    const capPct = profile.maxPositionPct;
-    const weightPct = r.weight * 100;
-    if (weightPct >= capPct) {
-      return { ...reco, detail: `${reco.detail} Ojo: esta posición ya pesa ${weightPct.toFixed(1)}% de tu cartera, en o por encima del tope de ${capPct}% de tu perfil ${profile.label} — el análisis técnico sugiere sumar, pero tu perfil sugiere no concentrar más acá.` };
-    }
-    return { ...reco, detail: `${reco.detail} Tu perfil ${profile.label} sugiere un tope de ${capPct}% por posición — hoy pesa ${weightPct.toFixed(1)}%, con margen para sumar hasta ${(capPct - weightPct).toFixed(1)} puntos porcentuales más.` };
+  if (!reco) return null;
+  const d = r.d;
+  const conv = positionConviction(r) || { score: null, verdict: null, factors: [] };
+  const profile = RISK_PROFILES[settingsState.riskProfile] ?? RISK_PROFILES.moderado;
+  const cap = profile.maxPositionPct;
+  const weightPct = r.weight != null ? r.weight * 100 : null;
+
+  // Factores ("por qué"): score + señales técnicas (estructura/momentum/RSI/
+  // stop/alerta, de la convicción) + P&L no realizado + peso vs. tope.
+  const factors = [];
+  if (d?.score != null) factors.push({ good: d.score >= 55, label: `Score ${d.score}` });
+  for (const f of conv.factors) factors.push({ good: f.good, label: f.t });
+  if (r.gainPct != null) factors.push({ good: r.gainPct >= 0, label: `${r.gainPct >= 0 ? '+' : ''}${(r.gainPct * 100).toFixed(1)}% s/costo` });
+  if (weightPct != null) factors.push({ good: weightPct < cap, label: `Peso ${weightPct.toFixed(1)}%${weightPct >= cap ? ` (≥ tope ${cap}%)` : ''}` });
+
+  // Niveles concretos del plan operativo, en % (moneda-agnóstico): qué tan lejos
+  // está el precio del stop y cuánto falta hasta el próximo objetivo.
+  const pr = d?.planRaw;
+  let levels = null;
+  if (pr && d?.price > 0) {
+    const distStop = pr.stopLoss != null ? ((d.price - pr.stopLoss) / d.price) * 100 : null;
+    const targets = [pr.tp1, pr.tp2, pr.tp3].filter(x => x != null && x > d.price);
+    const targetUp = targets.length ? ((Math.min(...targets) - d.price) / d.price) * 100 : null;
+    if (distStop != null || targetUp != null) levels = { distStop, targetUp };
   }
-  return reco;
+
+  // Sizing: cuánto operar, según el tono y el tope del perfil.
+  let sizing = null;
+  const unit = r.costCurrency === 'ARS' ? 'CEDEARs' : 'papeles';
+  if (reco.tone === 'sell' && r.shares) sizing = `Salida: cerrar la posición (${r.shares} ${unit}), o al menos la mitad para dar margen.`;
+  else if (reco.tone === 'reduce' && r.shares) sizing = `Reducción: tomar ~1/3 (${Math.max(1, Math.round(r.shares / 3))} ${unit}) y dejar correr el resto con stop ajustado.`;
+  else if (reco.tone === 'buy' && weightPct != null) {
+    sizing = weightPct >= cap
+      ? `Tu perfil ${profile.label} ya está en el tope de ${cap}% acá (pesa ${weightPct.toFixed(1)}%) — no concentrar más.`
+      : `Margen para sumar hasta ${(cap - weightPct).toFixed(1)} pp más antes del tope de ${cap}% (perfil ${profile.label}).`;
+  }
+
+  return { ...reco, conviction: { score: conv.score, verdict: conv.verdict }, factors: factors.slice(0, 6), levels, sizing };
 }
 
 function baseRecommendation(r) {
@@ -6850,15 +6878,24 @@ function portfolioHTML() {
       ${tradingPlanCardHTML(stats)}
       <div class="card port-notes-card">
         <div class="dash-radar-title">Recomendación por posición</div>
+        <div class="port-note" style="padding:0 0 10px;">Cada posición con su acción sugerida, la <strong>convicción</strong> del motor, los factores que la sustentan y los niveles concretos del plan. Determinístico sobre los datos de cada activo — no es asesoramiento financiero.</div>
         ${stats.rows.filter(r => r.d).map(r => {
           const reco = portfolioRecommendation(r);
           if (!reco) return '';
           const tone = RECO_TONE[reco.tone];
+          const conv = reco.conviction;
+          const lv = reco.levels;
           return `
-          <div class="port-reco-row">
-            <span class="port-reco-ticker">${esc(r.ticker)}</span>
-            <span class="watch-signal" style="background:${tone.bg}; color:${tone.color};">${esc(reco.label)}</span>
-            <span class="port-reco-detail">${esc(reco.detail)}</span>
+          <div class="port-reco-card reco-${reco.tone}">
+            <div class="prr-head">
+              <span class="port-reco-ticker" data-reco-ticker="${esc(r.ticker)}">${esc(r.ticker)}</span>
+              <span class="watch-signal" style="background:${tone.bg}; color:${tone.color};">${esc(reco.label)}</span>
+              ${conv?.verdict ? `<span class="prr-conv prr-conv-${conv.verdict}">convicción ${esc(conv.verdict)}${conv.score != null ? ` · ${conv.score}` : ''}</span>` : ''}
+            </div>
+            <div class="prr-detail">${esc(reco.detail)}</div>
+            ${reco.factors?.length ? `<div class="prr-factors">${reco.factors.map(f => `<span class="prr-factor ${f.good ? 'good' : 'bad'}">${f.good ? '✓' : '✕'} ${esc(f.label)}</span>`).join('')}</div>` : ''}
+            ${lv && (lv.distStop != null || lv.targetUp != null) ? `<div class="prr-levels">${lv.distStop != null ? `<span>🛡 A <b>${Math.abs(lv.distStop).toFixed(1)}%</b> del stop</span>` : ''}${lv.targetUp != null ? `<span>🎯 Próx. objetivo <b>+${lv.targetUp.toFixed(1)}%</b></span>` : ''}</div>` : ''}
+            ${reco.sizing ? `<div class="prr-sizing">${esc(reco.sizing)}</div>` : ''}
           </div>`;
         }).join('') || '<div class="dash-loading-note">Cargando análisis de cada posición…</div>'}
       </div>
@@ -7010,6 +7047,9 @@ function wirePortfolioEvents() {
       if (e.target.closest('.port-remove') || e.target.closest('.port-edit') || e.target.closest('.port-sell')) return;
       selectTicker(el.dataset.portTicker);
     });
+  });
+  els.report.querySelectorAll('[data-reco-ticker]').forEach(el => {
+    el.addEventListener('click', () => selectTicker(el.dataset.recoTicker));
   });
   els.report.querySelectorAll('.port-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
