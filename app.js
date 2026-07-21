@@ -1411,6 +1411,104 @@ function risksAndCatalysts(r) {
   return { risks, catalysts };
 }
 
+/* ── Informe del Analista ────────────────────────────────────────────────────
+ * Síntesis con voz propia sobre TODO lo que el motor ya calculó (score,
+ * técnico, fundamental, plan, zona). Es determinístico y trazable: no llama a la
+ * IA ni inventa nada — teje en lenguaje natural las mismas cifras que se ven
+ * desglosadas más abajo, al estilo de un one-pager de research de banca. Este
+ * es el "diferencial": pasa de mostrar indicadores a entregar una tesis. */
+function analystThesisParagraphs(r, priceAlert) {
+  const { asset, quote, technical: t, fundamentals: f, score, scoreLabel, confidence, plan, relativeStrength } = r;
+  const price = quote.usd;
+  const P = [];
+  // 1 · Identidad + veredicto
+  P.push(`${esc(asset.name)} (${esc(asset.ticker)})${asset.sector ? `, del sector ${esc(asset.sector.toLowerCase())},` : ''} cotiza a ${fmtUsd(price)} y obtiene un score compuesto de <strong>${score}/100</strong> — lectura de <strong>${esc(scoreLabel.toLowerCase())}</strong> con confianza ${esc(String(confidence).toLowerCase())}.`);
+  // 2 · Técnico
+  const rsiTxt = isNaN(t.rsi) ? '' : t.rsi >= 65 ? ` con momentum caliente (RSI ${t.rsi.toFixed(0)})` : t.rsi <= 35 ? ` con momentum deprimido (RSI ${t.rsi.toFixed(0)})` : ` con momentum neutro (RSI ${t.rsi.toFixed(0)})`;
+  const rsTxt = relativeStrength ? (relativeStrength.trend === 'up' ? `, y le viene ganando al S&P 500${relativeStrength.isNewHigh ? ' (en máximos de fuerza relativa, señal de liderazgo)' : ''}` : `, aunque viene rezagando frente al S&P 500`) : '';
+  const structTxt = t.structure?.short ? ` (${esc(t.structure.short.toLowerCase())})` : '';
+  P.push(`En el plano técnico, la tendencia primaria es <strong>${esc(String(t.primaryTrend).toLowerCase())}</strong>${structTxt}${rsiTxt}${rsTxt}.`);
+  // 3 · Fundamental
+  if (f?.hasData) {
+    const bits = [];
+    if (f.epsGrowth != null) bits.push(`el EPS crece ${f.epsGrowth.toFixed(0)}% interanual`);
+    else if (f.revenueGrowth != null) bits.push(`los ingresos crecen ${f.revenueGrowth.toFixed(0)}% interanual`);
+    if (f.roe != null) bits.push(`ROE de ${f.roe.toFixed(0)}%`);
+    if (f.netMargin != null) bits.push(`margen neto de ${f.netMargin.toFixed(0)}%`);
+    let val = '';
+    if (f.peg != null) val = ` La valuación luce ${f.peg > 2.5 ? 'exigente' : f.peg < 1 ? 'atractiva' : 'razonable'} (PEG ${f.peg.toFixed(1)}x).`;
+    else if (f.peTTM != null) val = ` Cotiza a ${f.peTTM.toFixed(0)}× ganancias (P/E TTM).`;
+    P.push(`En fundamentales, ${bits.length ? bits.join(', ') : 'con cobertura parcial del proveedor'}.${val}`);
+  } else {
+    P.push(`No hay cobertura de fundamentales del proveedor para este símbolo, así que el veredicto se apoya en precio, volumen e indicadores técnicos.`);
+  }
+  // 4 · Zona / plan
+  if (priceAlert && (priceAlert.type === 'buy' || priceAlert.type === 'sell') && priceAlert.grade) {
+    const dir = priceAlert.type === 'buy' ? 'compra' : 'venta';
+    P.push(`Hoy el precio está en <strong>zona de ${dir} grado ${priceAlert.grade}</strong> (calidad ${priceAlert.quality}/100)${priceAlert.rr != null ? `, con un riesgo/beneficio de ${priceAlert.rr}:1` : ''} — el plan operativo detalla stop y objetivos más abajo.`);
+  } else if (priceAlert && priceAlert.type === 'stop') {
+    P.push(`Atención: el precio <strong>rompió el soporte</strong> y activó el stop de riesgo — el plan prioriza proteger el capital.`);
+  } else {
+    P.push(`El precio no está en una zona operativa clara ahora mismo; el plan define la compra en ${esc(plan.compra)} con stop en ${esc(plan.stopLoss)}.`);
+  }
+  return P;
+}
+
+function analystVerdictLine(r, priceAlert) {
+  const { score } = r;
+  const inBuy = priceAlert?.type === 'buy';
+  const inSell = priceAlert?.type === 'sell';
+  if (score >= 65 && inBuy) return `El cuadro de fondo y el timing coinciden: setup de acumulación para el horizonte de ${horizonFor(r.technical)}, siempre respetando el stop del plan.`;
+  if (score >= 65 && !inBuy) return `Sesgo comprador de fondo, pero el precio no está en zona óptima — conviene esperar un retroceso hacia la zona de compra del plan.`;
+  if (score >= 45 && score < 65) return `Cuadro mixto: ni compra ni venta claras. Mejor operar por los niveles del plan que tomar una posición direccional fuerte.`;
+  if (inSell || score < 45) return `El balance de señales no favorece nuevas compras${inSell ? ' y el precio está en zona de distribución' : ''}; en posiciones existentes, vigilar de cerca el stop.`;
+  return `Lectura neutral — seguir de cerca los niveles del plan.`;
+}
+
+function analystBriefHTML(r, priceAlert, subScores, subScoreLabels) {
+  const { score, scoreLabel, confidence, plan } = r;
+  const accent = scoreLabelColor(scoreLabel).color;
+  const paras = analystThesisParagraphs(r, priceAlert);
+  const { risks, catalysts } = risksAndCatalysts(r);
+  const verdict = analystVerdictLine(r, priceAlert);
+  const pillar = (sb) => `<div class="brief-pillar${sb.available ? '' : ' na'}">
+      <div class="brief-pillar-top"><span class="brief-pillar-label">${esc(subScoreLabels[sb.key] ?? sb.label)}</span><span class="brief-pillar-val">${sb.available ? Math.round(sb.pct) : 'N/D'}</span></div>
+      <div class="brief-pillar-bar"><i style="width:${sb.available ? sb.pct : 0}%;"></i></div>
+    </div>`;
+  return `
+    ${sectionTitleHTML('Informe del Analista', 'briefcase')}
+    <div class="card brief-card" style="--brief-accent:${accent};">
+      <div class="brief-head">
+        <div class="brief-verdict">
+          <div class="brief-verdict-label">${esc(scoreLabel)}</div>
+          <div class="brief-verdict-score">${score}<span>/100</span></div>
+          <div class="brief-verdict-conf">confianza ${esc(String(confidence).toLowerCase())} · horizonte ${esc(horizonFor(r.technical))}</div>
+        </div>
+        <div class="brief-thesis">${paras.map(p => `<p>${p}</p>`).join('')}</div>
+      </div>
+      ${subScores.length ? `<div class="brief-pillars">${subScores.map(pillar).join('')}</div>` : ''}
+      <div class="brief-rc">
+        <div class="brief-rc-col">
+          <div class="brief-rc-title good">${ICONS.check} Catalizadores</div>
+          <ul>${catalysts.slice(0, 4).map(c => `<li>${esc(c)}</li>`).join('')}</ul>
+        </div>
+        <div class="brief-rc-col">
+          <div class="brief-rc-title bad">${ICONS.warning} Riesgos</div>
+          <ul>${risks.slice(0, 4).map(rk => `<li>${esc(rk)}</li>`).join('')}</ul>
+        </div>
+      </div>
+      <div class="brief-targets">
+        <div class="brief-target"><span>Entrada</span><b>${esc(plan.compra)}</b></div>
+        <div class="brief-target"><span>Stop loss</span><b>${esc(plan.stopLoss)}</b></div>
+        <div class="brief-target"><span>Objetivos</span><b>${esc(plan.tp1)} · ${esc(plan.tp2)} · ${esc(plan.tp3)}</b></div>
+        <div class="brief-target"><span>Riesgo / Beneficio</span><b>${esc(plan.riskReward)}</b></div>
+        ${plan.probabilityPct != null ? `<div class="brief-target"><span>Prob. estimada</span><b>${plan.probabilityPct}%</b></div>` : ''}
+      </div>
+      <div class="brief-verdict-line"><span class="brief-verdict-tag">Veredicto</span> ${esc(verdict)}</div>
+      <div class="brief-foot">Síntesis determinística de los indicadores ya calculados (técnico, fundamental, riesgo y plan) — no es asesoramiento financiero ni una recomendación garantizada. La confiabilidad histórica de la señal se detalla más abajo.</div>
+    </div>`;
+}
+
 function reportSkeletonHTML() {
   const skelRow = (w = '100%') => `<div class="skel skel-line" style="width:${w};"></div>`;
   return `
@@ -1786,13 +1884,7 @@ function renderReportImpl() {
       </div>
     </div>
 
-    ${sectionTitleHTML('Resumen Ejecutivo IA', 'bulb')}
-    <div class="card ai-summary-card">
-      <ul class="ai-summary-list">
-        ${catalysts.slice(0, 3).map(c => `<li class="ok">${ICONS.check}<span>${esc(c)}</span></li>`).join('')}
-        ${risks.slice(0, 3).map(rk => `<li class="risk">${ICONS.warning}<span>${esc(rk)}</span></li>`).join('')}
-      </ul>
-    </div>
+    ${analystBriefHTML(r, priceAlert, subScores, subScoreLabels)}
 
     <div class="card thermo-card">
       <div class="thermo-labels"><span>Venta</span><span>Reducir</span><span>Mantener</span><span>Compra</span><span>Compra Fuerte</span></div>
@@ -2445,23 +2537,37 @@ function sortAndFilterTickers(tickers) {
 }
 
 /* ───────────────────────── sidebar de navegación ───────────────────────── */
-const SIDEBAR_NAV = [
-  { view: 'dashboard', label: 'Dashboard', icon: 'grid' },
-  { view: 'portfolio', label: 'Portfolio Advisor', icon: 'briefcase' },
-  { view: 'simulator', label: 'Simulador "¿Y si...?"', icon: 'shuffle' },
-  { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
-  { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
-  { view: 'screener', label: 'Screener', icon: 'filter' },
-  { view: 'shorttrades', label: 'Trades Cortos', icon: 'zap' },
-  { view: 'gaps', label: 'Radar de Gaps', icon: 'gap' },
-  { view: 'dividends', label: 'Dividendos', icon: 'coins' },
-  { view: 'compare', label: 'Comparador', icon: 'compare' },
-  { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
-  { view: 'alerts', label: 'Alertas', icon: 'warning' },
-  { view: 'calendar', label: 'Calendario Económico', icon: 'calendar' },
-  { view: 'backtest', label: 'Backtesting', icon: 'trend' },
-  { view: 'trackrecord', label: 'Track Record del Motor', icon: 'award' },
-  { view: 'settings', label: 'Configuración', icon: 'gear' },
+// Navegación agrupada por área (antes eran 16 ítems planos). No cambia ninguna
+// ruta/vista: solo organiza y ordena para que se lea como una plataforma
+// institucional y para que los apartados relacionados queden juntos
+// (Backtesting junto a Track Record, Watchlist junto a Alertas, etc.).
+const SIDEBAR_NAV_GROUPS = [
+  { label: 'Mercado', items: [
+    { view: 'dashboard', label: 'Dashboard', icon: 'grid' },
+    { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
+    { view: 'calendar', label: 'Calendario Económico', icon: 'calendar' },
+  ] },
+  { label: 'Oportunidades', items: [
+    { view: 'screener', label: 'Screener', icon: 'filter' },
+    { view: 'shorttrades', label: 'Trades Cortos', icon: 'zap' },
+    { view: 'gaps', label: 'Radar de Gaps', icon: 'gap' },
+    { view: 'dividends', label: 'Dividendos', icon: 'coins' },
+    { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
+  ] },
+  { label: 'Mi Cartera', items: [
+    { view: 'portfolio', label: 'Portfolio Advisor', icon: 'briefcase' },
+    { view: 'simulator', label: 'Simulador "¿Y si...?"', icon: 'shuffle' },
+    { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
+    { view: 'alerts', label: 'Alertas', icon: 'warning' },
+  ] },
+  { label: 'Motor de Análisis', items: [
+    { view: 'compare', label: 'Comparador', icon: 'compare' },
+    { view: 'backtest', label: 'Backtesting', icon: 'trend' },
+    { view: 'trackrecord', label: 'Track Record del Motor', icon: 'award' },
+  ] },
+  { label: 'Ajustes', items: [
+    { view: 'settings', label: 'Configuración', icon: 'gear' },
+  ] },
 ];
 // Ninguna funcionalidad queda deshabilitada por ahora: cada ítem del sidebar
 // corresponde a una vista real con datos en vivo. Si se agrega una nueva
@@ -2473,12 +2579,14 @@ function renderSidebar() {
   if (!els.sidebarNav) return;
   const activeView = !state.asset ? state.view : null;
   els.sidebarNav.innerHTML = `
+    ${SIDEBAR_NAV_GROUPS.map(group => `
     <div class="sidebar-nav-group">
-      ${SIDEBAR_NAV.map(item => `
+      <div class="sidebar-nav-label">${esc(group.label)}</div>
+      ${group.items.map(item => `
         <button class="sidebar-nav-btn ${activeView === item.view ? 'active' : ''}" data-view="${item.view}" ${activeView === item.view ? 'aria-current="page"' : ''}>
           ${ICONS[item.icon]}<span>${esc(item.label)}</span>
         </button>`).join('')}
-    </div>
+    </div>`).join('')}
     ${SIDEBAR_NAV_DISABLED.length ? `
     <div class="sidebar-nav-group">
       <div class="sidebar-nav-label">Próximamente</div>
