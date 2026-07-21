@@ -429,6 +429,30 @@ select.port-input { cursor: pointer; }
 .port-reco-ticker { font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 13px; width: 56px; flex-shrink: 0; }
 .port-reco-detail { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; flex: 1; min-width: 220px; }
 
+/* Recomendación por posición — versión profesional (convicción + factores + niveles + sizing) */
+.port-reco-card { padding: 13px 15px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft); border-left: 3px solid var(--border-strong); margin-bottom: 10px; }
+.port-reco-card:last-child { margin-bottom: 0; }
+.port-reco-card.reco-buy { border-left-color: var(--up); }
+.port-reco-card.reco-hold { border-left-color: var(--amber); }
+.port-reco-card.reco-reduce { border-left-color: oklch(0.70 0.15 45); }
+.port-reco-card.reco-sell { border-left-color: var(--down); }
+.prr-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 7px; }
+.prr-head .port-reco-ticker { width: auto; font-size: 15px; font-weight: 700; cursor: pointer; transition: color 0.12s; }
+.prr-head .port-reco-ticker:hover { color: var(--accent-text); }
+.prr-head .watch-signal { font-size: 11px; padding: 3px 9px; border-radius: 6px; font-weight: 700; }
+.prr-conv { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; padding: 3px 9px; border-radius: 20px; margin-left: auto; white-space: nowrap; }
+.prr-conv-alta { background: var(--up-soft); color: var(--up-text); }
+.prr-conv-media { background: var(--amber-soft); color: var(--amber-text); }
+.prr-conv-baja { background: var(--surface-3); color: var(--text-mute); }
+.prr-detail { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+.prr-factors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.prr-factor { font-size: 10.5px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border-soft); background: var(--bg-card); color: var(--text-mute); white-space: nowrap; }
+.prr-factor.good { color: var(--up-text); border-color: oklch(0.72 0.17 152 / 0.35); }
+.prr-factor.bad { color: var(--down-text); border-color: oklch(0.70 0.21 23 / 0.30); }
+.prr-levels { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; font-size: 12px; color: var(--text-mute); }
+.prr-levels b { font-family: 'IBM Plex Mono', monospace; color: var(--text-dim); font-weight: 700; }
+.prr-sizing { margin-top: 9px; font-size: 12px; color: var(--text-dim); background: color-mix(in oklch, var(--accent) 8%, transparent); border: 1px solid color-mix(in oklch, var(--accent) 18%, transparent); border-radius: 8px; padding: 8px 11px; line-height: 1.45; }
+
 /* ---------- Dashboard / Radar ---------- */
 .dash-intro { font-size: 13px; color: var(--text-mute); line-height: 1.6; max-width: 760px; margin-bottom: 8px; }
 .dash-loading-note { font-size: 12px; color: var(--text-mute); margin: 8px 0 24px 0; }
