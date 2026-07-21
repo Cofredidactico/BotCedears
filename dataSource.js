@@ -219,7 +219,7 @@ const Mock = {
     const freqLabel = perYear === 12 ? 'Mensual' : perYear === 4 ? 'Trimestral' : perYear === 2 ? 'Semestral' : 'Anual';
     return { items, frequency: freqLabel, perYear, medianIntervalDays: intervalDays, ttm, nextExDate: next.toISOString().slice(0, 10), nextExEstimated: true, lastAmount: items[0].amount, lastExDate: items[0].date, cagr3y: 2.4, isReal: false };
   },
-  async getBonds() { return { items: [], isReal: false }; },
+  async getBonds() { return { items: [], ons: [], letras: [], isReal: false }; },
 };
 
 /* ═════════════════════════════ LIVE ═══════════════════════════════════ */
@@ -258,12 +258,12 @@ const Live = {
       const d = await r.json(); return { ...d, isReal: true };
     });
   },
+  // El consenso viene DENTRO de /api/fundamentals (para no sumar una función
+  // serverless — el plan Hobby de Vercel topa en 12). Se deriva de ahí, reusando
+  // el mismo request ya cacheado.
   async getRecommendations(ticker) {
-    return cached('rec:' + ticker, 6 * 60 * 60 * 1000, async () => {
-      const r = await fetch(`${API_BASE}/recommendations?symbol=${encodeURIComponent(ticker)}`);
-      if (!r.ok) throw new Error('recommendations ' + r.status);
-      const d = await r.json(); return { ...d, isReal: true };
-    });
+    const f = await this.getFundamentals(ticker);
+    return f?.recommendations ? { ...f.recommendations, isReal: true } : { hasData: false, isReal: true };
   },
   async getGeneralNews() {
     return cached('n:general', 10 * 60 * 1000, async () => {

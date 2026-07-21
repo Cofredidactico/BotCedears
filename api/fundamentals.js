@@ -17,9 +17,17 @@ export default async function handler(req, res) {
     // es premium para este símbolo, se degrada a null sin romper nada.
     const since = new Date(Date.now() - 183 * 86400e3).toISOString().slice(0, 10);
     const insiderUrl = `${FINNHUB}/stock/insider-transactions?symbol=${symbol}&from=${since}&token=${token}`;
-    const [d, insiderRaw] = await Promise.all([
+    // Consenso de analistas ("la calle") — se pide acá, dentro de fundamentals,
+    // para NO agregar una función serverless nueva (el plan Hobby de Vercel topa
+    // en 12). recommendation es free tier; price-target puede ser premium y se
+    // degrada a null sin romper.
+    const recUrl = `${FINNHUB}/stock/recommendation?symbol=${symbol}&token=${token}`;
+    const ptUrl = `${FINNHUB}/stock/price-target?symbol=${symbol}&token=${token}`;
+    const [d, insiderRaw, recRaw, ptRaw] = await Promise.all([
       fetch(metricUrl).then(r => r.json()).catch(() => ({})),
       fetch(insiderUrl).then(r => r.json()).catch(() => null),
+      fetch(recUrl).then(r => r.json()).catch(() => null),
+      fetch(ptUrl).then(r => r.json()).catch(() => null),
     ]);
     const m = d.metric || {};
     const has = (v) => typeof v === 'number' && !Number.isNaN(v);
@@ -53,16 +61,50 @@ export default async function handler(req, res) {
 
     const hasData = revenueGrowth != null || epsGrowth != null || peTTM != null || roe != null;
     const insider = summarizeInsider(insiderRaw);
+    const recommendations = summarizeRecommendations(recRaw, ptRaw);
 
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=7200');
     return res.status(200).json({
       hasData, revenueGrowth, epsGrowth, peTTM, peForward, peg, pegComputed, pb, ps, evEbitda,
       roe, roi, grossMargin, netMargin, fcfPerShare, debtEquity, dividendYield,
-      insider,
+      insider, recommendations,
     });
   } catch (e) {
     return res.status(502).json({ error: 'upstream', detail: String(e) });
   }
+}
+
+/**
+ * Consenso de analistas: resume la distribución de recomendaciones (escala 1–5)
+ * y, si está disponible, el precio objetivo. Devuelve { hasData:false } si el
+ * símbolo no tiene cobertura — nunca inventa.
+ */
+function summarizeRecommendations(recRaw, ptRaw) {
+  const rows = Array.isArray(recRaw) ? recRaw.slice() : [];
+  rows.sort((a, b) => String(b.period || '').localeCompare(String(a.period || '')));
+  const sum = (row) => {
+    if (!row) return null;
+    const strongBuy = Number(row.strongBuy) || 0, buy = Number(row.buy) || 0, hold = Number(row.hold) || 0, sell = Number(row.sell) || 0, strongSell = Number(row.strongSell) || 0;
+    const total = strongBuy + buy + hold + sell + strongSell;
+    if (!total) return null;
+    const scored = (strongBuy * 5 + buy * 4 + hold * 3 + sell * 2 + strongSell) / total;
+    return {
+      period: row.period || null, strongBuy, buy, hold, sell, strongSell, total,
+      scored: Math.round(scored * 100) / 100, scored100: Math.round(((scored - 1) / 4) * 100),
+      bullishPct: Math.round(((strongBuy + buy) / total) * 100), bearishPct: Math.round(((sell + strongSell) / total) * 100),
+      label: scored >= 4.5 ? 'Compra fuerte' : scored >= 3.5 ? 'Compra' : scored >= 2.5 ? 'Mantener' : scored >= 1.5 ? 'Venta' : 'Venta fuerte',
+    };
+  };
+  const latest = rows.length ? sum(rows[0]) : null;
+  const prev = rows.length > 1 ? sum(rows[1]) : null;
+  let trend = null;
+  if (latest && prev) { const dd = latest.scored - prev.scored; trend = Math.abs(dd) < 0.05 ? 'estable' : dd > 0 ? 'mejorando' : 'empeorando'; }
+  let priceTarget = null;
+  const num = (v) => (typeof v === 'number' && !Number.isNaN(v) && v > 0 ? v : null);
+  if (ptRaw && (num(ptRaw.targetMean) || num(ptRaw.targetMedian))) {
+    priceTarget = { mean: num(ptRaw.targetMean), median: num(ptRaw.targetMedian), high: num(ptRaw.targetHigh), low: num(ptRaw.targetLow), lastUpdated: ptRaw.lastUpdated || null };
+  }
+  return { hasData: latest != null, latest, prev, trend, priceTarget };
 }
 
 /**
