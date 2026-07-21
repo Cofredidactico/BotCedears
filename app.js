@@ -1785,8 +1785,174 @@ async function runBacktest(ticker) {
 }
 
 /* ───────────────────────── render del reporte ───────────────────────── */
+/* ═══════════════════ Asesor de Inversión (asignación por perfil) ═══════════
+ * "Tengo X pesos, ¿cómo lo reparto?". Modelo DETERMINÍSTICO de asignación por
+ * clase de activo según el perfil de riesgo — no es asesoramiento personalizado
+ * ni una recomendación garantizada. En equity (CEDEARs y acciones argentinas)
+ * elige instrumentos concretos por su score real ya calculado; en renta fija
+ * (letras, bonos soberanos, ONs) da una referencia curada de instrumentos
+ * representativos (el análisis fino de TIR/paridad vive en Bonos Argentinos y no
+ * se inventa acá). Toda la parte de equity usa datos reales; la de renta fija se
+ * marca explícitamente como referencia. */
+const ADVISOR_CLASSES = [
+  { key: 'letras', label: 'Letras en pesos (tasa fija, corto plazo)', kind: 'rf', color: 'oklch(0.80 0.15 85)' },
+  { key: 'bonos', label: 'Bonos soberanos argentinos', kind: 'rf', color: 'oklch(0.72 0.15 250)' },
+  { key: 'ons', label: 'Obligaciones negociables (ONs)', kind: 'rf', color: 'oklch(0.78 0.13 199)' },
+  { key: 'cedears', label: 'CEDEARs', kind: 'eq', color: 'oklch(0.70 0.19 291)' },
+  { key: 'accionesarg', label: 'Acciones argentinas', kind: 'eq', color: 'oklch(0.76 0.18 152)' },
+];
+const ADVISOR_ALLOCATION = {
+  conservador: { letras: 30, bonos: 28, ons: 22, cedears: 12, accionesarg: 8 },
+  moderado: { letras: 15, bonos: 20, ons: 20, cedears: 28, accionesarg: 17 },
+  agresivo: { letras: 5, bonos: 12, ons: 13, cedears: 42, accionesarg: 28 },
+};
+const ADVISOR_PROFILE_DESC = {
+  conservador: 'Prioriza preservar capital: mayoría en renta fija en pesos y dólares, exposición acotada a acciones.',
+  moderado: 'Equilibrio entre renta fija y variable, buscando crecimiento con riesgo controlado.',
+  agresivo: 'Prioriza crecimiento: mayoría en acciones (CEDEARs y argentinas), con renta fija como amortiguador.',
+};
+// Referencia curada de renta fija (no hay análisis por instrumento acá — son
+// ejemplos representativos que el usuario pide a su broker; se marcan como tal).
+const ADVISOR_FIXED = {
+  letras: {
+    note: 'Instrumento de tasa fija en pesos, tramo corto (LECAPs). El papel específico rota con los vencimientos vigentes — pedile a tu broker la letra más corta con mejor tasa.',
+    items: [{ name: 'LECAP corta', desc: 'Letra del Tesoro capitalizable en pesos, < 6 meses' }],
+  },
+  bonos: {
+    note: 'Bonos soberanos en dólares. Referencia — mirá paridad y liquidez en el apartado Bonos Argentinos (con precios reales).',
+    items: [
+      { name: 'AL30', desc: 'Bonar 2030 · ley Argentina · USD' },
+      { name: 'GD30', desc: 'Global 2030 · ley Nueva York · USD' },
+      { name: 'AL35 / GD35', desc: 'tramo más largo, mayor duration' },
+    ],
+  },
+  ons: {
+    note: 'Obligaciones negociables corporativas hard-dollar de empresas líderes — suelen tener menos riesgo que el soberano, en dólares. Diversificá emisores.',
+    items: [
+      { name: 'ON YPF', desc: 'energía · dólar' },
+      { name: 'ON Pampa Energía', desc: 'energía · dólar' },
+      { name: 'ON Telecom / Vista / Cresud', desc: 'diversificar sector y emisor' },
+    ],
+  },
+};
+const advisorState = {
+  amount: (() => { const v = parseFloat(lsGetSafe('icp_advisor_amount', '')); return isNaN(v) || v <= 0 ? 1000000 : v; })(),
+  profile: lsGetSafe('icp_advisor_profile', settingsState.riskProfile || 'moderado'),
+};
+
+function advisorEquityPicks(kind, n) {
+  const entries = Object.entries(dashState.data).filter(([t, d]) => d && d.score != null);
+  const pool = kind === 'cedears'
+    ? entries.filter(([t, d]) => !AR_TICKERS.has(t) && d.category === 'CEDEAR')
+    : entries.filter(([t, d]) => AR_TICKERS.has(t));
+  return pool.sort((a, b) => b[1].score - a[1].score).slice(0, n).map(([ticker, d]) => ({ ticker, d }));
+}
+
+function advisorClassInstrumentsHTML(cls, classPeso) {
+  if (cls.kind === 'eq') {
+    const picks = advisorEquityPicks(cls.key, 4);
+    if (!picks.length) return `<div class="advisor-inst-empty">Cargando el universo para elegir los mejores ${cls.key === 'cedears' ? 'CEDEARs' : 'papeles argentinos'} por score…</div>`;
+    const totalScore = picks.reduce((s, p) => s + p.d.score, 0) || 1;
+    return picks.map(p => {
+      const peso = classPeso * (p.d.score / totalScore);
+      const units = p.d.cedearArs ? Math.floor(peso / p.d.cedearArs) : null;
+      const sig = scoreLabelColor(p.d.scoreLabel);
+      return `<div class="advisor-inst" data-advisor-ticker="${esc(p.ticker)}">
+        <div class="advisor-inst-id"><b>${esc(p.ticker)}</b> <span>${esc(p.d.name ?? '')}</span></div>
+        <div class="advisor-inst-mid"><span class="advisor-score" style="color:${sig.color};">${p.d.score}</span><span class="advisor-inst-sig">${esc(p.d.scoreLabel)}</span></div>
+        <div class="advisor-inst-amt"><b>${fmtArs(peso)}</b>${units != null ? `<span>~${units.toLocaleString('es-AR')} ${cls.key === 'cedears' ? 'CEDEARs' : 'papeles'}</span>` : ''}</div>
+      </div>`;
+    }).join('');
+  }
+  const fx = ADVISOR_FIXED[cls.key];
+  const per = classPeso / fx.items.length;
+  return `${fx.items.map(it => `<div class="advisor-inst advisor-inst-ref">
+      <div class="advisor-inst-id"><b>${esc(it.name)}</b> <span>${esc(it.desc)}</span></div>
+      <div class="advisor-inst-mid"><span class="advisor-ref-badge">referencia</span></div>
+      <div class="advisor-inst-amt"><b>${fmtArs(per)}</b></div>
+    </div>`).join('')}
+    <div class="advisor-inst-note">${esc(fx.note)}</div>`;
+}
+
+function advisorPageHTML() {
+  const amount = advisorState.amount;
+  const profile = ADVISOR_ALLOCATION[advisorState.profile] ? advisorState.profile : 'moderado';
+  const alloc = ADVISOR_ALLOCATION[profile];
+  const rfPct = alloc.letras + alloc.bonos + alloc.ons;
+  const eqPct = alloc.cedears + alloc.accionesarg;
+  const segBtn = (key, label) => `<button class="advisor-seg-btn ${profile === key ? 'active' : ''}" data-advisor-profile="${key}">${label}</button>`;
+  const loadingUniverse = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
+
+  return `
+    ${sectionTitleHTML('Asesor de Inversión', 'target')}
+    <div class="dash-intro">Ingresá un monto en pesos y tu perfil de riesgo, y el asesor te propone <strong>cómo repartirlo</strong> entre letras, bonos soberanos, obligaciones negociables, CEDEARs y acciones argentinas. La parte de acciones/CEDEARs se elige por el <strong>score real</strong> de cada papel; la renta fija es una referencia de instrumentos representativos. ${loadingUniverse ? 'Cargando el universo…' : ''}</div>
+    <div class="cedear-note" style="margin-bottom:20px; border-color:oklch(0.55 0.15 70 / 0.4);">
+      <strong>⚠ No es asesoramiento financiero.</strong> Es un modelo determinístico y educativo de asignación por perfil — no considera tu situación personal, impuestos ni horizonte específico, y ningún rendimiento está garantizado. Consultá a un asesor matriculado antes de invertir.
+    </div>
+
+    <div class="card advisor-form">
+      <label class="advisor-field">
+        <span>Monto a invertir (ARS)</span>
+        <div class="advisor-amount-wrap"><span class="advisor-amount-sign">AR$</span><input type="text" id="advisor-amount" class="advisor-amount-input" value="${amount.toLocaleString('es-AR')}" inputmode="numeric" autocomplete="off" /></div>
+      </label>
+      <div class="advisor-field">
+        <span>Perfil de inversor</span>
+        <div class="advisor-seg">${segBtn('conservador', 'Conservador')}${segBtn('moderado', 'Moderado')}${segBtn('agresivo', 'Agresivo')}</div>
+      </div>
+    </div>
+    <div class="advisor-profile-desc">${esc(ADVISOR_PROFILE_DESC[profile])}</div>
+
+    <div class="card advisor-summary">
+      <div class="advisor-summary-top">
+        <div><span>Total a invertir</span><b>${fmtArs(amount)}</b></div>
+        <div class="advisor-split"><span class="advisor-split-rf">${rfPct}% renta fija</span> · <span class="advisor-split-eq">${eqPct}% renta variable</span></div>
+      </div>
+      <div class="advisor-bar">${ADVISOR_CLASSES.map(c => alloc[c.key] > 0 ? `<div class="advisor-bar-seg" style="flex:${alloc[c.key]}; background:${c.color};" title="${esc(c.label)}: ${alloc[c.key]}%"></div>` : '').join('')}</div>
+      <div class="advisor-bar-legend">${ADVISOR_CLASSES.map(c => `<span class="advisor-leg"><i style="background:${c.color};"></i>${esc(c.label.split(' (')[0])} <b>${alloc[c.key]}%</b></span>`).join('')}</div>
+    </div>
+
+    <div class="advisor-classes">
+      ${ADVISOR_CLASSES.map(c => {
+        const classPeso = amount * (alloc[c.key] / 100);
+        return `<div class="card advisor-class" style="--class-color:${c.color};">
+          <div class="advisor-class-head">
+            <div class="advisor-class-title">${esc(c.label)}</div>
+            <div class="advisor-class-amt"><b>${fmtArs(classPeso)}</b><span>${alloc[c.key]}% · ${c.kind === 'eq' ? 'renta variable' : 'renta fija'}</span></div>
+          </div>
+          <div class="advisor-inst-list">${advisorClassInstrumentsHTML(c, classPeso)}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+function wireAdvisorEvents() {
+  const amountInput = document.getElementById('advisor-amount');
+  if (amountInput) {
+    const commit = () => {
+      const raw = parseFloat(String(amountInput.value).replace(/[^\d]/g, ''));
+      advisorState.amount = isNaN(raw) || raw <= 0 ? 0 : raw;
+      try { localStorage.setItem('icp_advisor_amount', String(advisorState.amount)); } catch (e) {}
+      renderReport();
+    };
+    amountInput.addEventListener('change', commit);
+    amountInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
+  }
+  els.report.querySelectorAll('[data-advisor-profile]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      advisorState.profile = btn.dataset.advisorProfile;
+      try { localStorage.setItem('icp_advisor_profile', advisorState.profile); } catch (e) {}
+      renderReport();
+    });
+  });
+  els.report.querySelectorAll('[data-advisor-ticker]').forEach(el => {
+    el.addEventListener('click', () => selectTicker(el.dataset.advisorTicker));
+  });
+}
+
 const VIEW_PAGES = {
   dashboard: { html: dashboardHTML, wire: wireDashboardEvents, load: () => { if (!dashState.started) loadDashboardData(); loadPortfolioData(); } },
+  advisor: { html: advisorPageHTML, wire: wireAdvisorEvents, load: () => { if (!dashState.started) loadDashboardData(); } },
   portfolio: { html: portfolioHTML, wire: wirePortfolioEvents, load: loadPortfolioData },
   simulator: { html: simulatorHTML, wire: wireSimulatorEvents, load: loadSimulatorData },
   watchlist: { html: watchlistPageHTML, wire: wireWatchlistEvents, load: () => {} },
@@ -2663,6 +2829,7 @@ const SIDEBAR_NAV_GROUPS = [
     { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
   ] },
   { label: 'Mi Cartera', items: [
+    { view: 'advisor', label: 'Asesor de Inversión', icon: 'target' },
     { view: 'portfolio', label: 'Portfolio Advisor', icon: 'briefcase' },
     { view: 'simulator', label: 'Simulador "¿Y si...?"', icon: 'shuffle' },
     { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
