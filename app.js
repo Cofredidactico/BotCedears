@@ -302,9 +302,51 @@ function alertConfidenceSuffix(a) {
 function alertTitleAttr(a) {
   if (!a) return '';
   const parts = [];
-  if (a.reason) parts.push(a.reason);
+  const narr = alertNarrativeText(a);
+  if (narr) parts.push(narr);
+  else if (a.reason) parts.push(a.reason);
   if (a.confirmations?.length) parts.push('✓ ' + a.confirmations.join(' · '));
   return parts.length ? ` title="${esc(parts.join('  |  '))}"` : '';
+}
+
+/* ── Narrativa de la alerta (mismo estilo que la de Trades Cortos) ───────────
+ * Traduce la señal de precio (zona de compra/venta/stop) a una frase clara con
+ * la proyección real hasta el nivel opuesto: la resistencia como objetivo de un
+ * rebote de compra, o el soporte como objetivo de una caída de venta. Usa los
+ * niveles S/R que detectPriceAlert ya adjunta a la alerta — no inventa nada:
+ * es un objetivo estructural, no una promesa. Devuelve null si no aplica. */
+function alertNarrative(a) {
+  if (!a) return null;
+  const sup = a.support, res = a.resistance, price = a.entry;
+  const conf = a.confluences?.length ? ` (el nivel confluye con ${a.confluences.join(', ')})` : '';
+  const rrTxt = a.rr != null ? ` Riesgo/beneficio ${a.rr}:1.` : '';
+  const lead = a.pending ? 'Está tocando' : 'Llegó a';
+  if (a.type === 'buy') {
+    const projPct = (res != null && price > 0 && res > price) ? ((res - price) / price) * 100 : null;
+    const proj = projPct != null ? ` Si rebota, el objetivo es la resistencia en <b>${fmtUsd(res)}</b> (<b class="up">+${projPct.toFixed(1)}%</b>).` : '';
+    return `🟢 ${lead} la <b>zona de compra</b>${sup != null ? ` — tocó el soporte de <b>${fmtUsd(sup)}</b>` : ''}${conf}.${proj}${rrTxt}`;
+  }
+  if (a.type === 'sell') {
+    const projPct = (sup != null && price > 0 && sup < price) ? ((price - sup) / price) * 100 : null;
+    const proj = projPct != null ? ` Si gira, el objetivo es el soporte en <b>${fmtUsd(sup)}</b> (<b class="down">−${projPct.toFixed(1)}%</b>).` : '';
+    return `🔴 ${lead} la <b>zona de venta</b>${res != null ? ` — tocó la resistencia de <b>${fmtUsd(res)}</b>` : ''}${conf}.${proj}${rrTxt}`;
+  }
+  if (a.type === 'stop') {
+    return `⛔ <b>Rompió el soporte</b>${sup != null ? ` de <b>${fmtUsd(sup)}</b>` : ''} — el piso técnico cedió; el plan de compra queda invalidado hasta que recupere el nivel.`;
+  }
+  return null;
+}
+// Versión en texto plano (para tooltips y notificaciones).
+function alertNarrativeText(a) {
+  const html = alertNarrative(a);
+  return html ? html.replace(/<[^>]+>/g, '') : null;
+}
+// Tarjeta narrativa de la alerta en la ficha del activo.
+function alertNarrativeCardHTML(a) {
+  const txt = alertNarrative(a);
+  if (!txt) return '';
+  const cls = a.type === 'buy' ? 'up' : a.type === 'sell' ? 'down' : 'stop';
+  return `<div class="card alert-narrative ${cls}">${txt}</div>`;
 }
 
 /** Tarjeta didáctica del GRADO de la zona de compra/venta en la ficha del
@@ -2545,6 +2587,7 @@ function renderReportImpl() {
       </div>
     </div>
 
+    ${alertNarrativeCardHTML(priceAlert)}
     ${alertGradeCardHTML(priceAlert)}
     ${alertReliabilityCardHTML(priceAlert, t, plan, quote.usd, asset.ticker)}
 
@@ -7874,6 +7917,7 @@ function watchCardHTML(ticker) {
     <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
     <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
     ${am ? `<div class="watch-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
+    ${am && alertNarrative(d.alert) ? `<div class="watch-alert-narr ${d.alert.type === 'buy' ? 'up' : d.alert.type === 'sell' ? 'down' : 'stop'}">${alertNarrative(d.alert)}</div>` : ''}
   </div>`;
 }
 

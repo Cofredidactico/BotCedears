@@ -307,7 +307,7 @@ export function detectPriceAlert(price, technical, opts = {}) {
   const safeAtr = atr && atr > 0 && !isNaN(atr) ? atr : price * 0.02;
 
   if (price <= support - safeAtr) {
-    return { type: 'stop', label: 'Rompió el soporte', confidence: 'alta', grade: null, quality: null, rr: null, confirmations: [], factors: [], confirmationsAvailable: 0, pending: false };
+    return { type: 'stop', label: 'Rompió el soporte', confidence: 'alta', grade: null, quality: null, rr: null, confirmations: [], factors: [], confirmationsAvailable: 0, pending: false, support, resistance, entry: price };
   }
 
   const inBuyZone = price <= support + 0.6 * safeAtr;
@@ -432,5 +432,6 @@ export function detectPriceAlert(price, technical, opts = {}) {
     confluences, reason,
     confirmations, factors, confirmationsAvailable: factors.length, pending,
     gradeRank: gradeOrder[grade],
+    support, resistance, entry: price,
   };
 }
