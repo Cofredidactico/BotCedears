@@ -6778,18 +6778,19 @@ function corrMatrixCardHTML(risk) {
  * ganás/perdés en total y en el día — todo en pesos, con lenguaje simple. */
 function portfolioDidacticSummary(stats) {
   const ccl = portState.ccl?.value ?? portState.macro?.dolares?.ccl ?? null;
-  // Plata invertida = valor ACTUAL de las tenencias (el mismo total que figura
-  // en la pestaña Tenencias). Antes mostraba el costo; ahora, el valor de mercado.
-  const investedNow = stats.totalValueArs;
-  // Costo de las compras (para separar el efectivo disponible y medir la ganancia).
+  // Plata invertida = COSTO total de tus compras (lo que gastaste comprando).
+  // Así las tarjetas cierran: Pusiste = Plata invertida + Disponible. La
+  // ganancia/pérdida se mide aparte (valor actual − costo).
   let costBasis = null;
   if (stats.totalCostArs != null || stats.totalCostUsd != null) {
     costBasis = (stats.totalCostArs || 0) + (stats.totalCostUsd != null && ccl ? stats.totalCostUsd * ccl : 0);
     if (costBasis <= 0) costBasis = null;
   }
+  const investedNow = costBasis; // "Plata invertida" = costo de las compras
+  const currentValue = stats.totalValueArs; // valor de mercado actual (Tenencias total)
   const declared = portState.investedArs; // lo que el usuario depositó en la cuenta
   const available = (declared != null && costBasis != null) ? declared - costBasis : null; // efectivo sin invertir
-  const gainArs = (investedNow != null && costBasis != null) ? investedNow - costBasis : null; // P&L sobre lo invertido
+  const gainArs = (currentValue != null && costBasis != null) ? currentValue - costBasis : null; // P&L sobre lo invertido
   const gainPct = (gainArs != null && costBasis > 0) ? (gainArs / costBasis) * 100 : null;
   let dayArs = null, prevArs = 0, hasDay = false;
   for (const r of stats.rows) {
@@ -6799,7 +6800,7 @@ function portfolioDidacticSummary(stats) {
     }
   }
   const dayPct = hasDay && prevArs > 0 ? (dayArs / prevArs) * 100 : null;
-  return { ccl, investedNow, declared, costBasis, available, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct };
+  return { ccl, investedNow, currentValue, declared, costBasis, available, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct };
 }
 
 /* Rendimiento del basket por período (Hoy/Semana/Mes/Año/Total), a partir de la
@@ -6884,7 +6885,7 @@ function portfolioDidacticHTML(stats) {
         <div class="pdx-tile">
           <div class="pdx-k">📈 Plata invertida</div>
           <div class="pdx-v">${s.investedNow != null ? pv(fmtArs(s.investedNow)) : '—'}</div>
-          <div class="pdx-sub">valor actual de tus tenencias (igual al total de Tenencias)</div>
+          <div class="pdx-sub">${s.investedNow != null ? 'lo que gastaste comprando (costo de tus activos)' : 'cargá el costo de tus compras'}</div>
         </div>
         <div class="pdx-tile">
           <div class="pdx-k">🏦 Disponible para invertir</div>
