@@ -6778,16 +6778,19 @@ function corrMatrixCardHTML(risk) {
  * ganás/perdés en total y en el día — todo en pesos, con lenguaje simple. */
 function portfolioDidacticSummary(stats) {
   const ccl = portState.ccl?.value ?? portState.macro?.dolares?.ccl ?? null;
-  const valueArs = stats.totalValueArs;
-  let computed = null;
+  const valueArs = stats.totalValueArs; // valor actual de las tenencias (ARS)
+  // Plata invertida = costo total de todas las compras registradas (ARS): las
+  // de costo en pesos directo, las de costo en USD convertidas al CCL de hoy.
+  let costBasis = null;
   if (stats.totalCostArs != null || stats.totalCostUsd != null) {
-    computed = (stats.totalCostArs || 0) + (stats.totalCostUsd != null && ccl ? stats.totalCostUsd * ccl : 0);
-    if (computed <= 0) computed = null;
+    costBasis = (stats.totalCostArs || 0) + (stats.totalCostUsd != null && ccl ? stats.totalCostUsd * ccl : 0);
+    if (costBasis <= 0) costBasis = null;
   }
-  const invested = portState.investedArs ?? computed;
-  const manual = portState.investedArs != null;
-  const gainArs = (valueArs != null && invested != null) ? valueArs - invested : null;
-  const gainPct = (gainArs != null && invested > 0) ? (gainArs / invested) * 100 : null;
+  const declared = portState.investedArs; // lo que el usuario puso en la cuenta
+  const available = (declared != null && costBasis != null) ? declared - costBasis : null; // disponible sin invertir
+  const gainArs = (valueArs != null && costBasis != null) ? valueArs - costBasis : null;    // P&L sobre lo invertido
+  const gainPct = (gainArs != null && costBasis > 0) ? (gainArs / costBasis) * 100 : null;
+  // Ganancia/pérdida del día = suma de la variación de hoy de cada tenencia.
   let dayArs = null, prevArs = 0, hasDay = false;
   for (const r of stats.rows) {
     if (r.valueArs != null && r.d?.changePct != null) {
@@ -6796,35 +6799,41 @@ function portfolioDidacticSummary(stats) {
     }
   }
   const dayPct = hasDay && prevArs > 0 ? (dayArs / prevArs) * 100 : null;
-  return { ccl, valueArs, invested, manual, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct };
+  return { ccl, valueArs, declared, costBasis, available, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct };
 }
 
 function portfolioDidacticHTML(stats) {
   const s = portfolioDidacticSummary(stats);
   const gc = s.gainArs == null ? '' : s.gainArs >= 0 ? 'up' : 'down';
   const dc = s.dayArs == null ? '' : s.dayArs >= 0 ? 'up' : 'down';
-  const gword = s.gainArs == null ? 'Ganancia total' : s.gainArs >= 0 ? 'Ganás en total' : 'Perdés en total';
+  const gword = s.gainArs == null ? 'Ganancias / Pérdidas' : s.gainArs >= 0 ? 'Ganás en total' : 'Perdés en total';
+  const avClass = s.available == null ? '' : s.available < 0 ? 'down' : '';
   return `
     <div class="card pdx-card">
       <div class="pdx-head">
         <div class="pdx-title">💡 Tu resumen, en criollo</div>
-        <label class="pdx-invested">¿Cuánto pusiste en total?<span class="pdx-inp"><span>AR$</span><input type="text" id="pdx-invested-input" inputmode="numeric" autocomplete="off" placeholder="ej. 1.000.000" value="${portState.investedArs != null ? Math.round(portState.investedArs).toLocaleString('es-AR') : ''}" /></span></label>
+        <label class="pdx-invested">¿Cuánto pusiste en tu cartera?<span class="pdx-inp"><span>AR$</span><input type="text" id="pdx-invested-input" inputmode="numeric" autocomplete="off" placeholder="ej. 1.000.000" value="${portState.investedArs != null ? Math.round(portState.investedArs).toLocaleString('es-AR') : ''}" /></span></label>
       </div>
       <div class="pdx-grid">
         <div class="pdx-tile">
-          <div class="pdx-k">💵 Pusiste</div>
-          <div class="pdx-v">${s.invested != null ? pv(fmtArs(s.invested)) : '—'}</div>
-          <div class="pdx-sub">${s.manual ? 'lo que declaraste' : s.invested != null ? 'según tus costos cargados' : 'cargalo arriba o poné el costo de cada compra'}</div>
+          <div class="pdx-k">💰 Pusiste en tu cartera</div>
+          <div class="pdx-v">${s.declared != null ? pv(fmtArs(s.declared)) : '—'}</div>
+          <div class="pdx-sub">${s.declared != null ? 'lo que depositaste en la cuenta' : 'cargalo en el campo de arriba'}</div>
         </div>
         <div class="pdx-tile">
-          <div class="pdx-k">📊 Tenés hoy</div>
-          <div class="pdx-v">${s.valueArs != null ? pv(fmtArs(s.valueArs)) : '—'}</div>
-          <div class="pdx-sub">valor actual de tus tenencias</div>
+          <div class="pdx-k">📈 Plata invertida</div>
+          <div class="pdx-v">${s.costBasis != null ? pv(fmtArs(s.costBasis)) : '—'}</div>
+          <div class="pdx-sub">${s.costBasis != null ? 'costo total de tus compras' : 'cargá el costo de cada compra'}</div>
+        </div>
+        <div class="pdx-tile">
+          <div class="pdx-k">🏦 Disponible para invertir</div>
+          <div class="pdx-v ${avClass}">${s.available != null ? pv(fmtArs(s.available)) : '—'}</div>
+          <div class="pdx-sub ${avClass}">${s.available == null ? 'necesita lo que pusiste y lo invertido' : s.available < 0 ? 'invertiste más de lo declarado — revisá' : 'todavía sin invertir'}</div>
         </div>
         <div class="pdx-tile pdx-hl ${gc}">
-          <div class="pdx-k">${s.gainArs == null ? '📈' : s.gainArs >= 0 ? '🟢' : '🔴'} ${gword}</div>
+          <div class="pdx-k">${s.gainArs == null ? '📊' : s.gainArs >= 0 ? '🟢' : '🔴'} ${gword}</div>
           <div class="pdx-v ${gc}">${s.gainArs != null ? `${s.gainArs >= 0 ? '+' : ''}${pv(fmtArs(s.gainArs))}` : '—'}</div>
-          <div class="pdx-sub ${gc}">${s.gainPct != null ? `${s.gainPct >= 0 ? '+' : ''}${s.gainPct.toFixed(1)}% sobre lo que pusiste` : 'cargá cuánto pusiste para verlo'}</div>
+          <div class="pdx-sub ${gc}">${s.gainPct != null ? `${s.gainPct >= 0 ? '+' : ''}${s.gainPct.toFixed(1)}% sobre lo invertido` : 'cargá el costo de tus compras'}</div>
         </div>
         <div class="pdx-tile ${dc}">
           <div class="pdx-k">${s.dayArs == null ? '📅' : s.dayArs >= 0 ? '⬆️' : '⬇️'} Hoy</div>
@@ -6832,7 +6841,7 @@ function portfolioDidacticHTML(stats) {
           <div class="pdx-sub ${dc}">${s.dayPct != null ? `${s.dayPct >= 0 ? '+' : ''}${s.dayPct.toFixed(1)}% en el día` : 'esperando cotizaciones'}</div>
         </div>
       </div>
-      <div class="pdx-foot">Valores en pesos, a la última cotización real del CEDEAR${stats.arsEligibleCount < stats.rows.length ? ` · incluye ${stats.arsEligibleCount} de ${stats.rows.length} posiciones (las que tienen CEDEAR)` : ''}. No es asesoramiento financiero.</div>
+      <div class="pdx-foot">Valores en pesos, a la última cotización real del CEDEAR${stats.arsEligibleCount < stats.rows.length ? ` · incluye ${stats.arsEligibleCount} de ${stats.rows.length} posiciones (las que tienen CEDEAR)` : ''}. La ganancia se mide sobre lo invertido (valor actual − costo de tus compras). No es asesoramiento financiero.</div>
     </div>`;
 }
 
