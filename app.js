@@ -6190,19 +6190,34 @@ function portfolioTreemapSVG(rows) {
     <div class="card treemap-card">
       <div class="dash-radar-title">Mapa de la cartera <span class="risk-days-note">— tamaño = peso, color = P&amp;L</span></div>
       <svg class="treemap-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Treemap de la cartera">
+        <defs>
+          <linearGradient id="tmGloss" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="oklch(1 0 0)" stop-opacity="0.16"/>
+            <stop offset="42%" stop-color="oklch(1 0 0)" stop-opacity="0.03"/>
+            <stop offset="100%" stop-color="oklch(0 0 0)" stop-opacity="0.14"/>
+          </linearGradient>
+        </defs>
         ${rects.map(({ r, x, y, w, h }) => {
           const big = w > 90 && h > 46;
           const mid = w > 56 && h > 30;
+          const rx = (x + GAP / 2).toFixed(1), ry = (y + GAP / 2).toFixed(1);
+          const rw = Math.max(1, w - GAP).toFixed(1), rh = Math.max(1, h - GAP).toFixed(1);
           return `
-          <g>
-            <rect x="${(x + GAP / 2).toFixed(1)}" y="${(y + GAP / 2).toFixed(1)}" width="${Math.max(1, w - GAP).toFixed(1)}" height="${Math.max(1, h - GAP).toFixed(1)}" rx="6" fill="${fillFor(r.gainPct)}" stroke="oklch(0.22 0.02 262)" stroke-width="1">
+          <g class="treemap-cell">
+            <rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" rx="7" fill="${fillFor(r.gainPct)}" stroke="oklch(0.22 0.02 262)" stroke-width="1">
               <title>${esc(r.ticker)} — ${Math.round((r.weight ?? 0) * 100)}% de la cartera${portState.privacy ? '' : ` · ${fmtUsd(r.value)}`}${r.gainPct != null ? ` · P&L ${fmtPct(r.gainPct * 100)}` : ''}</title>
             </rect>
-            ${mid ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + (big ? -8 : 4)).toFixed(1)}" text-anchor="middle" class="treemap-ticker">${esc(r.ticker)}</text>` : ''}
-            ${big ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + 12).toFixed(1)}" text-anchor="middle" class="treemap-sub">${Math.round((r.weight ?? 0) * 100)}%${r.gainPct != null ? ` · ${fmtPct(r.gainPct * 100)}` : ''}</text>` : ''}
+            <rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" rx="7" fill="url(#tmGloss)" stroke="oklch(1 0 0 / 0.08)" stroke-width="1" pointer-events="none"/>
+            ${mid ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + (big ? -8 : 4)).toFixed(1)}" text-anchor="middle" class="treemap-ticker" pointer-events="none">${esc(r.ticker)}</text>` : ''}
+            ${big ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + 12).toFixed(1)}" text-anchor="middle" class="treemap-sub" pointer-events="none">${Math.round((r.weight ?? 0) * 100)}%${r.gainPct != null ? ` · ${fmtPct(r.gainPct * 100)}` : ''}</text>` : ''}
           </g>`;
         }).join('')}
       </svg>
+      <div class="treemap-legend">
+        <span class="tml-label down">Pérdida</span>
+        <span class="tml-scale"></span>
+        <span class="tml-label up">Ganancia</span>
+      </div>
     </div>`;
 }
 
@@ -6977,16 +6992,38 @@ function portfolioAttributionHTML(stats) {
   const bySector = {};
   for (const r of rows) { if (r.sector) bySector[r.sector] = (bySector[r.sector] || 0) + r.gainArs; }
   const sectors = Object.entries(bySector).map(([sector, g]) => ({ sector, gainArs: g })).sort((a, b) => Math.abs(b.gainArs) - Math.abs(a.gainArs)).slice(0, 6);
-  const row = (r) => `<div class="attr-row"><span class="port-reco-ticker attr-tk" data-reco-ticker="${esc(r.ticker)}">${esc(r.ticker)}</span><span class="attr-name">${esc(r.name || '')}</span><span class="attr-amt ${r.gainArs >= 0 ? 'up' : 'down'}">${r.gainArs >= 0 ? '+' : ''}${pv(fmtArs(r.gainArs))}</span>${r.gainPct != null ? `<span class="attr-pct ${r.gainPct >= 0 ? 'up' : 'down'}">${r.gainPct >= 0 ? '+' : ''}${(r.gainPct * 100).toFixed(1)}%</span>` : ''}</div>`;
+  // Escala común a ganadores y perdedores: la barra de cada fila mide su aporte
+  // relativo a la posición de mayor impacto (así se lee de un vistazo quién pesa).
+  const maxAbs = Math.max(...rows.map(r => Math.abs(r.gainArs)), 1);
+  const secMaxAbs = Math.max(...sectors.map(s => Math.abs(s.gainArs)), 1);
+  const row = (r) => {
+    const pctW = Math.max(4, Math.round((Math.abs(r.gainArs) / maxAbs) * 100));
+    const up = r.gainArs >= 0;
+    return `<div class="attr-row">
+      <span class="port-reco-ticker attr-tk" data-reco-ticker="${esc(r.ticker)}" title="${esc(r.name || r.ticker)}">${esc(r.ticker)}</span>
+      <span class="attr-bar-wrap"><span class="attr-bar ${up ? 'up' : 'down'}" style="width:${pctW}%;"></span></span>
+      <span class="attr-amt ${up ? 'up' : 'down'}">${up ? '+' : ''}${pv(fmtArs(r.gainArs))}</span>
+      ${r.gainPct != null ? `<span class="attr-pct ${r.gainPct >= 0 ? 'up' : 'down'}">${r.gainPct >= 0 ? '+' : ''}${(r.gainPct * 100).toFixed(1)}%</span>` : '<span class="attr-pct"></span>'}
+    </div>`;
+  };
+  const secRow = (sr) => {
+    const pctW = Math.max(4, Math.round((Math.abs(sr.gainArs) / secMaxAbs) * 100));
+    const up = sr.gainArs >= 0;
+    return `<div class="attr-sec-row">
+      <span class="attr-sec-name">${esc(sr.sector)}</span>
+      <span class="attr-bar-wrap sec"><span class="attr-bar ${up ? 'up' : 'down'}" style="width:${pctW}%;"></span></span>
+      <span class="attr-amt ${up ? 'up' : 'down'}">${up ? '+' : ''}${pv(fmtArs(sr.gainArs))}</span>
+    </div>`;
+  };
   return `
     ${sectionTitleHTML('Atribución de resultados', 'award')}
     <div class="card">
-      <div class="port-note" style="padding:0 0 12px;">Quién te está haciendo ganar (o perder): cuánto aporta cada posición a tu resultado, en pesos${ccl ? ' — las de costo en USD, convertidas al CCL de hoy' : ''}.</div>
+      <div class="port-note" style="padding:0 0 12px;">Quién te está haciendo ganar (o perder): cuánto aporta cada posición a tu resultado, en pesos${ccl ? ' — las de costo en USD, convertidas al CCL de hoy' : ''}. La barra mide el impacto relativo.</div>
       <div class="attr-grid">
         <div class="attr-col"><div class="attr-col-title good">${ICONS.check} Te hacen ganar</div>${winners.length ? winners.map(row).join('') : '<div class="attr-empty">Todavía ninguna en ganancia.</div>'}</div>
         <div class="attr-col"><div class="attr-col-title bad">${ICONS.warning} Te hacen perder</div>${losers.length ? losers.map(row).join('') : '<div class="attr-empty">Ninguna en pérdida — bien ahí.</div>'}</div>
       </div>
-      ${sectors.length ? `<div class="attr-sectors"><div class="attr-sectors-title">Por sector</div><div class="attr-sec-rows">${sectors.map(sr => `<div class="attr-sec-row"><span>${esc(sr.sector)}</span><span class="${sr.gainArs >= 0 ? 'up' : 'down'}">${sr.gainArs >= 0 ? '+' : ''}${pv(fmtArs(sr.gainArs))}</span></div>`).join('')}</div></div>` : ''}
+      ${sectors.length ? `<div class="attr-sectors"><div class="attr-sectors-title">Por sector</div><div class="attr-sec-rows">${sectors.map(secRow).join('')}</div></div>` : ''}
     </div>`;
 }
 
@@ -7216,7 +7253,7 @@ function portfolioRowHTML(r) {
       ? `${pv(fmtArs(r.d.cedearArs))} <span title="${r.d.cedearSource === 'live' ? 'Precio real operado hoy en BYMA' : 'Estimado vía CCL — sin cotización real disponible para este símbolo'}">${r.d.cedearSource === 'live' ? '●' : '≈'}</span><br><span class="port-pnl-abs">subyacente ${pv(fmtUsd(r.d.price))}</span>`
       : pv(fmtUsd(r.d.price))}</td>
     ${valueCell}
-    <td>${r.weight != null ? `${Math.round(r.weight * 100)}%` : 'N/D'}</td>
+    <td class="port-weight-cell">${r.weight != null ? `<div class="port-weight"><span class="port-weight-bar"><i style="width:${Math.min(100, Math.round(r.weight * 100))}%;"></i></span><span class="port-weight-pct">${Math.round(r.weight * 100)}%</span></div>` : 'N/D'}</td>
     ${pnlTd}
     <td>${stopCell}</td>
     ${signalTd}
