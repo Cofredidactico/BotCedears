@@ -677,12 +677,14 @@ select.port-input { cursor: pointer; }
 }
 .watch-alerts-btn:hover { border-color: var(--accent); }
 .watch-alerts-btn.on { background: var(--gold-soft); border-color: oklch(0.80 0.15 85 / 0.5); color: var(--gold-text); box-shadow: var(--glow-gold); }
-.watch-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; margin-top: 14px; }
+/* Grilla uniforme y responsiva: las tarjetas llenan filas de varias columnas
+   (la página deja de quedar alargada) y todas tienen el mismo ancho. */
+.watch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 12px; margin-bottom: 28px; margin-top: 14px; align-items: start; }
 .watch-card {
-  position: relative; cursor: pointer; width: 190px;
+  position: relative; cursor: pointer; width: auto;
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 13px;
-  padding: 14px 16px 16px 16px; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
-  box-shadow: var(--shadow-card);
+  padding: 13px 15px 14px; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  box-shadow: var(--shadow-card); overflow: hidden;
 }
 .watch-card:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow-card-hover); }
 .watch-card.has-alert { border-width: 1.5px; }
@@ -1910,13 +1912,35 @@ select.port-input { cursor: pointer; }
 .dcv-ars-val { font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; font-weight: 600; color: var(--text-dim); }
 .dcv-ars-src { font-size: 9.5px; letter-spacing: 0.3px; color: var(--text-faint); }
 .dcv-ars-src.live { color: var(--up-text); }
-.dcv-spark { margin: 8px 0 4px; }
-.dcv-spark .watch-sparkline { width: 100%; height: 42px; display: block; }
-.dcv-sigrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dcv-spark { margin: 7px 0 3px; }
+.dcv-spark .watch-sparkline { width: 100%; height: 30px; display: block; }
+.dcv-sigrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dcv-sigrow .watch-signal { font-size: 11px; padding: 3px 9px; border-radius: 6px; font-weight: 600; }
 .dcv-conv { font-size: 11px; font-weight: 600; }
-.dcv-highlight { font-size: 11.5px; color: var(--text-mute); line-height: 1.4; margin-top: 9px; }
+.dcv-highlight { font-size: 11px; color: var(--text-mute); line-height: 1.4; margin-top: 8px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .dcv-alert { font-size: 11.5px; font-weight: 600; margin-top: 8px; }
+
+/* ── Panel de análisis que se revela al pasar el mouse ──────────────────────
+   Mantiene la tarjeta compacta y cuadrada: la narrativa + "qué mirar" viven en
+   un panel que se desliza desde abajo al hacer hover (desktop). En pantallas
+   táctiles no hay hover, así que se muestra inline (la tarjeta crece un poco,
+   pero en mobile la grilla es de una sola columna igual). */
+.card-reveal { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  padding: 12px 14px 14px; border-top: 1px solid var(--border-soft);
+  background: linear-gradient(to top, var(--bg-card) 66%, color-mix(in oklch, var(--bg-card) 78%, transparent));
+  transform: translateY(101%); opacity: 0; pointer-events: none;
+  transition: transform 0.24s cubic-bezier(0.22,1,0.36,1), opacity 0.2s ease;
+  font-size: 11.5px; line-height: 1.45; color: var(--text-dim); max-height: 100%; overflow-y: auto; }
+.dash-card:hover .card-reveal, .watch-card:hover .card-reveal { transform: translateY(0); opacity: 1; }
+.card-reveal .dcv-narr, .card-reveal .watch-alert-narr { margin-top: 0; }
+.card-reveal-hint { position: absolute; top: 9px; right: 40px; font-size: 13px; opacity: 0.4; transition: opacity 0.15s; pointer-events: none; }
+.dash-card:hover .card-reveal-hint, .watch-card:hover .card-reveal-hint { opacity: 0; }
+@media (hover: none) {
+  .card-reveal { position: static; transform: none; opacity: 1; background: none; border-top: none; padding: 10px 0 0; max-height: none; overflow: visible; }
+  .card-reveal-hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .card-reveal { transition: opacity 0.2s ease; } }
 
 /* ---------- Grado de la zona de compra/venta (A/B/C) ---------- */
 .alert-grade { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 5px; border: 1px solid currentColor; letter-spacing: 0.2px; }
