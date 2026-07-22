@@ -3260,7 +3260,7 @@ function dashCardHTML(ticker, d) {
     </div>
     ${d.highlight ? `<div class="dcv-highlight">${esc(d.highlight)}</div>` : ''}
     ${am ? `<div class="dcv-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
-    ${dcvNarrative(d)}
+    ${(() => { const n = dcvNarrative(d); return n ? `<span class="card-reveal-hint" aria-hidden="true">🔍</span><div class="card-reveal">${n}</div>` : ''; })()}
   </div>`;
 }
 
@@ -7982,7 +7982,7 @@ function watchCardHTML(ticker) {
     <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
     <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
     ${am ? `<div class="watch-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
-    ${am && alertNarrative(d.alert) ? `<div class="watch-alert-narr ${d.alert.type === 'buy' ? 'up' : d.alert.type === 'sell' ? 'down' : 'stop'}">${alertNarrative(d.alert)}${alertWatchToday(d.alert) ? `<div class="watch-alert-watch">👀 <b>Qué mirar:</b> ${alertWatchToday(d.alert)}</div>` : ''}</div>` : ''}
+    ${am && alertNarrative(d.alert) ? `<span class="card-reveal-hint" aria-hidden="true">🔍</span><div class="card-reveal"><div class="watch-alert-narr ${d.alert.type === 'buy' ? 'up' : d.alert.type === 'sell' ? 'down' : 'stop'}">${alertNarrative(d.alert)}${alertWatchToday(d.alert) ? `<div class="watch-alert-watch">👀 <b>Qué mirar:</b> ${alertWatchToday(d.alert)}</div>` : ''}</div></div>` : ''}
   </div>`;
 }
 
