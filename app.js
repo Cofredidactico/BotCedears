@@ -1,5 +1,5 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, getRecommendations, isLive } from './dataSource.js';
-import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged, macd, rsi } from './indicators.js';
+import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged, macd, rsi, ema } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
@@ -4483,6 +4483,7 @@ function shortTradeCardHTML(ticker, d) {
         </div>
       </div>
       <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
+      ${s.narrative ? `<div class="short-narrative ${s.direction === 'short' ? 'down' : 'up'}">${s.narrative}</div>` : ''}
       <div class="short-triggers">
         ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
         ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
@@ -8808,9 +8809,74 @@ function shortTermSetup(technical, candles) {
   return {
     ...best,
     qualifies,
+    narrative: setupNarrative(technical, candles, best),
     timeStopDays: 3, // los setups de corto plazo caducan: si no se activa en ~3 ruedas, se descarta
     confidence: best.score >= 75 ? 'muy alta' : best.score >= 60 ? 'alta' : best.score >= 45 ? 'media' : 'baja',
   };
+}
+
+/* ─────────────────────── narrativa del setup (en criollo) ───────────────────
+ * Traduce lo que ACABA de pasar con un nivel de referencia (EMA200/EMA50/EMA21
+ * o un swing) a una frase clara, con la proyección real hasta el próximo nivel
+ * estructural (la próxima resistencia si es alcista, el próximo soporte si es
+ * bajista). Nada se inventa: el % proyectado es la distancia al nivel de S/R que
+ * ya calcula indicators.js sobre swings reales; es un objetivo estructural, no
+ * una promesa. Devuelve null si no hay un evento nítido para narrar. */
+function setupNarrative(technical, candles, setup) {
+  const c = candles.c, l = candles.l, h = candles.h;
+  const n = c.length;
+  if (n < 25) return null;
+  const price = c[n - 1], prev = c[n - 2];
+  const long = setup.direction === 'long';
+  const ema21arr = ema(c, 21);
+  const e21 = ema21arr[n - 1], e21p = ema21arr[n - 2];
+  const e50 = technical.ema50, e200 = technical.ema200;
+  const res = technical.resistance, sup = technical.support;
+  // Proyección hacia el próximo nivel estructural, en la dirección del setup.
+  const upPct = (res != null && res > price) ? ((res - price) / price) * 100 : null;
+  const downPct = (sup != null && sup < price) ? ((price - sup) / price) * 100 : null;
+  const projUp = upPct != null ? ` Si sigue, la próxima resistencia está en <b>${fmtUsd(res)}</b> (<b class="up">+${upPct.toFixed(1)}%</b>).` : '';
+  const projDown = downPct != null ? ` Si cae, el próximo soporte está en <b>${fmtUsd(sup)}</b> (<b class="down">−${downPct.toFixed(1)}%</b>).` : '';
+  const near = (a, b, tol) => a != null && b != null && Math.abs(a - b) / b <= tol;
+  const recentLow = Math.min(l[n - 1], l[n - 2]);
+  const recentHigh = Math.max(h[n - 1], h[n - 2]);
+
+  if (long) {
+    // 1 · Rebote en la EMA200 (soporte de fondo).
+    if (e200 && price > e200 && recentLow <= e200 * 1.012 && price <= e200 * 1.05)
+      return `📈 Acaba de tocar la <b>EMA200</b> (${fmtUsd(e200)}) y la respetó como soporte — suele ser un piso de rebote.${projUp}`;
+    // 2 · Recuperó la EMA200 (vuelve a ser alcista de fondo).
+    if (e200 && prev < e200 && price >= e200)
+      return `📈 Acaba de <b>recuperar la EMA200</b> (${fmtUsd(e200)}) — vuelve a ponerse alcista de fondo.${projUp}`;
+    // 3 · Cruce fresco de la EMA21 al alza (alcista de corto).
+    if (e21 && e21p && prev < e21p && price >= e21)
+      return `📈 Acaba de <b>cruzar la EMA21</b> (${fmtUsd(e21)}) y se puso alcista de corto plazo.${projUp}`;
+    // 4 · Cruce de la EMA50.
+    if (e50 && prev < e50 && price >= e50)
+      return `📈 Acaba de <b>superar la EMA50</b> (${fmtUsd(e50)}) — mejora la tendencia de mediano plazo.${projUp}`;
+    // 5 · Rebote desde un soporte estructural.
+    if (sup && near(recentLow, sup, 0.015) && price > sup)
+      return `📈 Rebotó desde el soporte de <b>${fmtUsd(sup)}</b>.${projUp}`;
+    if (projUp) return `📈 Setup alcista de corto plazo.${projUp}`;
+  } else {
+    // 1 · Rechazo en la EMA200 (resistencia de fondo).
+    if (e200 && price < e200 && recentHigh >= e200 * 0.988 && price >= e200 * 0.95)
+      return `📉 Acaba de <b>rechazar la EMA200</b> (${fmtUsd(e200)}) como resistencia — suele frenar rebotes.${projDown}`;
+    // 2 · Perdió la EMA200.
+    if (e200 && prev > e200 && price <= e200)
+      return `📉 Acaba de <b>perder la EMA200</b> (${fmtUsd(e200)}) — se pone bajista de fondo.${projDown}`;
+    // 3 · Cruce fresco de la EMA21 a la baja.
+    if (e21 && e21p && prev > e21p && price <= e21)
+      return `📉 Acaba de <b>perder la EMA21</b> (${fmtUsd(e21)}) y se puso bajista de corto plazo.${projDown}`;
+    // 4 · Perdió la EMA50.
+    if (e50 && prev > e50 && price <= e50)
+      return `📉 Acaba de <b>perder la EMA50</b> (${fmtUsd(e50)}) — se debilita el mediano plazo.${projDown}`;
+    // 5 · Rechazo en una resistencia estructural.
+    if (res && near(recentHigh, res, 0.015) && price < res)
+      return `📉 Rechazó la resistencia de <b>${fmtUsd(res)}</b>.${projDown}`;
+    if (projDown) return `📉 Setup bajista de corto plazo.${projDown}`;
+  }
+  return null;
 }
 
 /* ───────────────────────── radar de gaps / pre-market ─────────────────────
