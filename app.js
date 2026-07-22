@@ -3200,7 +3200,8 @@ function sparklineSVG(closes, up) {
   const linePath = `M${pts.join(' L')}`;
   const areaPath = `${linePath} L${(w - pad).toFixed(1)},${(h - pad).toFixed(1)} L${pad.toFixed(1)},${(h - pad).toFixed(1)} Z`;
   const gradId = `sparkGrad${sparklineIdSeq++}`; // id único por instancia — varias tarjetas comparten la página
-  return `<svg class="watch-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+  const sparkData = closes.map(c => +Number(c).toFixed(2)).join(','); // cierres para el tooltip al hover
+  return `<svg class="watch-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" data-spark="${sparkData}">
     <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="${color}" stop-opacity="0.42"/>
       <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
@@ -3209,6 +3210,41 @@ function sparklineSVG(closes, up) {
     <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
   </svg>`;
 }
+
+/* ── Sparklines interactivas: tooltip con el valor al pasar el mouse ──────────
+ * Los mini-gráficos llevan sus cierres en data-spark; un único handler delegado
+ * (sobrevive a los re-render) muestra el valor y la variación vs. el inicio en
+ * el punto donde está el cursor. Igual que el crosshair del gráfico grande, pero
+ * liviano. */
+let _sparkTip = null;
+function sparkTipEl() {
+  if (_sparkTip) return _sparkTip;
+  _sparkTip = document.createElement('div');
+  _sparkTip.className = 'spark-tip';
+  _sparkTip.style.display = 'none';
+  document.body.appendChild(_sparkTip);
+  return _sparkTip;
+}
+function hideSparkTip() { if (_sparkTip) _sparkTip.style.display = 'none'; }
+document.addEventListener('mousemove', (e) => {
+  const svg = e.target.closest && e.target.closest('.watch-sparkline');
+  if (!svg || !svg.dataset.spark) { hideSparkTip(); return; }
+  const closes = svg.dataset.spark.split(',').map(Number);
+  if (closes.length < 2) return;
+  const rect = svg.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const idx = Math.round(frac * (closes.length - 1));
+  const val = closes[idx], first = closes[0];
+  const pct = first ? ((val - first) / first) * 100 : 0;
+  const vTxt = Math.abs(val) >= 1000 ? val.toLocaleString('en-US', { maximumFractionDigits: 0 }) : val.toFixed(2);
+  const tip = sparkTipEl();
+  tip.innerHTML = `<b>$${vTxt}</b> <span class="${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</span>`;
+  tip.style.display = 'block';
+  tip.style.left = e.clientX + 'px';
+  tip.style.top = (rect.top - 6) + 'px';
+}, { passive: true });
+document.addEventListener('scroll', hideSparkTip, { passive: true, capture: true });
 
 // Etiqueta de origen de la tarjeta de oportunidad: distingue de un vistazo las
 // oportunidades locales (empresas argentinas) de los CEDEARs de empresas
@@ -4592,10 +4628,6 @@ function shortTradeCardHTML(ticker, d) {
       </div>
       <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
       ${s.narrative ? `<div class="short-narrative ${s.direction === 'short' ? 'down' : 'up'}">${s.narrative}</div>` : ''}
-      <div class="short-triggers">
-        ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
-        ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
-      </div>
       <div class="short-plan">
         <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
         <div class="short-plan-cell"><span>Stop</span><b class="down">${fmtUsd(s.stop)}</b></div>
@@ -4604,15 +4636,22 @@ function shortTradeCardHTML(ticker, d) {
         <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
         <div class="short-plan-cell"><span>Rango diario típ.</span><b>±${s.expectedMovePct.toFixed(1)}%</b></div>
       </div>
-      <div class="short-manage">
-        <span title="Confirmá la entrada solo si el precio ${s.direction === 'short' ? 'pierde' : 'supera'} el extremo de la última rueda">🎯 Gatillo: ${s.direction === 'short' ? 'perder' : 'superar'} <b>${fmtUsd(s.entryTrigger)}</b></span>
-        <span title="Si el precio cierra del otro lado del stop, el setup queda invalidado">✖ Invalida: cierre ${s.direction === 'short' ? 'sobre' : 'bajo'} <b>${fmtUsd(s.invalidation)}</b></span>
-        <span title="Los setups de corto plazo caducan: si no se activa el objetivo en ~${s.timeStopDays} ruedas, conviene salir">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
-      </div>
-      ${shortSizingHTML(sizing, s)}
-      ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
-      <div class="short-reliab" data-reliab-slot="${esc(ticker)}">
-        ${cached ? shortReliabBodyHTML(cached, s.direction) : cachedErr ? `<div class="short-reliab-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>` : `<button class="short-reliab-btn" data-reliab-ticker="${esc(ticker)}">📊 Medir confiabilidad histórica del setup</button>`}
+      <button class="short-more-btn" data-short-more aria-expanded="false">Ver detalle <span class="short-more-caret">▾</span></button>
+      <div class="short-more" hidden>
+        <div class="short-triggers">
+          ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
+          ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
+        </div>
+        <div class="short-manage">
+          <span title="Confirmá la entrada solo si el precio ${s.direction === 'short' ? 'pierde' : 'supera'} el extremo de la última rueda">🎯 Gatillo: ${s.direction === 'short' ? 'perder' : 'superar'} <b>${fmtUsd(s.entryTrigger)}</b></span>
+          <span title="Si el precio cierra del otro lado del stop, el setup queda invalidado">✖ Invalida: cierre ${s.direction === 'short' ? 'sobre' : 'bajo'} <b>${fmtUsd(s.invalidation)}</b></span>
+          <span title="Los setups de corto plazo caducan: si no se activa el objetivo en ~${s.timeStopDays} ruedas, conviene salir">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
+        </div>
+        ${shortSizingHTML(sizing, s)}
+        ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
+        <div class="short-reliab" data-reliab-slot="${esc(ticker)}">
+          ${cached ? shortReliabBodyHTML(cached, s.direction) : cachedErr ? `<div class="short-reliab-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>` : `<button class="short-reliab-btn" data-reliab-ticker="${esc(ticker)}">📊 Medir confiabilidad histórica del setup</button>`}
+        </div>
       </div>
     </div>`;
 }
@@ -4669,9 +4708,24 @@ function wireShortTradesEvents() {
       if (state.view === 'shorttrades' && !state.asset) rerender();
     });
   });
+  // "Ver detalle": despliega el plan completo, sizing, gestión y confiabilidad
+  // sin agrandar la tarjeta por defecto.
+  els.report.querySelectorAll('[data-short-more]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const more = btn.parentElement.querySelector('.short-more');
+      if (!more) return;
+      const open = more.hidden;
+      more.hidden = !open;
+      btn.setAttribute('aria-expanded', String(open));
+      btn.classList.toggle('is-open', open);
+      btn.querySelector('.short-more-caret').textContent = open ? '▴' : '▾';
+      btn.childNodes[0].textContent = open ? 'Ocultar detalle ' : 'Ver detalle ';
+    });
+  });
   els.report.querySelectorAll('[data-short-ticker]').forEach(el => {
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.short-controls') || e.target.closest('.short-reliab')) return;
+      if (e.target.closest('.short-controls') || e.target.closest('.short-reliab') || e.target.closest('.short-more-btn') || e.target.closest('.short-more')) return;
       selectTicker(el.dataset.shortTicker);
     });
   });
