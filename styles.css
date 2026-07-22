@@ -454,6 +454,30 @@ select.port-input { cursor: pointer; }
 .pdx-sub { font-size: 11px; color: var(--text-faint); margin-top: 5px; line-height: 1.35; }
 .pdx-sub.up { color: var(--up-text); } .pdx-sub.down { color: var(--down-text); }
 .pdx-foot { font-size: 11px; color: var(--text-faint); line-height: 1.5; margin-top: 14px; }
+/* Rendimiento por período */
+.pdx-periods { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.pdx-period { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border-soft); min-width: 76px; }
+.pdx-period-k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-mute); }
+.pdx-period-v { font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 700; color: var(--text); }
+.pdx-period.up .pdx-period-v { color: var(--up-text); }
+.pdx-period.down .pdx-period-v { color: var(--down-text); }
+.pdx-period.na .pdx-period-v { color: var(--text-faint); }
+/* Veredicto vs inflación/dólar/plazo fijo */
+.pdx-verdict { margin-top: 16px; padding: 14px 16px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft); }
+.pdx-verdict-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-mute); font-weight: 700; margin-bottom: 10px; }
+.pdx-vd { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; color: var(--text-dim); line-height: 1.5; padding: 3px 0; }
+.pdx-vd b { color: var(--text); font-family: 'IBM Plex Mono', monospace; font-weight: 600; }
+.pdx-vd-i { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-top: 1px; }
+.pdx-vd.good .pdx-vd-i { background: var(--up-soft); color: var(--up-text); }
+.pdx-vd.bad .pdx-vd-i { background: var(--down-soft); color: var(--down-text); }
+.pdx-verdict-foot { font-size: 10.5px; color: var(--text-faint); line-height: 1.5; margin-top: 10px; border-top: 1px solid var(--border-soft); padding-top: 8px; }
+/* Progreso hacia la meta */
+.pdx-goal { margin-top: 16px; padding: 14px 16px; border-radius: 12px; background: color-mix(in oklch, var(--accent) 7%, transparent); border: 1px solid color-mix(in oklch, var(--accent) 20%, transparent); }
+.pdx-goal-top { display: flex; align-items: baseline; justify-content: space-between; font-size: 13px; color: var(--text-dim); }
+.pdx-goal-top b { font-family: 'IBM Plex Mono', monospace; font-size: 18px; color: var(--accent-text); }
+.pdx-goal-bar { height: 8px; border-radius: 6px; background: var(--surface-2); overflow: hidden; margin: 9px 0 7px; }
+.pdx-goal-bar i { display: block; height: 100%; border-radius: 6px; background: var(--gradient-brand); }
+.pdx-goal-sub { font-size: 11.5px; color: var(--text-mute); font-family: 'IBM Plex Mono', monospace; }
 
 /* Atribución de resultados */
 .attr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }

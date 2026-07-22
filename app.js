@@ -6778,19 +6778,19 @@ function corrMatrixCardHTML(risk) {
  * ganás/perdés en total y en el día — todo en pesos, con lenguaje simple. */
 function portfolioDidacticSummary(stats) {
   const ccl = portState.ccl?.value ?? portState.macro?.dolares?.ccl ?? null;
-  const valueArs = stats.totalValueArs; // valor actual de las tenencias (ARS)
-  // Plata invertida = costo total de todas las compras registradas (ARS): las
-  // de costo en pesos directo, las de costo en USD convertidas al CCL de hoy.
+  // Plata invertida = valor ACTUAL de las tenencias (el mismo total que figura
+  // en la pestaña Tenencias). Antes mostraba el costo; ahora, el valor de mercado.
+  const investedNow = stats.totalValueArs;
+  // Costo de las compras (para separar el efectivo disponible y medir la ganancia).
   let costBasis = null;
   if (stats.totalCostArs != null || stats.totalCostUsd != null) {
     costBasis = (stats.totalCostArs || 0) + (stats.totalCostUsd != null && ccl ? stats.totalCostUsd * ccl : 0);
     if (costBasis <= 0) costBasis = null;
   }
-  const declared = portState.investedArs; // lo que el usuario puso en la cuenta
-  const available = (declared != null && costBasis != null) ? declared - costBasis : null; // disponible sin invertir
-  const gainArs = (valueArs != null && costBasis != null) ? valueArs - costBasis : null;    // P&L sobre lo invertido
+  const declared = portState.investedArs; // lo que el usuario depositó en la cuenta
+  const available = (declared != null && costBasis != null) ? declared - costBasis : null; // efectivo sin invertir
+  const gainArs = (investedNow != null && costBasis != null) ? investedNow - costBasis : null; // P&L sobre lo invertido
   const gainPct = (gainArs != null && costBasis > 0) ? (gainArs / costBasis) * 100 : null;
-  // Ganancia/pérdida del día = suma de la variación de hoy de cada tenencia.
   let dayArs = null, prevArs = 0, hasDay = false;
   for (const r of stats.rows) {
     if (r.valueArs != null && r.d?.changePct != null) {
@@ -6799,7 +6799,47 @@ function portfolioDidacticSummary(stats) {
     }
   }
   const dayPct = hasDay && prevArs > 0 ? (dayArs / prevArs) * 100 : null;
-  return { ccl, valueArs, declared, costBasis, available, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct };
+  return { ccl, investedNow, declared, costBasis, available, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct };
+}
+
+/* Rendimiento del basket por período (Hoy/Semana/Mes/Año/Total), a partir de la
+ * curva de valor histórica (asume las cantidades actuales sostenidas). */
+function portfolioPeriodReturns(stats, dayPct) {
+  const eq = portfolioEquityCurve(stats);
+  const s = eq?.series;
+  const ret = (n) => (s && s.length > n && s[s.length - 1 - n] > 0) ? (s[s.length - 1] / s[s.length - 1 - n] - 1) * 100 : null;
+  return [
+    { k: 'Hoy', v: dayPct },
+    { k: 'Semana', v: ret(5) },
+    { k: 'Mes', v: ret(21) },
+    { k: 'Año', v: ret(252) },
+    { k: 'Total', v: eq ? eq.changePct : null },
+  ];
+}
+
+/* Veredicto "en criollo": ¿tu cartera le ganó a la inflación, al dólar y al
+ * plazo fijo? Reusa lo ya calculado (IPC real por posición, CCL histórico). */
+function portfolioBenchmarkVerdict(stats) {
+  const hist = portState.cclHistory?.items;
+  const cclNow = portState.ccl?.value ?? (hist?.length ? hist[hist.length - 1].venta : null);
+  let usdNum = 0, usdDen = 0, inflNum = 0, inflDen = 0;
+  for (const r of stats.rows) {
+    if (r.gainPct == null) continue;
+    if (hist && cclNow && r.purchaseDate) {
+      const cclThen = cclAtDate(hist, r.purchaseDate);
+      if (cclThen) {
+        const cclReturn = cclNow / cclThen - 1;
+        const usdRet = r.costCurrency === 'ARS' ? (1 + r.gainPct) / (1 + cclReturn) - 1 : r.gainPct;
+        const costArs = r.costCurrency === 'ARS' ? r.avgCost * r.shares : r.avgCost * r.shares * cclNow;
+        usdNum += usdRet * costArs; usdDen += costArs;
+      }
+    }
+    if (r.realGainPct != null) { const costArs = r.avgCost * r.shares; inflNum += r.realGainPct * costArs; inflDen += costArs; }
+  }
+  const usdPct = usdDen > 0 ? (usdNum / usdDen) * 100 : null;
+  const realPct = inflDen > 0 ? (inflNum / inflDen) * 100 : null;
+  if (usdPct == null && realPct == null) return null;
+  return { usdPct, realPct };
 }
 
 function portfolioDidacticHTML(stats) {
@@ -6808,6 +6848,27 @@ function portfolioDidacticHTML(stats) {
   const dc = s.dayArs == null ? '' : s.dayArs >= 0 ? 'up' : 'down';
   const gword = s.gainArs == null ? 'Ganancias / Pérdidas' : s.gainArs >= 0 ? 'Ganás en total' : 'Perdés en total';
   const avClass = s.available == null ? '' : s.available < 0 ? 'down' : '';
+  // Rendimiento por período
+  const periods = portfolioPeriodReturns(stats, s.dayPct);
+  const periodChips = periods.some(p => p.v != null) ? `
+    <div class="pdx-periods">${periods.map(p => `<div class="pdx-period ${p.v == null ? 'na' : p.v >= 0 ? 'up' : 'down'}"><span class="pdx-period-k">${p.k}</span><span class="pdx-period-v">${p.v == null ? '—' : `${p.v >= 0 ? '+' : ''}${p.v.toFixed(1)}%`}</span></div>`).join('')}</div>` : '';
+  // Veredicto vs inflación / dólar / plazo fijo
+  const bv = portfolioBenchmarkVerdict(stats);
+  const verdictLine = (ok, label, extra) => `<div class="pdx-vd ${ok ? 'good' : 'bad'}"><span class="pdx-vd-i">${ok ? '✓' : '✗'}</span><span>${label}${extra ? ` <b>${extra}</b>` : ''}</span></div>`;
+  let verdict = '';
+  if (bv) {
+    const parts = [];
+    if (bv.realPct != null) parts.push(verdictLine(bv.realPct >= 0, bv.realPct >= 0 ? 'Le ganaste a la inflación' : 'La inflación te ganó', `real ${bv.realPct >= 0 ? '+' : ''}${bv.realPct.toFixed(1)}%`));
+    if (bv.usdPct != null) parts.push(verdictLine(bv.usdPct >= 0, bv.usdPct >= 0 ? 'Le ganaste al dólar (CCL)' : 'El dólar te ganó', `en USD ${bv.usdPct >= 0 ? '+' : ''}${bv.usdPct.toFixed(1)}%`));
+    if (bv.realPct != null) parts.push(verdictLine(bv.realPct >= 0, bv.realPct >= 0 ? 'Mejor que un plazo fijo' : 'Un plazo fijo te habría cuidado más', bv.realPct >= 0 ? '(tu retorno real es positivo)' : '(tu retorno real es negativo)'));
+    verdict = `<div class="pdx-verdict"><div class="pdx-verdict-title">¿Le ganaste a…?</div>${parts.join('')}<div class="pdx-verdict-foot">Real = ajustado por inflación (IPC). Dólar = medido en CCL. El plazo fijo, históricamente, apenas empata la inflación — por eso se compara contra tu retorno real. Solo cuenta posiciones con fecha de compra.</div></div>`;
+  }
+  // Progreso hacia la meta (si está cargada, en USD)
+  let meta = '';
+  if (portState.goalUsd && stats.totalValue != null) {
+    const pct = Math.max(0, Math.min(100, (stats.totalValue / portState.goalUsd) * 100));
+    meta = `<div class="pdx-goal"><div class="pdx-goal-top"><span>🎯 Progreso hacia tu meta</span><b>${pct.toFixed(0)}%</b></div><div class="pdx-goal-bar"><i style="width:${pct}%;"></i></div><div class="pdx-goal-sub">${pv(fmtUsd(stats.totalValue))} de ${pv(fmtUsd(portState.goalUsd))} · te faltan ${pv(fmtUsd(Math.max(0, portState.goalUsd - stats.totalValue)))}</div></div>`;
+  }
   return `
     <div class="card pdx-card">
       <div class="pdx-head">
@@ -6822,13 +6883,13 @@ function portfolioDidacticHTML(stats) {
         </div>
         <div class="pdx-tile">
           <div class="pdx-k">📈 Plata invertida</div>
-          <div class="pdx-v">${s.costBasis != null ? pv(fmtArs(s.costBasis)) : '—'}</div>
-          <div class="pdx-sub">${s.costBasis != null ? 'costo total de tus compras' : 'cargá el costo de cada compra'}</div>
+          <div class="pdx-v">${s.investedNow != null ? pv(fmtArs(s.investedNow)) : '—'}</div>
+          <div class="pdx-sub">valor actual de tus tenencias (igual al total de Tenencias)</div>
         </div>
         <div class="pdx-tile">
           <div class="pdx-k">🏦 Disponible para invertir</div>
           <div class="pdx-v ${avClass}">${s.available != null ? pv(fmtArs(s.available)) : '—'}</div>
-          <div class="pdx-sub ${avClass}">${s.available == null ? 'necesita lo que pusiste y lo invertido' : s.available < 0 ? 'invertiste más de lo declarado — revisá' : 'todavía sin invertir'}</div>
+          <div class="pdx-sub ${avClass}">${s.available == null ? 'poné lo que pusiste y el costo de tus compras' : s.available < 0 ? 'invertiste más de lo declarado — revisá' : 'depositado y todavía sin comprar'}</div>
         </div>
         <div class="pdx-tile pdx-hl ${gc}">
           <div class="pdx-k">${s.gainArs == null ? '📊' : s.gainArs >= 0 ? '🟢' : '🔴'} ${gword}</div>
@@ -6841,7 +6902,10 @@ function portfolioDidacticHTML(stats) {
           <div class="pdx-sub ${dc}">${s.dayPct != null ? `${s.dayPct >= 0 ? '+' : ''}${s.dayPct.toFixed(1)}% en el día` : 'esperando cotizaciones'}</div>
         </div>
       </div>
-      <div class="pdx-foot">Valores en pesos, a la última cotización real del CEDEAR${stats.arsEligibleCount < stats.rows.length ? ` · incluye ${stats.arsEligibleCount} de ${stats.rows.length} posiciones (las que tienen CEDEAR)` : ''}. La ganancia se mide sobre lo invertido (valor actual − costo de tus compras). No es asesoramiento financiero.</div>
+      ${periodChips}
+      ${verdict}
+      ${meta}
+      <div class="pdx-foot">Valores en pesos, a la última cotización real del CEDEAR${stats.arsEligibleCount < stats.rows.length ? ` · incluye ${stats.arsEligibleCount} de ${stats.rows.length} posiciones (las que tienen CEDEAR)` : ''}. La ganancia se mide sobre lo invertido (valor actual − costo de tus compras). El rendimiento por período asume las cantidades actuales sostenidas. No es asesoramiento financiero.</div>
     </div>`;
 }
 
