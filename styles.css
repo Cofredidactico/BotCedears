@@ -485,20 +485,45 @@ select.port-input { cursor: pointer; }
 .attr-col-title { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
 .attr-col-title svg { width: 14px; height: 14px; }
 .attr-col-title.good { color: var(--up-text); } .attr-col-title.bad { color: var(--amber-text); }
-.attr-row { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
+.attr-row { display: grid; grid-template-columns: 58px 1fr auto 52px; gap: 6px 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border-soft); }
 .attr-row:last-child { border-bottom: none; }
-.attr-tk { width: auto; cursor: pointer; }
+.attr-tk { width: auto; cursor: pointer; font-size: 13px; font-weight: 700; white-space: nowrap; }
 .attr-tk:hover { color: var(--accent-text); }
+/* Barra de contribución: mide el impacto de la posición contra la de mayor peso. */
+.attr-bar-wrap { position: relative; height: 9px; border-radius: 6px; background: var(--surface-2); overflow: hidden; min-width: 40px; }
+.attr-bar { position: absolute; top: 0; left: 0; height: 100%; border-radius: 6px; transition: width 0.5s cubic-bezier(0.22,1,0.36,1); }
+.attr-bar.up { background: linear-gradient(90deg, oklch(0.55 0.14 152 / 0.7), var(--up)); box-shadow: 0 0 10px oklch(0.76 0.18 152 / 0.25); }
+.attr-bar.down { background: linear-gradient(90deg, oklch(0.52 0.16 23 / 0.7), var(--down)); box-shadow: 0 0 10px oklch(0.70 0.21 23 / 0.22); }
 .attr-name { font-size: 11.5px; color: var(--text-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attr-amt { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; text-align: right; }
+.attr-amt { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; text-align: right; white-space: nowrap; }
 .attr-pct { font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; min-width: 52px; }
 .attr-amt.up, .attr-pct.up { color: var(--up-text); } .attr-amt.down, .attr-pct.down { color: var(--down-text); }
 .attr-empty { font-size: 12px; color: var(--text-faint); padding: 8px 0; }
 .attr-sectors { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
 .attr-sectors-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-mute); font-weight: 600; margin-bottom: 10px; }
-.attr-sec-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 20px; }
-.attr-sec-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 3px 0; }
-.attr-sec-row .up { color: var(--up-text); font-family: 'IBM Plex Mono', monospace; } .attr-sec-row .down { color: var(--down-text); font-family: 'IBM Plex Mono', monospace; }
+.attr-sec-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 24px; }
+.attr-sec-row { display: grid; grid-template-columns: minmax(72px, auto) 1fr auto; gap: 10px; align-items: center; font-size: 12.5px; padding: 4px 0; }
+.attr-sec-name { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attr-bar-wrap.sec { height: 7px; }
+@media (prefers-reduced-motion: reduce) { .attr-bar { transition: none; } }
+
+/* treemap: leyenda de escala de color + realce al pasar el mouse */
+.treemap-cell { transition: opacity 0.15s ease; }
+.treemap-svg:hover .treemap-cell { opacity: 0.55; }
+.treemap-svg .treemap-cell:hover { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .treemap-cell { transition: none; } }
+.treemap-legend { display: flex; align-items: center; gap: 10px; margin-top: 14px; justify-content: center; }
+.treemap-legend .tml-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
+.treemap-legend .tml-label.up { color: var(--up-text); } .treemap-legend .tml-label.down { color: var(--down-text); }
+.treemap-legend .tml-scale { flex: 0 1 260px; height: 8px; border-radius: 6px;
+  background: linear-gradient(90deg, oklch(0.44 0.16 23), oklch(0.35 0.03 262), oklch(0.46 0.15 152)); }
+
+/* tenencias: mini-barra de peso en la columna Peso */
+.port-weight-cell { min-width: 88px; }
+.port-weight { display: flex; align-items: center; gap: 8px; }
+.port-weight-bar { position: relative; flex: 1; height: 6px; border-radius: 5px; background: var(--surface-2); overflow: hidden; min-width: 34px; }
+.port-weight-bar i { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 5px; background: linear-gradient(90deg, var(--accent-soft), var(--accent)); }
+.port-weight-pct { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-dim); min-width: 34px; text-align: right; }
 
 /* Recomendación por posición — versión profesional (convicción + factores + niveles + sizing) */
 .port-reco-card { padding: 13px 15px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft); border-left: 3px solid var(--border-strong); margin-bottom: 10px; }
