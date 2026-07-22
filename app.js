@@ -2111,6 +2111,57 @@ const VIEW_PAGES = {
 function renderReport() {
   renderReportImpl();
   triggerReportTransition();
+  maybeRunCountUps();
+}
+
+/* ── Count-up de cifras clave ──────────────────────────────────────────────
+ * Anima números importantes (tarjetas del resumen de cartera, etc.) hacia su
+ * valor final la PRIMERA vez que aparecen en una vista. No re-anima en los
+ * refrescos silenciosos de fondo (mismo problema de "titilar" que ya se cuidó
+ * para el fade): se marca la vista como ya animada y solo se reinicia al
+ * navegar a otra pantalla. Respeta prefers-reduced-motion y el modo privacidad. */
+const _countUpFmt = {
+  ars: (n) => fmtArs(n),
+  arsSigned: (n) => (n >= 0 ? '+' : '') + fmtArs(n),
+  usd: (n) => fmtUsd(n),
+  int: (n) => Math.round(n).toLocaleString('es-AR'),
+};
+function countUpFormatted(el, target, fmtKey, duration = 850) {
+  if (!Number.isFinite(target)) return;
+  const fmt = _countUpFmt[fmtKey] || _countUpFmt.int;
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) { el.textContent = fmt(target); return; }
+  const start = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  (function tick(now) {
+    const p = Math.min(1, (now - start) / duration);
+    el.textContent = fmt(target * ease(p));
+    if (p < 1) requestAnimationFrame(tick);
+    else el.textContent = fmt(target);
+  })(performance.now());
+}
+function runCountUps(root) {
+  root.querySelectorAll('[data-countup]:not([data-counted])').forEach((el) => {
+    const target = parseFloat(el.dataset.countup);
+    if (!Number.isFinite(target)) return;
+    if (el.textContent.includes('•')) return; // enmascarado por privacidad
+    el.dataset.counted = '1';
+    countUpFormatted(el, target, el.dataset.cfmt || 'int');
+  });
+}
+let _countKeyPrev = null, _countWindowUntil = 0;
+function maybeRunCountUps() {
+  if (state.loading) return;
+  const key = state.asset && state.report ? `ticker:${state.asset.ticker}` : !state.asset ? `view:${state.view}` : null;
+  if (key === null) return;
+  // Al navegar a otra vista/ticker abrimos una ventana corta (~7s) durante la
+  // cual animamos cualquier cifra que aparezca —así los datos que llegan tarde
+  // (precios/CCL de la cartera) también cuentan hacia su valor. Fuera de esa
+  // ventana no animamos: los refrescos silenciosos de fondo (cada 180s)
+  // reconstruyen el HTML pero NO deben re-animar (evita el "titilar").
+  if (key !== _countKeyPrev) { _countKeyPrev = key; _countWindowUntil = performance.now() + 7000; }
+  if (performance.now() > _countWindowUntil) return;
+  runCountUps(els.report);
 }
 
 /** Anima SOLO cuando cambió lo que se está mostrando (otra vista, u otro
@@ -3059,11 +3110,11 @@ function sparklineSVG(closes, up) {
   const gradId = `sparkGrad${sparklineIdSeq++}`; // id único por instancia — varias tarjetas comparten la página
   return `<svg class="watch-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
     <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${color}" stop-opacity="0.38"/>
+      <stop offset="0%" stop-color="${color}" stop-opacity="0.42"/>
       <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
     </linearGradient></defs>
     <path d="${areaPath}" fill="url(#${gradId})" stroke="none"/>
-    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.6"/>
+    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
   </svg>`;
 }
 
@@ -6870,6 +6921,9 @@ function portfolioDidacticHTML(stats) {
     const pct = Math.max(0, Math.min(100, (stats.totalValue / portState.goalUsd) * 100));
     meta = `<div class="pdx-goal"><div class="pdx-goal-top"><span>🎯 Progreso hacia tu meta</span><b>${pct.toFixed(0)}%</b></div><div class="pdx-goal-bar"><i style="width:${pct}%;"></i></div><div class="pdx-goal-sub">${pv(fmtUsd(stats.totalValue))} de ${pv(fmtUsd(portState.goalUsd))} · te faltan ${pv(fmtUsd(Math.max(0, portState.goalUsd - stats.totalValue)))}</div></div>`;
   }
+  // Atributos para el count-up: solo si hay número y NO estamos en modo privacidad
+  // (el valor crudo iría en el HTML y filtraría la cifra enmascarada).
+  const cu = (n, fmt) => (n != null && Number.isFinite(n) && !portState.privacy) ? ` data-countup="${n}" data-cfmt="${fmt}"` : '';
   return `
     <div class="card pdx-card">
       <div class="pdx-head">
@@ -6879,27 +6933,27 @@ function portfolioDidacticHTML(stats) {
       <div class="pdx-grid">
         <div class="pdx-tile">
           <div class="pdx-k">💰 Pusiste en tu cartera</div>
-          <div class="pdx-v">${s.declared != null ? pv(fmtArs(s.declared)) : '—'}</div>
+          <div class="pdx-v"${cu(s.declared, 'ars')}>${s.declared != null ? pv(fmtArs(s.declared)) : '—'}</div>
           <div class="pdx-sub">${s.declared != null ? 'lo que depositaste en la cuenta' : 'cargalo en el campo de arriba'}</div>
         </div>
         <div class="pdx-tile">
           <div class="pdx-k">📈 Plata invertida</div>
-          <div class="pdx-v">${s.investedNow != null ? pv(fmtArs(s.investedNow)) : '—'}</div>
+          <div class="pdx-v"${cu(s.investedNow, 'ars')}>${s.investedNow != null ? pv(fmtArs(s.investedNow)) : '—'}</div>
           <div class="pdx-sub">${s.investedNow != null ? 'lo que gastaste comprando (costo de tus activos)' : 'cargá el costo de tus compras'}</div>
         </div>
         <div class="pdx-tile">
           <div class="pdx-k">🏦 Disponible para invertir</div>
-          <div class="pdx-v ${avClass}">${s.available != null ? pv(fmtArs(s.available)) : '—'}</div>
+          <div class="pdx-v ${avClass}"${cu(s.available, 'ars')}>${s.available != null ? pv(fmtArs(s.available)) : '—'}</div>
           <div class="pdx-sub ${avClass}">${s.available == null ? 'poné lo que pusiste y el costo de tus compras' : s.available < 0 ? 'invertiste más de lo declarado — revisá' : 'depositado y todavía sin comprar'}</div>
         </div>
         <div class="pdx-tile pdx-hl ${gc}">
           <div class="pdx-k">${s.gainArs == null ? '📊' : s.gainArs >= 0 ? '🟢' : '🔴'} ${gword}</div>
-          <div class="pdx-v ${gc}">${s.gainArs != null ? `${s.gainArs >= 0 ? '+' : ''}${pv(fmtArs(s.gainArs))}` : '—'}</div>
+          <div class="pdx-v ${gc}"${cu(s.gainArs, 'arsSigned')}>${s.gainArs != null ? `${s.gainArs >= 0 ? '+' : ''}${pv(fmtArs(s.gainArs))}` : '—'}</div>
           <div class="pdx-sub ${gc}">${s.gainPct != null ? `${s.gainPct >= 0 ? '+' : ''}${s.gainPct.toFixed(1)}% sobre lo invertido` : 'cargá el costo de tus compras'}</div>
         </div>
         <div class="pdx-tile ${dc}">
           <div class="pdx-k">${s.dayArs == null ? '📅' : s.dayArs >= 0 ? '⬆️' : '⬇️'} Hoy</div>
-          <div class="pdx-v ${dc}">${s.dayArs != null ? `${s.dayArs >= 0 ? '+' : ''}${pv(fmtArs(s.dayArs))}` : '—'}</div>
+          <div class="pdx-v ${dc}"${cu(s.dayArs, 'arsSigned')}>${s.dayArs != null ? `${s.dayArs >= 0 ? '+' : ''}${pv(fmtArs(s.dayArs))}` : '—'}</div>
           <div class="pdx-sub ${dc}">${s.dayPct != null ? `${s.dayPct >= 0 ? '+' : ''}${s.dayPct.toFixed(1)}% en el día` : 'esperando cotizaciones'}</div>
         </div>
       </div>
