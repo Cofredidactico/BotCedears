@@ -1149,6 +1149,20 @@ select.port-input { cursor: pointer; }
 .short-chip { font-size: 11px; padding: 3px 9px; border-radius: 12px; background: var(--bg-input); border: 1px solid var(--border-soft); color: var(--text-dim); line-height: 1.3; }
 .short-chip.primary { background: oklch(0.30 0.09 152 / 0.35); border-color: oklch(0.72 0.17 152 / 0.4); color: var(--up-text); font-weight: 600; }
 .short-plan { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 8px; padding: 12px 0; border-top: 1px solid var(--border-soft); }
+/* "Ver detalle": expande el plan completo, sizing, gestión y confiabilidad. */
+.short-more-btn { width: 100%; margin-top: 4px; padding: 8px 12px; border-radius: 9px; border: 1px solid var(--border-soft); background: var(--surface-2); color: var(--text-dim); font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+.short-more-btn:hover { border-color: var(--border-strong); color: var(--text); }
+.short-more-caret { font-size: 10px; transition: transform 0.18s; }
+/* Tooltip flotante de las sparklines interactivas. */
+.spark-tip { position: fixed; z-index: 9999; transform: translate(-50%, -100%); pointer-events: none;
+  background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: 7px; padding: 4px 8px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text); box-shadow: var(--shadow-md); white-space: nowrap; }
+.spark-tip .up { color: var(--up-text); } .spark-tip .down { color: var(--down-text); }
+.watch-sparkline { cursor: crosshair; }
+
+.short-more { margin-top: 12px; animation: shortMoreIn 0.2s ease; }
+@keyframes shortMoreIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .short-more { animation: none; } }
 .short-plan-cell { display: flex; flex-direction: column; gap: 2px; }
 .short-plan-cell span { font-size: 10px; color: var(--text-mute); text-transform: uppercase; letter-spacing: 0.03em; }
 .short-plan-cell b { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--text); font-weight: 600; }
