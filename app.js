@@ -150,6 +150,7 @@ const portState = {
   privacy: lsGetSafe('icp_port_privacy', '0') === '1',
   allocAmount: '', allocResult: null, // asignador "¿qué compro con AR$X?"
   accountTotalArs: (() => { const v = parseFloat(lsGetSafe('icp_port_account', '')); return isNaN(v) || v <= 0 ? null : v; })(), // valor total declarado de la cuenta (ARS) → habilita el motor de liquidez
+  investedArs: (() => { const v = parseFloat(lsGetSafe('icp_port_invested', '')); return isNaN(v) || v <= 0 ? null : v; })(), // total que el usuario declara haber invertido (ARS) → resumen didáctico de ganancia
   goalUsd: (() => { const v = parseFloat(lsGetSafe('icp_port_goal', '')); return isNaN(v) || v <= 0 ? null : v; })(), // meta de patrimonio (USD)
   goalMonthlyUsd: (() => { const v = parseFloat(lsGetSafe('icp_port_goal_m', '')); return isNaN(v) || v < 0 ? 0 : v; })(), // aporte mensual (USD)
   _planCache: null, // último Plan de Trading calculado, para ejecutar por índice
@@ -6773,6 +6774,94 @@ function corrMatrixCardHTML(risk) {
     </div>`;
 }
 
+/* Resumen didáctico "en criollo": lo que pusiste, lo que tenés hoy, cuánto
+ * ganás/perdés en total y en el día — todo en pesos, con lenguaje simple. */
+function portfolioDidacticSummary(stats) {
+  const ccl = portState.ccl?.value ?? portState.macro?.dolares?.ccl ?? null;
+  const valueArs = stats.totalValueArs;
+  let computed = null;
+  if (stats.totalCostArs != null || stats.totalCostUsd != null) {
+    computed = (stats.totalCostArs || 0) + (stats.totalCostUsd != null && ccl ? stats.totalCostUsd * ccl : 0);
+    if (computed <= 0) computed = null;
+  }
+  const invested = portState.investedArs ?? computed;
+  const manual = portState.investedArs != null;
+  const gainArs = (valueArs != null && invested != null) ? valueArs - invested : null;
+  const gainPct = (gainArs != null && invested > 0) ? (gainArs / invested) * 100 : null;
+  let dayArs = null, prevArs = 0, hasDay = false;
+  for (const r of stats.rows) {
+    if (r.valueArs != null && r.d?.changePct != null) {
+      const prev = r.valueArs / (1 + r.d.changePct / 100);
+      prevArs += prev; dayArs = (dayArs || 0) + (r.valueArs - prev); hasDay = true;
+    }
+  }
+  const dayPct = hasDay && prevArs > 0 ? (dayArs / prevArs) * 100 : null;
+  return { ccl, valueArs, invested, manual, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct };
+}
+
+function portfolioDidacticHTML(stats) {
+  const s = portfolioDidacticSummary(stats);
+  const gc = s.gainArs == null ? '' : s.gainArs >= 0 ? 'up' : 'down';
+  const dc = s.dayArs == null ? '' : s.dayArs >= 0 ? 'up' : 'down';
+  const gword = s.gainArs == null ? 'Ganancia total' : s.gainArs >= 0 ? 'Ganás en total' : 'Perdés en total';
+  return `
+    <div class="card pdx-card">
+      <div class="pdx-head">
+        <div class="pdx-title">💡 Tu resumen, en criollo</div>
+        <label class="pdx-invested">¿Cuánto pusiste en total?<span class="pdx-inp"><span>AR$</span><input type="text" id="pdx-invested-input" inputmode="numeric" autocomplete="off" placeholder="ej. 1.000.000" value="${portState.investedArs != null ? Math.round(portState.investedArs).toLocaleString('es-AR') : ''}" /></span></label>
+      </div>
+      <div class="pdx-grid">
+        <div class="pdx-tile">
+          <div class="pdx-k">💵 Pusiste</div>
+          <div class="pdx-v">${s.invested != null ? pv(fmtArs(s.invested)) : '—'}</div>
+          <div class="pdx-sub">${s.manual ? 'lo que declaraste' : s.invested != null ? 'según tus costos cargados' : 'cargalo arriba o poné el costo de cada compra'}</div>
+        </div>
+        <div class="pdx-tile">
+          <div class="pdx-k">📊 Tenés hoy</div>
+          <div class="pdx-v">${s.valueArs != null ? pv(fmtArs(s.valueArs)) : '—'}</div>
+          <div class="pdx-sub">valor actual de tus tenencias</div>
+        </div>
+        <div class="pdx-tile pdx-hl ${gc}">
+          <div class="pdx-k">${s.gainArs == null ? '📈' : s.gainArs >= 0 ? '🟢' : '🔴'} ${gword}</div>
+          <div class="pdx-v ${gc}">${s.gainArs != null ? `${s.gainArs >= 0 ? '+' : ''}${pv(fmtArs(s.gainArs))}` : '—'}</div>
+          <div class="pdx-sub ${gc}">${s.gainPct != null ? `${s.gainPct >= 0 ? '+' : ''}${s.gainPct.toFixed(1)}% sobre lo que pusiste` : 'cargá cuánto pusiste para verlo'}</div>
+        </div>
+        <div class="pdx-tile ${dc}">
+          <div class="pdx-k">${s.dayArs == null ? '📅' : s.dayArs >= 0 ? '⬆️' : '⬇️'} Hoy</div>
+          <div class="pdx-v ${dc}">${s.dayArs != null ? `${s.dayArs >= 0 ? '+' : ''}${pv(fmtArs(s.dayArs))}` : '—'}</div>
+          <div class="pdx-sub ${dc}">${s.dayPct != null ? `${s.dayPct >= 0 ? '+' : ''}${s.dayPct.toFixed(1)}% en el día` : 'esperando cotizaciones'}</div>
+        </div>
+      </div>
+      <div class="pdx-foot">Valores en pesos, a la última cotización real del CEDEAR${stats.arsEligibleCount < stats.rows.length ? ` · incluye ${stats.arsEligibleCount} de ${stats.rows.length} posiciones (las que tienen CEDEAR)` : ''}. No es asesoramiento financiero.</div>
+    </div>`;
+}
+
+/* Atribución de resultados: quién aporta a tu ganancia/pérdida, en pesos. */
+function portfolioAttributionHTML(stats) {
+  const ccl = portState.ccl?.value ?? portState.macro?.dolares?.ccl ?? null;
+  const rows = stats.rows.filter(r => r.gainAbs != null).map(r => ({
+    ticker: r.ticker, name: r.d?.name, sector: r.d?.sector, gainPct: r.gainPct,
+    gainArs: r.gainCurrency === 'ARS' ? r.gainAbs : (ccl ? r.gainAbs * ccl : null),
+  })).filter(x => x.gainArs != null);
+  if (!rows.length) return '';
+  const winners = rows.filter(r => r.gainArs > 0).sort((a, b) => b.gainArs - a.gainArs).slice(0, 5);
+  const losers = rows.filter(r => r.gainArs < 0).sort((a, b) => a.gainArs - b.gainArs).slice(0, 5);
+  const bySector = {};
+  for (const r of rows) { if (r.sector) bySector[r.sector] = (bySector[r.sector] || 0) + r.gainArs; }
+  const sectors = Object.entries(bySector).map(([sector, g]) => ({ sector, gainArs: g })).sort((a, b) => Math.abs(b.gainArs) - Math.abs(a.gainArs)).slice(0, 6);
+  const row = (r) => `<div class="attr-row"><span class="port-reco-ticker attr-tk" data-reco-ticker="${esc(r.ticker)}">${esc(r.ticker)}</span><span class="attr-name">${esc(r.name || '')}</span><span class="attr-amt ${r.gainArs >= 0 ? 'up' : 'down'}">${r.gainArs >= 0 ? '+' : ''}${pv(fmtArs(r.gainArs))}</span>${r.gainPct != null ? `<span class="attr-pct ${r.gainPct >= 0 ? 'up' : 'down'}">${r.gainPct >= 0 ? '+' : ''}${(r.gainPct * 100).toFixed(1)}%</span>` : ''}</div>`;
+  return `
+    ${sectionTitleHTML('Atribución de resultados', 'award')}
+    <div class="card">
+      <div class="port-note" style="padding:0 0 12px;">Quién te está haciendo ganar (o perder): cuánto aporta cada posición a tu resultado, en pesos${ccl ? ' — las de costo en USD, convertidas al CCL de hoy' : ''}.</div>
+      <div class="attr-grid">
+        <div class="attr-col"><div class="attr-col-title good">${ICONS.check} Te hacen ganar</div>${winners.length ? winners.map(row).join('') : '<div class="attr-empty">Todavía ninguna en ganancia.</div>'}</div>
+        <div class="attr-col"><div class="attr-col-title bad">${ICONS.warning} Te hacen perder</div>${losers.length ? losers.map(row).join('') : '<div class="attr-empty">Ninguna en pérdida — bien ahí.</div>'}</div>
+      </div>
+      ${sectors.length ? `<div class="attr-sectors"><div class="attr-sectors-title">Por sector</div><div class="attr-sec-rows">${sectors.map(sr => `<div class="attr-sec-row"><span>${esc(sr.sector)}</span><span class="${sr.gainArs >= 0 ? 'up' : 'down'}">${sr.gainArs >= 0 ? '+' : ''}${pv(fmtArs(sr.gainArs))}</span></div>`).join('')}</div></div>` : ''}
+    </div>`;
+}
+
 function portfolioHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
@@ -6815,6 +6904,7 @@ function portfolioHTML() {
     </div>
 
     ${!holdings.length ? emptyStateHTML('briefcase', `Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}). Podés empezar cargando una a la vez arriba, o importar un CSV (columnas: ticker,shares,avgCost,costCurrency).`) : `
+    ${portfolioDidacticHTML(stats)}
     <div class="port-summary-grid">
       <div class="card port-summary-card">
         <div class="dash-radar-title">Valor total</div>
@@ -6843,6 +6933,7 @@ function portfolioHTML() {
     ${tab === 'resumen' ? `
       ${portfolioCopilotCardHTML(copilot, health)}
       ${actionPlanCardHTML(stats, risk)}
+      ${portfolioAttributionHTML(stats)}
       ${breadthCardHTML(stats)}
       ${portfolioTreemapSVG(stats.rows)}
       ${portfolioHealthCardHTML(health)}
@@ -7051,6 +7142,17 @@ function wirePortfolioEvents() {
   els.report.querySelectorAll('[data-reco-ticker]').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.recoTicker));
   });
+  const investedInput = document.getElementById('pdx-invested-input');
+  if (investedInput) {
+    const commitInvested = () => {
+      const raw = parseFloat(String(investedInput.value).replace(/[^\d]/g, ''));
+      portState.investedArs = isNaN(raw) || raw <= 0 ? null : raw;
+      lsSetSafe('icp_port_invested', portState.investedArs != null ? String(portState.investedArs) : '');
+      renderReport();
+    };
+    investedInput.addEventListener('change', commitInvested);
+    investedInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitInvested(); } });
+  }
   els.report.querySelectorAll('.port-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
