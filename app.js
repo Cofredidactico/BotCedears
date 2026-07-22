@@ -341,12 +341,39 @@ function alertNarrativeText(a) {
   const html = alertNarrative(a);
   return html ? html.replace(/<[^>]+>/g, '') : null;
 }
-// Tarjeta narrativa de la alerta en la ficha del activo.
+
+/* ── "Qué mirar hoy" ─────────────────────────────────────────────────────────
+ * El paso siguiente accionable de la alerta: qué falta para confirmar la señal
+ * (las confirmaciones del motor que todavía NO se cumplen) y a qué nivel se
+ * invalida. Convierte "está en zona de compra" en un plan concreto. Todo sale
+ * de datos ya calculados (factors + niveles de la alerta); no inventa nada. */
+function alertWatchToday(a) {
+  if (!a) return null;
+  if (a.type === 'stop') return 'Esperá señales de piso (una vela de reversión con volumen) antes de pensar en recomprar — no atajes el cuchillo cayendo.';
+  const parts = [];
+  if (a.pending) parts.push('Esperá un <b>segundo cierre dentro de la zona</b> — un solo toque puede ser un amague.');
+  // Confirmaciones que faltan (lo que hay que vigilar), priorizando las de mayor peso.
+  const missing = (a.factors || []).filter(f => f.ok !== true);
+  const missingPrimary = missing.filter(f => f.primary).map(f => f.label.toLowerCase());
+  const missingOther = missing.filter(f => !f.primary).map(f => f.label.toLowerCase());
+  const toWatch = (missingPrimary.length ? missingPrimary : missingOther).slice(0, 2);
+  if (toWatch.length) parts.push(`Para confirmar, mirá que se cumpla: <b>${toWatch.join('</b> y <b>')}</b>.`);
+  else if (!a.pending) parts.push('Las señales clave ya están alineadas — vigilá que el <b>volumen</b> sostenga el movimiento.');
+  // Nivel de invalidación (dónde el setup deja de tener sentido).
+  if (a.type === 'buy' && a.support != null) parts.push(`Se invalida si <b>cierra por debajo del soporte</b> (${fmtUsd(a.support)}).`);
+  if (a.type === 'sell' && a.resistance != null) parts.push(`Se invalida si <b>cierra por encima de la resistencia</b> (${fmtUsd(a.resistance)}).`);
+  return parts.length ? parts.join(' ') : null;
+}
+// Tarjeta narrativa de la alerta en la ficha del activo (narrativa + qué mirar hoy).
 function alertNarrativeCardHTML(a) {
   const txt = alertNarrative(a);
   if (!txt) return '';
   const cls = a.type === 'buy' ? 'up' : a.type === 'sell' ? 'down' : 'stop';
-  return `<div class="card alert-narrative ${cls}">${txt}</div>`;
+  const watch = alertWatchToday(a);
+  return `<div class="card alert-narrative ${cls}">
+    <div class="alert-narrative-lead">${txt}</div>
+    ${watch ? `<div class="alert-watch">👀 <span class="alert-watch-tag">Qué mirar hoy</span> ${watch}</div>` : ''}
+  </div>`;
 }
 
 /** Tarjeta didáctica del GRADO de la zona de compra/venta en la ficha del
@@ -2376,6 +2403,7 @@ function renderReportImpl() {
         </div>
         <div class="gauge-label">${esc(scoreLabel)}</div>
         <div class="gauge-conviction" title="Convicción: ${esc(confidence)}">${convictionDotsHTML(confidence)}<span>Convicción: ${esc(confidence)}</span></div>
+        ${scoreProjectionHTML(t, quote.usd, scoreLabel)}
         ${subScores.length ? `
         <div class="gauge-subscores">
           ${subScores.map(sb => `
@@ -3013,6 +3041,27 @@ function macroChips(macro) {
   return chips;
 }
 
+/* Proyección del score: hasta qué nivel estructural podría ir el precio si el
+ * sesgo del score se sostiene — próxima resistencia si es alcista, próximo
+ * soporte si es bajista. Da el "hasta dónde" de un vistazo, junto al número. */
+function scoreProjectionHTML(t, price, scoreLabel) {
+  if (!t || !(price > 0)) return '';
+  const lbl = (scoreLabel || '').toLowerCase();
+  let bull = null;
+  if (lbl.includes('compra')) bull = true;
+  else if (lbl.includes('venta') || lbl.includes('reducir')) bull = false;
+  else if (t.ema50 != null) bull = price >= t.ema50; // "Mantener": sesgo por la EMA50
+  if (bull === true && t.resistance != null && t.resistance > price) {
+    const pct = ((t.resistance - price) / price) * 100;
+    return `<div class="gauge-proj up" title="Próxima resistencia estructural — objetivo si el sesgo alcista se sostiene (no es una promesa)">🎯 Próximo techo <b>${fmtUsd(t.resistance)}</b> <b class="up">+${pct.toFixed(1)}%</b></div>`;
+  }
+  if (bull === false && t.support != null && t.support < price) {
+    const pct = ((price - t.support) / price) * 100;
+    return `<div class="gauge-proj down" title="Próximo soporte estructural — riesgo si el sesgo bajista se sostiene">🎯 Próximo piso <b>${fmtUsd(t.support)}</b> <b class="down">−${pct.toFixed(1)}%</b></div>`;
+  }
+  return '';
+}
+
 /* ───────────────────────── seguimiento (watchlist) ───────────────────────── */
 function scoreLabelColor(label) {
   if (label === 'Compra Fuerte') return { bg: 'oklch(0.32 0.11 152)', color: 'oklch(0.90 0.16 152)' };
@@ -3211,7 +3260,23 @@ function dashCardHTML(ticker, d) {
     </div>
     ${d.highlight ? `<div class="dcv-highlight">${esc(d.highlight)}</div>` : ''}
     ${am ? `<div class="dcv-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
+    ${dcvNarrative(d)}
   </div>`;
+}
+
+/* Narrativa compacta de la tarjeta de Oportunidades: prioriza la del setup de
+ * Trades Cortos (qué acaba de pasar + proyección); si no hay setup que califique,
+ * usa la de la alerta de precio. Solo en tarjetas accionables — el resto queda
+ * limpio. */
+function dcvNarrative(d) {
+  if (d.setup?.qualifies && d.setup.narrative) {
+    return `<div class="dcv-narr ${d.setup.direction === 'short' ? 'down' : 'up'}">${d.setup.narrative}</div>`;
+  }
+  if (d.alert && alertNarrative(d.alert)) {
+    const cls = d.alert.type === 'buy' ? 'up' : d.alert.type === 'sell' ? 'down' : 'stop';
+    return `<div class="dcv-narr ${cls}">${alertNarrative(d.alert)}</div>`;
+  }
+  return '';
 }
 
 /* ═══════════════════ DASHBOARD: capa de contexto de mercado ═══════════════
@@ -7917,7 +7982,7 @@ function watchCardHTML(ticker) {
     <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
     <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
     ${am ? `<div class="watch-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
-    ${am && alertNarrative(d.alert) ? `<div class="watch-alert-narr ${d.alert.type === 'buy' ? 'up' : d.alert.type === 'sell' ? 'down' : 'stop'}">${alertNarrative(d.alert)}</div>` : ''}
+    ${am && alertNarrative(d.alert) ? `<div class="watch-alert-narr ${d.alert.type === 'buy' ? 'up' : d.alert.type === 'sell' ? 'down' : 'stop'}">${alertNarrative(d.alert)}${alertWatchToday(d.alert) ? `<div class="watch-alert-watch">👀 <b>Qué mirar:</b> ${alertWatchToday(d.alert)}</div>` : ''}</div>` : ''}
   </div>`;
 }
 
