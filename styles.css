@@ -1153,6 +1153,34 @@ select.port-input { cursor: pointer; }
 .short-more-btn { width: 100%; margin-top: 4px; padding: 8px 12px; border-radius: 9px; border: 1px solid var(--border-soft); background: var(--surface-2); color: var(--text-dim); font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: border-color 0.15s, color 0.15s, background 0.15s; }
 .short-more-btn:hover { border-color: var(--border-strong); color: var(--text); }
 .short-more-caret { font-size: 10px; transition: transform 0.18s; }
+/* Glosario: término subrayado con popover explicativo en criollo al hover/foco. */
+.gloss { border-bottom: 1px dashed var(--text-faint); cursor: help; position: relative; }
+.gloss:hover, .gloss:focus { border-bottom-color: var(--accent); outline: none; }
+.gloss-pop { position: absolute; bottom: calc(100% + 9px); left: 0; width: 250px; max-width: 78vw;
+  background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px;
+  font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.5; font-weight: 400;
+  text-transform: none; letter-spacing: normal; color: var(--text-dim); box-shadow: var(--shadow-lg);
+  opacity: 0; visibility: hidden; transform: translateY(4px); transition: opacity 0.16s ease, transform 0.16s ease;
+  z-index: 60; pointer-events: none; white-space: normal; }
+.gloss-pop b { color: var(--accent-text); font-weight: 700; }
+.gloss:hover .gloss-pop, .gloss:focus .gloss-pop, .gloss:focus-within .gloss-pop { opacity: 1; visibility: visible; transform: translateY(0); }
+.gloss-pop::after { content: ''; position: absolute; top: 100%; left: 16px; border: 6px solid transparent; border-top-color: var(--border-strong); }
+/* Los contenedores de indicadores no deben recortar el popover. */
+.metrics-grid, .advanced-details { overflow: visible; }
+
+/* Sub-navegación pegajosa de la ficha del activo: salta a cada sección. */
+.report-subnav { position: sticky; top: 72px; z-index: 19; display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 10px 0; margin: -4px 0 14px;
+  background: linear-gradient(180deg, var(--bg) 74%, transparent); }
+.report-subnav-chip { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-soft);
+  background: var(--surface-2); color: var(--text-mute); font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; text-decoration: none;
+  transition: color 0.15s, border-color 0.15s, background 0.15s; }
+.report-subnav-chip:hover { color: var(--text); border-color: var(--border-strong); }
+.report-subnav-chip.active { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: var(--glow-accent); }
+.sectiontitle.has-anchor { scroll-margin-top: 128px; }
+@media (max-width: 720px) { .report-subnav { top: 60px; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; } .report-subnav::-webkit-scrollbar { display: none; } }
+
 /* Tooltip flotante de las sparklines interactivas. */
 .spark-tip { position: fixed; z-index: 9999; transform: translate(-50%, -100%); pointer-events: none;
   background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: 7px; padding: 4px 8px;

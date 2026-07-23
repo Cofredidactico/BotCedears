@@ -462,7 +462,7 @@ function alertReliabilityCardHTML(alert, t, plan, price, ticker) {
   const reads = keyIndicatorReadouts(t, plan, price, alert);
   const readGrid = reads.length ? `<div class="reliab-reads">${reads.map(r => `<div class="reliab-read reliab-tone-${r.tone}"><div class="reliab-read-k">${esc(r.k)}</div><div class="reliab-read-v">${esc(r.v)}</div><div class="reliab-read-sub">${esc(r.sub)}</div></div>`).join('')}</div>` : '';
   return `
-    ${sectionTitleHTML('Confiabilidad histórica de la señal', 'award')}
+    ${sectionTitleHTML('Confiabilidad histórica de la señal', 'award', '', 'sec-conf')}
     <div class="card reliab-card">
       <div class="reliab-lead">Cuando el motor dio esta misma señal (<strong>${alert.type === 'buy' ? 'zona de compra' : 'zona de venta'} · confianza ${esc(alert.pending ? 'tentativa' : alert.confidence)}</strong>) en el pasado de ${esc(ticker)}, ¿qué pasó después? Medido sobre sus velas diarias reales, sin mirar el futuro.</div>
       <div id="alert-bt-slot" class="reliab-bt reliab-bt-loading">Midiendo la confiabilidad histórica…</div>
@@ -964,8 +964,8 @@ const ICONS = {
   filter: `<svg ${ICON_ATTR}><path d="M3.5 4.5h17l-6.2 8v6.5l-4.6 2v-8.5Z"/></svg>`,
   shuffle: `<svg ${ICON_ATTR}><path d="M3 6h3.5c2.5 0 3.8 1.6 5 3.5"/><path d="M11.5 14.5c1.2 1.9 2.5 3.5 5 3.5H21"/><polyline points="17.5,4.5 21,6 17.5,7.5"/><polyline points="17.5,15 21,16.5 17.5,18"/><path d="M3 18h3.5c2.5 0 3.8-1.6 5-3.5"/><path d="M11.5 9.5C12.7 7.6 14 6 16.5 6"/></svg>`,
 };
-function sectionTitleHTML(text, iconKey, style = '') {
-  return `<div class="sectiontitle" ${style ? `style="${style}"` : ''}>${ICONS[iconKey] ?? ''}<span>${esc(text)}</span></div>`;
+function sectionTitleHTML(text, iconKey, style = '', id = '') {
+  return `<div class="sectiontitle${id ? ' has-anchor' : ''}" ${id ? `id="${id}"` : ''} ${style ? `style="${style}"` : ''}>${ICONS[iconKey] ?? ''}<span>${esc(text)}</span></div>`;
 }
 
 /** Estado vacío con ícono — mismo mensaje real que antes, con más peso
@@ -1561,7 +1561,7 @@ function analystBriefHTML(r, priceAlert, subScores, subScoreLabels) {
       <div class="brief-pillar-bar"><i style="width:${sb.available ? sb.pct : 0}%;"></i></div>
     </div>`;
   return `
-    ${sectionTitleHTML('Informe del Analista', 'briefcase')}
+    ${sectionTitleHTML('Informe del Analista', 'briefcase', '', 'sec-analisis')}
     <div class="card brief-card" style="--brief-accent:${accent};">
       <div class="brief-head">
         <div class="brief-verdict">
@@ -2374,8 +2374,15 @@ function renderReportImpl() {
 
   els.report.innerHTML = `
     <div class="breadcrumbs">Análisis <span>›</span> ${esc(breadcrumbLabel)} <span>›</span> <strong>${esc(asset.ticker)}</strong></div>
+    <nav class="report-subnav" id="report-subnav" aria-label="Secciones del informe">
+      <a class="report-subnav-chip" data-sec="sec-resumen">Resumen</a>
+      <a class="report-subnav-chip" data-sec="sec-analisis">Análisis</a>
+      <a class="report-subnav-chip" data-sec="sec-grafico">Gráfico</a>
+      <a class="report-subnav-chip" data-sec="sec-plan">Plan</a>
+      <a class="report-subnav-chip" data-sec="sec-conf">Confiabilidad</a>
+    </nav>
     ${degradedNote}
-    ${sectionTitleHTML('Resumen Ejecutivo', 'briefcase')}
+    ${sectionTitleHTML('Resumen Ejecutivo', 'briefcase', '', 'sec-resumen')}
     <div class="exec-grid">
       <div class="card exec-card">
         <div class="exec-name-row">
@@ -2471,7 +2478,7 @@ function renderReportImpl() {
       </div>
     </div>
 
-    ${sectionTitleHTML('Gráfico de Precio', 'chart')}
+    ${sectionTitleHTML('Gráfico de Precio', 'chart', '', 'sec-grafico')}
     <div class="card chart-card">
       <div class="chart-mode-tabs" role="tablist">
         <button class="chart-mode-tab ${chartState.mode === 'institucional' ? 'active' : ''}" data-mode="institucional" role="tab" aria-selected="${chartState.mode === 'institucional'}">Análisis Institucional</button>
@@ -2515,7 +2522,7 @@ function renderReportImpl() {
           <details class="advanced-details">
             <summary>Ver todos los indicadores técnicos (avanzado)</summary>
             <div class="metrics-grid" style="margin-top:12px;">
-              ${technicalMetricRows(t, confluence, marketCorrelation, relativeStrength).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
+              ${technicalMetricRows(t, confluence, marketCorrelation, relativeStrength).map(m => `<div class="metric-row"><span class="metric-label">${glossify(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
             </div>
           </details>
         </div>
@@ -2587,7 +2594,7 @@ function renderReportImpl() {
     ${seasonalityHTML(asset.ticker)}
 
     <div class="panel-header">
-      ${sectionTitleHTML('Plan Operativo', 'target', 'margin-bottom:0;')}
+      ${sectionTitleHTML('Plan Operativo', 'target', 'margin-bottom:0;', 'sec-plan')}
       <div style="display:flex; align-items:center; gap:10px;">
         ${priceAlertMeta ? `<div class="watch-alert plan-alert-badge" style="color:${priceAlertMeta.color};"${alertTitleAttr(priceAlert)}>⚡ ${esc(priceAlertMeta.label)}${alertConfidenceSuffix(priceAlert)}</div>` : ''}
         <div class="freshness" style="color:${freshPlan.color};"><span class="dot" style="background:${freshPlan.color};"></span>${esc(freshPlan.text)}</div>
@@ -2632,6 +2639,31 @@ function renderReportImpl() {
   // primer paint del informe; se autocancela si el usuario cambia de activo.
   if (priceAlert && (priceAlert.type === 'buy' || priceAlert.type === 'sell') && priceAlert.grade) {
     hydrateAlertReliability(asset.ticker, priceAlert, t, quote.usd, plan);
+  }
+
+  // Sub-navegación de la ficha: salta a cada sección; quita los chips cuyo
+  // destino no existe en este informe (p. ej. sin alerta → sin Confiabilidad);
+  // marca el chip activo según la sección visible al hacer scroll.
+  const subnav = document.getElementById('report-subnav');
+  if (subnav) {
+    const chips = [...subnav.querySelectorAll('.report-subnav-chip')];
+    const byId = {};
+    chips.forEach(chip => {
+      const target = document.getElementById(chip.dataset.sec);
+      if (!target) { chip.remove(); return; }
+      byId[chip.dataset.sec] = chip;
+      chip.addEventListener('click', (e) => { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    });
+    const anchors = Object.keys(byId);
+    if (anchors.length <= 1) subnav.remove(); // una sola sección: no aporta
+    else if ('IntersectionObserver' in window) {
+      const obs = new IntersectionObserver((entries) => {
+        entries.forEach(en => {
+          if (en.isIntersecting) { chips.forEach(c => c.classList.remove('active')); byId[en.target.id]?.classList.add('active'); }
+        });
+      }, { rootMargin: '-90px 0px -72% 0px' });
+      anchors.forEach(id => obs.observe(document.getElementById(id)));
+    }
   }
 
   const starBtn = document.getElementById('exec-star');
@@ -3423,6 +3455,45 @@ function ideaOfTheDay(loaded) {
 
 function infoTip(text) {
   return `<span class="info-tip" tabindex="0" role="button" aria-label="${esc(text)}" title="${esc(text)}">ⓘ</span>`;
+}
+
+/* ── Glosario: jerga técnica explicada en criollo al pasar el mouse ──────────
+ * `glossify(texto)` envuelve el PRIMER término del glosario que aparezca con un
+ * popover que lo explica en lenguaje simple. Se auto-aplica a las filas de
+ * indicadores sin tener que anotarlas una por una. El resto del texto se escapa
+ * normal. */
+const GLOSSARY = {
+  'Fuerza Relativa': 'Compara al activo contra el mercado (S&P 500). Si sube más que el índice, está "liderando"; si sube menos, "rezagando".',
+  'Bollinger': 'Bandas de volatilidad alrededor del precio. Cuando se estrechan (squeeze), suele venir un movimiento fuerte; cuando el precio toca una banda, puede rebotar.',
+  'Divergencia': 'El precio hace un nuevo máximo (o mínimo) pero el indicador no lo acompaña. Suele anticipar un giro de tendencia.',
+  'Resistencia': 'Precio donde la suba suele frenar porque aparecen vendedores. Un "techo" técnico.',
+  'Soporte': 'Precio donde la caída suele frenar porque aparecen compradores. Un "piso" técnico.',
+  'Fibonacci': 'Niveles (38,2% · 50% · 61,8%) donde el precio suele frenar o rebotar tras un movimiento fuerte.',
+  'Squeeze': 'Compresión de volatilidad: las bandas se estrechan. Suele preceder a un movimiento brusco en cualquier dirección.',
+  'VWAP': 'Precio promedio ponderado por volumen. Muchos operadores lo usan como referencia de "precio justo" del día.',
+  'MACD': 'Cruce de dos medias móviles que mide el impulso. Cuando la línea cruza hacia arriba su señal, es momentum alcista; hacia abajo, bajista.',
+  'EMA': 'Media móvil exponencial: el precio promedio de las últimas N ruedas (dando más peso a lo reciente). La de 200 marca la tendencia de fondo.',
+  'RSI': 'Índice de Fuerza Relativa (0–100). Arriba de 70 el activo está "sobrecomprado" (puede corregir); abajo de 30, "sobrevendido" (puede rebotar).',
+  'ADX': 'Mide la FUERZA de la tendencia, no su dirección. Arriba de 25 la tendencia es fuerte; abajo de 20, el precio va de lado.',
+  'ATR': 'Rango Verdadero Promedio: cuánto se mueve el activo por día en promedio. Sirve para dimensionar el stop y el objetivo.',
+  'OBV': 'On-Balance Volume: suma el volumen en días de suba y lo resta en días de baja. Confirma si el volumen acompaña al precio.',
+  'POC': 'Punto de Control: el precio donde se operó MÁS volumen. Actúa como imán y como soporte/resistencia fuerte.',
+  'Beta': 'Cuánto se mueve el activo respecto al mercado. Beta 1,5 = amplifica un 50% los movimientos del índice.',
+  'Correlación': 'Qué tan de la mano se mueve con el mercado (de -1 a 1). Cerca de 1, van juntos; cerca de 0, independientes.',
+};
+const GLOSSARY_ORDER = Object.keys(GLOSSARY).sort((a, b) => b.length - a.length); // multi-palabra primero
+function glossify(text) {
+  if (!text) return esc(text ?? '');
+  const lower = text.toLowerCase();
+  for (const term of GLOSSARY_ORDER) {
+    const idx = lower.indexOf(term.toLowerCase());
+    if (idx < 0) continue;
+    const before = text.slice(0, idx), match = text.slice(idx, idx + term.length), after = text.slice(idx + term.length);
+    return esc(before)
+      + `<span class="gloss" tabindex="0">${esc(match)}<span class="gloss-pop" role="tooltip"><b>${esc(term)}</b> — ${esc(GLOSSARY[term])}</span></span>`
+      + esc(after);
+  }
+  return esc(text);
 }
 
 /* ── tarjetas del contexto de mercado ── */
