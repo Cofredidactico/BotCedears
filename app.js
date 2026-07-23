@@ -8217,33 +8217,91 @@ function wireWatchlistEvents() {
 /** Página de Noticias & Macro: chips macro (ya reales, misma fuente que la
  *  ficha de cada activo) + noticias generales de mercado (no ligadas a un
  *  ticker puntual). */
-const macroNewsState = { macro: null, news: null, loading: false, loadedAt: 0 };
+const macroNewsState = { macro: null, news: null, assetNews: null, newsFilter: 'all', loading: false, loadedAt: 0 };
 function macroNewsPageHTML() {
   const macro = macroNewsState.macro;
   const news = macroNewsState.news;
+  const assetNews = macroNewsState.assetNews;
+  const f = macroNewsState.newsFilter;
+  const hasAssets = getPortfolio().length + getWatchlist().length > 0;
+
+  const renderGrid = (items) => {
+    const sorted = items.slice().filter(n => newsMatchesFilter(n, f)).sort((a, b) => newsRelevance(b) - newsRelevance(a));
+    if (!sorted.length) return `<div class="card news-empty-card">No hay noticias que coincidan con el filtro elegido.</div>`;
+    return `<div class="news-grid">${sorted.map(newsCardHTML).join('')}</div>`;
+  };
+  const filterChips = `<div class="news-filters" role="group" aria-label="Filtrar noticias por sentimiento">
+    ${[['all', 'Todas'], ['pos', 'Positivas'], ['neg', 'Negativas'], ['strong', 'Alto impacto']].map(([k, l]) =>
+      `<button class="news-filter-chip ${f === k ? 'active' : ''}" data-news-filter="${k}">${l}</button>`).join('')}
+  </div>`;
+
+  // ── Sección: Noticias sobre TUS activos ──
+  let assetSection;
+  if (assetNews == null) {
+    assetSection = `<div class="card"><div class="dash-loading-note">Cargando novedades de tus activos…</div></div>`;
+  } else if (!hasAssets) {
+    assetSection = `<div class="card news-empty-card">Todavía no tenés activos en tu cartera ni en tu watchlist. Sumá algunos y acá vas a ver las noticias que los mueven, ordenadas por relevancia.</div>`;
+  } else if (!assetNews.length) {
+    assetSection = `<div class="card news-empty-card">Sin novedades recientes de tus activos. Cuando salga una noticia de alguno de tus papeles, aparece acá primero.</div>`;
+  } else {
+    assetSection = renderGrid(assetNews);
+  }
+
   return `
     ${sectionTitleHTML('Noticias & Macro', 'globe')}
-    <div class="dash-intro">Contexto macroeconómico y noticias generales del mercado — la misma fuente que se usa en cada ficha individual, acá agregada en una sola vista.</div>
-    <div class="card macro-card" style="margin-bottom:28px;">
+    <div class="dash-intro">Las noticias de tus activos primero, después el contexto del mercado — ordenadas por relevancia (recencia + impacto) y con el sentimiento de cada titular.</div>
+
+    ${sectionTitleHTML('Contexto macro', 'globe', 'margin-top:20px;')}
+    <div class="card macro-card" style="margin-bottom:26px;">
       ${macro ? macroChips(macro).map(mc => `<div class="macro-chip">${mc.live ? '<span class="macro-chip-live" title="En vivo"></span>' : ''}<span class="macro-chip-label">${esc(mc.label)}: </span><span class="macro-chip-value">${esc(mc.value)}</span>${typeof mc.live === 'string' ? ` <span class="macro-chip-var">(${esc(mc.live)})</span>` : ''}</div>`).join('') : `<div class="dash-loading-note">Cargando…</div>`}
     </div>
-    ${sectionTitleHTML('Noticias generales', 'news', 'margin-top:8px;')}
-    <div class="card news-card">
-      ${!news ? `<div class="dash-loading-note">Cargando…</div>` : news.items?.length ? news.items.map(n => `
-        <div class="news-item">
-          <div class="news-tag" style="background:${n.bg}; color:${n.color};">${esc(n.tag)}</div>
-          <div class="news-text">${esc(n.text)}${n.source ? ` <span class="news-source">— ${esc(n.source)}</span>` : ''}</div>
-        </div>`).join('') : `<div class="news-empty">Sin noticias generales disponibles en este momento.</div>`}
-    </div>`;
+
+    <div class="news-section-head">
+      ${sectionTitleHTML('📌 Noticias sobre tus activos', 'bookmark', 'margin-bottom:0;')}
+      ${assetNews?.length ? `<span class="news-count">${assetNews.filter(n => newsMatchesFilter(n, f)).length}</span>` : ''}
+    </div>
+    ${assetNews?.length || news?.items?.length ? filterChips : ''}
+    ${assetSection}
+
+    ${sectionTitleHTML('Noticias del mercado', 'news', 'margin-top:28px;')}
+    ${!news ? `<div class="card"><div class="dash-loading-note">Cargando…</div></div>`
+      : news.items?.length ? renderGrid(news.items)
+      : `<div class="card news-empty-card">Sin noticias generales disponibles en este momento.</div>`}`;
 }
-function wireMacroNewsEvents() { /* sin interacciones propias por ahora */ }
+function wireMacroNewsEvents() {
+  els.report.querySelectorAll('[data-news-filter]').forEach(btn => {
+    btn.addEventListener('click', () => { macroNewsState.newsFilter = btn.dataset.newsFilter; renderReport(); });
+  });
+  els.report.querySelectorAll('[data-news-ticker]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); selectTicker(btn.dataset.newsTicker); });
+  });
+}
 async function loadMacroNewsData() {
   if (macroNewsState.loading || Date.now() - macroNewsState.loadedAt < 3 * 60 * 1000) return;
   macroNewsState.loading = true;
   try {
-    const [macro, news] = await Promise.all([getMacro(), getGeneralNews()]);
+    // Noticias de TUS activos: se piden por ticker (cartera primero, luego
+    // watchlist), deduplicadas y limitadas para no golpear el proveedor. Cada
+    // getNews está cacheado 15 min, así que es barato y se comparte con la ficha.
+    const assetTickers = [...new Set([...getPortfolio().map(h => h.ticker), ...getWatchlist()])].slice(0, 10);
+    const [macro, news, ...assetRes] = await Promise.all([
+      getMacro(), getGeneralNews(),
+      ...assetTickers.map(t => getNews(t).then(r => ({ t, r })).catch(() => ({ t, r: null }))),
+    ]);
     macroNewsState.macro = macro;
     macroNewsState.news = news;
+    const seen = new Set();
+    const assetNews = [];
+    for (const { t, r } of assetRes) {
+      if (!r?.items?.length) continue;
+      for (const it of r.items) {
+        const key = it.url || it.textEn || it.text;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        assetNews.push({ ...it, ticker: t });
+      }
+    }
+    macroNewsState.assetNews = assetNews;
     macroNewsState.loadedAt = Date.now();
   } catch (e) {
     console.warn('[macro-news] no se pudo cargar', e.message);
@@ -8251,6 +8309,38 @@ async function loadMacroNewsData() {
     macroNewsState.loading = false;
     if (!state.asset && state.view === 'macro') renderReport();
   }
+}
+
+/* Relevancia de una noticia: la recencia manda; el sentimiento fuerte la sube
+ * (una noticia "Muy Positiva/Negativa" pesa como ~6h más fresca). */
+function newsSentBonus(tag) {
+  if (tag === 'Muy Positiva' || tag === 'Muy Negativa') return 2;
+  if (tag === 'Positiva' || tag === 'Negativa') return 1;
+  return 0;
+}
+function newsRelevance(n) {
+  const dtMs = n.datetime ? n.datetime * 1000 : 0;
+  return dtMs + newsSentBonus(n.tag) * 6 * 3600 * 1000;
+}
+function newsMatchesFilter(n, f) {
+  if (f === 'pos') return n.tag === 'Positiva' || n.tag === 'Muy Positiva';
+  if (f === 'neg') return n.tag === 'Negativa' || n.tag === 'Muy Negativa';
+  if (f === 'strong') return n.tag === 'Muy Positiva' || n.tag === 'Muy Negativa';
+  return true; // 'all'
+}
+// Tarjeta de noticia: sentimiento + titular (linkeado) + fuente + antigüedad, y
+// el ticker (si es de tus activos) que abre la ficha.
+function newsCardHTML(n) {
+  const time = n.datetime ? relativeTime(n.datetime * 1000) : '';
+  return `<div class="news-card-item">
+    <div class="news-row-top">
+      ${n.ticker ? `<button class="news-ticker" data-news-ticker="${esc(n.ticker)}" title="Ver análisis de ${esc(n.ticker)}">${esc(n.ticker)}</button>` : ''}
+      <span class="news-tag" style="background:${n.bg}; color:${n.color};">${esc(n.tag)}</span>
+      ${time ? `<span class="news-time">${esc(time)}</span>` : ''}
+    </div>
+    ${n.url ? `<a class="news-headline" href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.text)}</a>` : `<div class="news-headline">${esc(n.text)}</div>`}
+    <div class="news-meta">${n.source ? `<span class="news-src">${esc(n.source)}</span>` : '<span></span>'}${n.url ? '<span class="news-ext">Leer nota ↗</span>' : ''}</div>
+  </div>`;
 }
 
 /** Tarjeta de vinculación/gestión de alertas por Telegram: avisa aunque el
