@@ -146,6 +146,7 @@ const portState = {
   spy: null, // cierres de SPY para beta/benchmark de la cartera
   cclHistory: null, // serie histórica del CCL (argentinadatos) para medir la cartera en dólares reales
   dividends: {}, // ticker -> historial de dividendos, para el yield agregado de la cartera
+  earnings: {}, // ticker -> próximo balance (para el calendario de catalizadores de "Mi Día")
   compact: lsGetSafe('icp_port_compact', '0') === '1',
   privacy: lsGetSafe('icp_port_privacy', '0') === '1',
   allocAmount: '', allocResult: null, // asignador "¿qué compro con AR$X?"
@@ -154,7 +155,7 @@ const portState = {
   goalUsd: (() => { const v = parseFloat(lsGetSafe('icp_port_goal', '')); return isNaN(v) || v <= 0 ? null : v; })(), // meta de patrimonio (USD)
   goalMonthlyUsd: (() => { const v = parseFloat(lsGetSafe('icp_port_goal_m', '')); return isNaN(v) || v < 0 ? 0 : v; })(), // aporte mensual (USD)
   _planCache: null, // último Plan de Trading calculado, para ejecutar por índice
-  tab: 'resumen', // pestaña activa de la Radiografía de Cartera
+  tab: 'hoy', // pestaña activa de la Radiografía de Cartera (arranca en el cockpit "Mi Día")
   stressShock: null, // shock de mercado elegido en el panel de estrés (o null)
   optMode: 'minvar', // criterio del optimizador de cartera
 };
@@ -6465,6 +6466,7 @@ function portfolioTreemapSVG(rows) {
  * ─────────────────────────────────────────────────────────────────────────── */
 
 const PORT_TABS = [
+  { key: 'hoy', label: 'Mi Día', icon: 'target' },
   { key: 'resumen', label: 'Resumen', icon: 'grid' },
   { key: 'riesgo', label: 'Riesgo & Proyección', icon: 'trend' },
   { key: 'operar', label: 'Operar', icon: 'shuffle' },
@@ -7143,6 +7145,117 @@ function portfolioBenchmarkVerdict(stats) {
   return { usdPct, realPct };
 }
 
+/* ═══════════════════ "MI DÍA" — cockpit personalizado de la cartera ═════════
+ * Una sola pantalla que responde "¿qué pasó hoy con lo mío y qué tengo que
+ * mirar?": P&L del día, tus mayores movimientos, alertas activas en tus activos,
+ * el rendimiento de la cartera vs. el mercado (S&P/CCL) y los próximos
+ * catalizadores (balances + ex-dividends). Todo sobre datos ya cargados. */
+function portfolioTodayHTML(stats) {
+  const s = portfolioDidacticSummary(stats);
+  const dc = s.dayArs == null ? '' : s.dayArs >= 0 ? 'up' : 'down';
+
+  // ── Tus movimientos de hoy (mayor variación absoluta primero) ──
+  const movers = stats.rows
+    .filter(r => r.d?.changePct != null && r.valueArs != null)
+    .map(r => { const prev = r.valueArs / (1 + r.d.changePct / 100); return { ticker: r.ticker, name: r.d.name, pct: r.d.changePct, dayArs: r.valueArs - prev }; })
+    .sort((a, b) => Math.abs(b.dayArs) - Math.abs(a.dayArs))
+    .slice(0, 6);
+  const moverRow = (m) => `<div class="today-mover" data-port-ticker="${esc(m.ticker)}">
+      <span class="today-mover-tk">${esc(m.ticker)}</span>
+      <span class="today-mover-pct ${m.pct >= 0 ? 'up' : 'down'}">${m.pct >= 0 ? '▲' : '▼'} ${Math.abs(m.pct).toFixed(1)}%</span>
+      <span class="today-mover-ars ${m.dayArs >= 0 ? 'up' : 'down'}">${m.dayArs >= 0 ? '+' : ''}${pv(fmtArs(m.dayArs))}</span>
+    </div>`;
+
+  // ── Alertas activas en tus activos ──
+  const alerted = stats.rows.filter(r => r.d?.alert).map(r => ({ ticker: r.ticker, a: r.d.alert }));
+  const alertRow = ({ ticker, a }) => {
+    const meta = ALERT_META[a.type];
+    return `<div class="today-alert" data-port-ticker="${esc(ticker)}">
+      <span class="today-alert-tk">${esc(ticker)}</span>
+      <span class="today-alert-badge" style="color:${meta?.color};">⚡ ${esc(meta?.label ?? a.type)}${a.pending ? ' <i>(tentativa)</i>' : ''}${a.grade ? ` · ${a.grade}` : ''}</span>
+    </div>`;
+  };
+
+  // ── Rendimiento vs. mercado (curva normalizada) ──
+  const eq = portfolioEquityCurve(stats);
+  const chartSeries = [];
+  if (eq?.series?.length >= 2) {
+    chartSeries.push({ ticker: 'Tu cartera', closes: eq.series });
+    if (portState.spy?.length >= 2) chartSeries.push({ ticker: 'S&P 500', closes: portState.spy });
+    const ccl = portState.cclHistory?.items?.map(x => x.venta ?? x.value).filter(v => v != null);
+    if (ccl?.length >= 2) chartSeries.push({ ticker: 'Dólar CCL', closes: ccl });
+  }
+  const verdict = portfolioBenchmarkVerdict(stats);
+  const vLine = (ok, label) => `<span class="today-vd ${ok ? 'good' : 'bad'}">${ok ? '✓' : '✗'} ${label}</span>`;
+  const verdictChips = verdict ? [
+    verdict.usdPct != null ? vLine(verdict.usdPct >= 0, `${verdict.usdPct >= 0 ? 'Le ganás' : 'Perdés'} al dólar (${verdict.usdPct >= 0 ? '+' : ''}${verdict.usdPct.toFixed(1)}% en USD)`) : '',
+    verdict.realPct != null ? vLine(verdict.realPct >= 0, `${verdict.realPct >= 0 ? 'Le ganás' : 'Perdés'} a la inflación (${verdict.realPct >= 0 ? '+' : ''}${verdict.realPct.toFixed(1)}% real)`) : '',
+    verdict.realPct != null ? vLine(verdict.realPct >= 0, `${verdict.realPct >= 0 ? 'Superás' : 'No superás'} al plazo fijo`) : '',
+  ].filter(Boolean).join('') : '';
+
+  // ── Próximos catalizadores (balances + ex-dividends, ≤90 días) ──
+  const cats = [];
+  for (const r of stats.rows) {
+    const earn = portState.earnings?.[r.ticker];
+    if (earn?.nextDate) { const d = daysUntil(earn.nextDate); if (d != null && d >= 0 && d <= 90) cats.push({ ticker: r.ticker, type: 'earnings', date: earn.nextDate, days: d }); }
+    const div = portState.dividends?.[r.ticker];
+    if (div?.nextExDate) { const d = daysUntil(div.nextExDate); if (d != null && d >= 0 && d <= 90) cats.push({ ticker: r.ticker, type: 'exdiv', date: div.nextExDate, days: d, amount: div.lastAmount }); }
+  }
+  cats.sort((a, b) => a.days - b.days);
+  const catRow = (c) => {
+    const when = c.days === 0 ? 'hoy' : c.days === 1 ? 'mañana' : `en ${c.days} días`;
+    const isEarn = c.type === 'earnings';
+    return `<div class="today-cat" data-port-ticker="${esc(c.ticker)}">
+      <span class="today-cat-icon">${isEarn ? '📊' : '💰'}</span>
+      <span class="today-cat-tk">${esc(c.ticker)}</span>
+      <span class="today-cat-what">${isEarn ? 'Balance trimestral' : `Ex-dividend${c.amount != null ? ` · ${fmtUsd(c.amount)}` : ''}`}</span>
+      <span class="today-cat-when ${c.days <= 3 ? 'soon' : ''}">${when}</span>
+    </div>`;
+  };
+
+  const dayPctTxt = s.dayPct != null ? `${s.dayPct >= 0 ? '+' : ''}${s.dayPct.toFixed(2)}%` : '—';
+  return `
+    <div class="card today-hero ${dc}">
+      <div class="today-hero-main">
+        <div class="today-hero-k">Tu cartera hoy</div>
+        <div class="today-hero-v ${dc}">${s.dayArs != null ? `${s.dayArs >= 0 ? '+' : ''}${pv(fmtArs(s.dayArs))}` : '—'}</div>
+        <div class="today-hero-sub ${dc}">${dayPctTxt} en el día · valor total ${pv(fmtUsd(stats.totalValue))}${stats.totalValueArs != null ? ` · ${pv(fmtArs(stats.totalValueArs))}` : ''}</div>
+      </div>
+      <div class="today-hero-side">
+        <div class="today-hero-tot ${s.gainArs == null ? '' : s.gainArs >= 0 ? 'up' : 'down'}">
+          <span>Ganancia total</span>
+          <b>${s.gainArs != null ? `${s.gainArs >= 0 ? '+' : ''}${pv(fmtArs(s.gainArs))}` : '—'}${s.gainPct != null ? ` (${s.gainPct >= 0 ? '+' : ''}${s.gainPct.toFixed(1)}%)` : ''}</b>
+        </div>
+      </div>
+    </div>
+
+    <div class="today-grid">
+      <div class="card today-panel">
+        <div class="today-panel-title">📈 Tus movimientos de hoy</div>
+        ${movers.length ? movers.map(moverRow).join('') : '<div class="today-empty">Todavía sin cotizaciones del día.</div>'}
+      </div>
+      <div class="card today-panel">
+        <div class="today-panel-title">⚡ Alertas en tus activos</div>
+        ${alerted.length ? alerted.map(alertRow).join('') : '<div class="today-empty">Ningún activo tuyo tiene una alerta activa ahora — todo tranquilo.</div>'}
+      </div>
+    </div>
+
+    ${chartSeries.length >= 2 ? `
+    <div class="card today-chart-card">
+      <div class="today-panel-title">🏁 Tu cartera vs. el mercado</div>
+      <div class="today-chart-note">Valor de tu cartera comparado con el S&amp;P 500 y el dólar CCL, todo desde el inicio de la ventana (base 0%).</div>
+      <div class="today-chart">${renderCompareOverlaySVG(chartSeries, 180)}</div>
+      ${verdictChips ? `<div class="today-verdict">${verdictChips}</div>` : ''}
+    </div>` : verdictChips ? `<div class="card today-chart-card"><div class="today-panel-title">🏁 ¿Le ganás al mercado?</div><div class="today-verdict">${verdictChips}</div></div>` : ''}
+
+    <div class="card today-panel">
+      <div class="today-panel-title">🗓️ Próximos catalizadores de tu cartera</div>
+      <div class="today-chart-note">Balances y fechas de ex-dividend de tus tenencias en los próximos 90 días — para no comerte una fecha por sorpresa.</div>
+      ${cats.length ? cats.map(catRow).join('') : '<div class="today-empty">Sin balances ni ex-dividends próximos en tus activos (o todavía sin datos de fechas).</div>'}
+    </div>
+    <div class="pdx-foot">Todo calculado sobre tus tenencias reales y las últimas cotizaciones. El P&amp;L del día asume las cantidades actuales. No es asesoramiento financiero.</div>`;
+}
+
 function portfolioDidacticHTML(stats) {
   const s = portfolioDidacticSummary(stats);
   const gc = s.gainArs == null ? '' : s.gainArs >= 0 ? 'up' : 'down';
@@ -7328,6 +7441,8 @@ function portfolioHTML() {
     <div class="port-tabs" role="tablist">
       ${PORT_TABS.map(t => `<button class="port-tab ${tab === t.key ? 'active' : ''}" data-port-tab="${t.key}" role="tab" aria-selected="${tab === t.key}">${ICONS[t.icon]}<span>${esc(t.label)}</span></button>`).join('')}
     </div>
+
+    ${tab === 'hoy' ? portfolioTodayHTML(stats) : ''}
 
     ${tab === 'resumen' ? `
       ${portfolioCopilotCardHTML(copilot, health)}
@@ -7778,6 +7893,15 @@ async function loadPortfolioData() {
     await Promise.all(needDividends.map(async (h) => {
       try { portState.dividends[h.ticker] = await getDividends(h.ticker); }
       catch (e) { portState.dividends[h.ticker] = { items: [] }; }
+    }));
+    contextLoaded = true;
+  }
+  // Próximo balance por tenencia (para el calendario de catalizadores de "Mi Día").
+  const needEarnings = holdings.filter(h => !(h.ticker in portState.earnings));
+  if (needEarnings.length) {
+    await Promise.all(needEarnings.map(async (h) => {
+      try { portState.earnings[h.ticker] = await getEarnings(h.ticker); }
+      catch (e) { portState.earnings[h.ticker] = { nextDate: null }; }
     }));
     contextLoaded = true;
   }
