@@ -969,6 +969,38 @@ select.port-input { cursor: pointer; }
 .news-source { color: var(--text-faint); font-size: 12px; }
 .news-empty { font-size: 13px; color: var(--text-mute); }
 
+/* ── Noticias & Macro (rediseño) ─────────────────────────────────────────── */
+.news-section-head { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.news-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 7px;
+  border-radius: 11px; background: var(--accent-soft); color: var(--accent-text); font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 700; }
+.news-filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 16px; }
+.news-filter-chip { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-soft); background: var(--surface-2);
+  color: var(--text-mute); font-family: 'IBM Plex Sans', sans-serif; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.12s; }
+.news-filter-chip:hover { color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); }
+.news-filter-chip.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+.news-empty-card { padding: 20px 22px; font-size: 13px; color: var(--text-mute); line-height: 1.6; }
+
+.news-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 8px; }
+.news-card-item { display: flex; flex-direction: column; gap: 9px; padding: 15px 16px; border-radius: 13px;
+  background: var(--bg-card); border: 1px solid var(--border-soft); box-shadow: var(--hairline);
+  transition: border-color 0.16s, transform 0.16s, box-shadow 0.16s; }
+.news-card-item:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow-card); }
+.news-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.news-ticker { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px;
+  background: var(--accent-soft); color: var(--accent-text); border: 1px solid oklch(0.70 0.19 291 / 0.35); cursor: pointer;
+  transition: background 0.15s, color 0.15s; }
+.news-ticker:hover { background: var(--accent); color: #fff; }
+.news-time { margin-left: auto; font-size: 11px; color: var(--text-faint); font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
+.news-headline { font-size: 13.5px; line-height: 1.45; color: var(--text); font-weight: 500; text-decoration: none;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+a.news-headline:hover { color: var(--accent-text); }
+.news-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; font-size: 11px; }
+.news-src { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.news-ext { color: var(--accent-text); font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity 0.15s; }
+.news-card-item:hover .news-ext { opacity: 1; }
+@media (hover: none) { .news-ext { opacity: 1; } }
+
 /* ---------- Riesgos / Catalizadores ---------- */
 .rc-card { padding: 22px 28px; }
 .rc-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; }
