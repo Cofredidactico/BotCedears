@@ -1377,6 +1377,14 @@ a.news-headline:hover { color: var(--accent-text); }
 /* Tarjeta de rebote (mean-reversion) — mismo layout que el setup, acento cian. */
 .rebound-card .short-plan { border-top-color: oklch(0.75 0.13 210 / 0.3); }
 .rebound-card .short-narrative.up { border-left-color: oklch(0.75 0.13 210); background: oklch(0.72 0.14 210 / 0.07); }
+/* Pullback en tendencia — acento verde. */
+.pullback-card .short-plan { border-top-color: oklch(0.76 0.18 152 / 0.3); }
+/* "Por explotar" (squeeze) — acento ámbar/naranja. */
+.squeeze-card .short-plan { border-top-color: oklch(0.75 0.16 55 / 0.3); }
+.short-narrative.squeeze { border-left-color: oklch(0.75 0.16 55); background: oklch(0.72 0.16 55 / 0.08); }
+.short-narrative.squeeze b { color: var(--text); font-family: 'IBM Plex Mono', monospace; }
+.short-narrative.squeeze b.up { color: var(--up-text); } .short-narrative.squeeze b.down { color: var(--down-text); }
+.squeeze-glyph { filter: saturate(1.2); }
 
 .short-more { margin-top: 12px; animation: shortMoreIn 0.2s ease; }
 @keyframes shortMoreIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }

@@ -4883,6 +4883,27 @@ function shortTradesPageHTML() {
   });
   rebounds.sort((a, b) => b.d.rebound.score - a.d.rebound.score);
 
+  // ── Pullbacks en tendencia (continuación) ──
+  const catOk = (ticker, d) => {
+    if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
+    if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
+    return true;
+  };
+  const confOk = (conf) => shortState.minConf === 'all' || (SHORT_CONF_RANK[conf] ?? 0) >= (SHORT_CONF_RANK[shortState.minConf] ?? 0);
+  const gatherFrom = (pred) => {
+    const seenX = new Set(); const acc = [];
+    for (const map of [dashState.data, watchState.data]) for (const [ticker, d] of Object.entries(map)) {
+      if (!d || seenX.has(ticker) || !pred(d)) continue; seenX.add(ticker); acc.push({ ticker, d });
+    }
+    return acc;
+  };
+  let pullbacks = gatherFrom(d => d.pullback?.qualifies);
+  const totalPullbacks = pullbacks.length;
+  pullbacks = pullbacks.filter(({ ticker, d }) => catOk(ticker, d) && confOk(d.pullback.confidence)).sort((a, b) => b.d.pullback.score - a.d.pullback.score);
+  let squeezes = gatherFrom(d => d.squeezeWatch?.qualifies);
+  const totalSqueezes = squeezes.length;
+  squeezes = squeezes.filter(({ ticker, d }) => catOk(ticker, d) && confOk(d.squeezeWatch.confidence)).sort((a, b) => b.d.squeezeWatch.score - a.d.squeezeWatch.score);
+
   const loadingCurated = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
   const opt = (val, cur, txt) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${txt}</option>`;
   const seg = (val, txt) => `<button class="short-seg-btn ${shortState.direction === val ? 'active' : ''}" data-short-dir="${val}">${txt}</button>`;
@@ -4918,7 +4939,107 @@ function shortTradesPageHTML() {
     <div class="short-grid">
       ${rebounds.map(({ ticker, d }) => reboundCardHTML(ticker, d)).join('')}
     </div>`}
+
+    ${sectionTitleHTML('🏄 Pullbacks en tendencia (continuación)', 'trend', 'margin-top:34px;')}
+    <div class="dash-intro">Lo contrario al rebote: en vez de comprar sobreventa contra la tendencia, buscamos el <strong>retroceso a favor de la corriente</strong>. Tendencias alcistas sanas (EMAs alineadas) que <strong>descansaron sobre la EMA20/50</strong> y ofrecen una recompra de continuación — mayor probabilidad que ir contra la tendencia. Acciones y CEDEARs.</div>
+    <div class="short-count">${pullbacks.length}${totalPullbacks !== pullbacks.length ? ` de ${totalPullbacks}` : ''} pullback(s)${shortState.category !== 'all' || shortState.minConf !== 'all' ? ' con los filtros actuales' : ''}</div>
+    ${!pullbacks.length ? `<div class="card watch-empty">${loadingCurated ? 'Buscando pullbacks en tendencia…' : totalPullbacks ? 'Ningún pullback pasa los filtros actuales.' : 'No hay retrocesos claros en tendencia alcista ahora mismo.'}</div>` : `
+    <div class="short-grid">
+      ${pullbacks.map(({ ticker, d }) => pullbackCardHTML(ticker, d)).join('')}
+    </div>`}
+
+    ${sectionTitleHTML('💥 Por explotar (squeeze de volatilidad)', 'zap', 'margin-top:34px;')}
+    <div class="dash-intro">Activos con las <strong>Bandas de Bollinger comprimidas</strong> dentro de las de Keltner: la volatilidad está en mínimos y suele preceder a un <strong>movimiento fuerte</strong>. La dirección todavía no está definida — se marcan los <strong>niveles de ruptura</strong> (bandas) y un sesgo tentativo. La idea es <strong>anticiparse</strong> y confirmar cuando rompa.</div>
+    <div class="short-count">${squeezes.length}${totalSqueezes !== squeezes.length ? ` de ${totalSqueezes}` : ''} activo(s) comprimido(s)${shortState.category !== 'all' || shortState.minConf !== 'all' ? ' con los filtros actuales' : ''}</div>
+    ${!squeezes.length ? `<div class="card watch-empty">${loadingCurated ? 'Buscando compresiones de volatilidad…' : totalSqueezes ? 'Ningún squeeze pasa los filtros actuales.' : 'No hay activos en compresión de volatilidad significativa ahora mismo.'}</div>` : `
+    <div class="short-grid">
+      ${squeezes.map(({ ticker, d }) => squeezeCardHTML(ticker, d)).join('')}
+    </div>`}
   `;
+}
+
+function pullbackCardHTML(ticker, d) {
+  const s = d.pullback;
+  const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
+  const cat = AR_TICKERS.has(ticker) ? 'dcv-cat-arg' : d.category === 'ETF' ? 'dcv-cat-etf' : d.category === 'Cripto' ? 'dcv-cat-crypto' : 'dcv-cat-cedear';
+  const catLabel = AR_TICKERS.has(ticker) ? '🇦🇷 Arg' : esc(d.category ?? '');
+  const primary = s.triggers.filter(t => t.primary), secondary = s.triggers.filter(t => !t.primary);
+  return `
+    <div class="card short-card pullback-card" data-short-ticker="${esc(ticker)}" style="--dir-color:oklch(0.76 0.18 152);">
+      <div class="short-head">
+        <div>
+          <div class="short-ticker">${esc(ticker)} <span class="dcv-cat ${cat}">${catLabel}</span></div>
+          <div class="short-name">${esc(d.name ?? '')}</div>
+        </div>
+        <div class="short-head-right">
+          <span class="short-dir-badge" style="color:oklch(0.87 0.14 152); background:oklch(0.32 0.11 152 / 0.5);">🏄 Pullback</span>
+          <div class="short-conf" style="color:${conf};">
+            <div class="short-conf-score">${s.score}</div>
+            <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
+      ${s.narrative ? `<div class="short-narrative up">${s.narrative}</div>` : ''}
+      <div class="short-plan">
+        <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
+        <div class="short-plan-cell"><span>Objetivo</span><b class="up">${fmtUsd(s.target)}</b></div>
+        <div class="short-plan-cell"><span>Stop</span><b class="down">${fmtUsd(s.stop)}</b></div>
+        <div class="short-plan-cell"><span>Movimiento esp.</span><b class="up">+${s.expectedMovePct.toFixed(1)}%</b></div>
+        <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
+        <div class="short-plan-cell"><span>Vigencia</span><b>~${s.timeStopDays} ruedas</b></div>
+      </div>
+      <button class="short-more-btn" data-short-more aria-expanded="false">Ver detalle <span class="short-more-caret">▾</span></button>
+      <div class="short-more" hidden>
+        <div class="short-triggers">
+          ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
+          ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
+        </div>
+        <div class="short-manage">
+          <span title="Confirmá la continuación si el precio supera el máximo de la última rueda">🎯 Gatillo: superar <b>${fmtUsd(s.entryTrigger)}</b></span>
+          <span title="Si cierra debajo del stop, el pullback se profundizó de más">✖ Invalida: cierre bajo <b>${fmtUsd(s.stop)}</b></span>
+          <span title="Continuaciones de corto plazo: si no retoma en ~3 ruedas, revisá">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
+        </div>
+        ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function squeezeCardHTML(ticker, d) {
+  const s = d.squeezeWatch;
+  const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
+  const cat = AR_TICKERS.has(ticker) ? 'dcv-cat-arg' : d.category === 'ETF' ? 'dcv-cat-etf' : d.category === 'Cripto' ? 'dcv-cat-crypto' : 'dcv-cat-cedear';
+  const catLabel = AR_TICKERS.has(ticker) ? '🇦🇷 Arg' : esc(d.category ?? '');
+  const biasTxt = s.bias === 'alcista' ? 'sesgo alcista (precio sobre la EMA20)' : s.bias === 'bajista' ? 'sesgo bajista (precio bajo la EMA20)' : 'sin sesgo claro';
+  const biasCls = s.bias === 'alcista' ? 'up' : s.bias === 'bajista' ? 'down' : '';
+  return `
+    <div class="card short-card squeeze-card" data-short-ticker="${esc(ticker)}" style="--dir-color:oklch(0.75 0.16 55);">
+      <div class="short-head">
+        <div>
+          <div class="short-ticker">${esc(ticker)} <span class="dcv-cat ${cat}">${catLabel}</span></div>
+          <div class="short-name">${esc(d.name ?? '')}</div>
+        </div>
+        <div class="short-head-right">
+          <span class="short-dir-badge" style="color:oklch(0.85 0.14 55); background:oklch(0.40 0.12 55 / 0.35);">💥 ${s.justFired ? 'Liberándose' : 'Comprimido'}</span>
+          <div class="short-conf" style="color:${conf};">
+            <div class="short-conf-score">${s.score}</div>
+            <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
+      <div class="short-narrative squeeze"><span class="squeeze-glyph">💥</span> <b>Volatilidad comprimida</b> hace <b>${s.bars} rueda(s)</b>${s.justFired ? ' — <b class="up">recién liberándose</b>' : ' — ruptura próxima'}. Movimiento esperado al romper: <b>±${s.expectedMovePct.toFixed(1)}%</b>. Hoy, ${biasCls ? `<b class="${biasCls}">${biasTxt}</b>` : biasTxt}.</div>
+      <div class="short-plan">
+        <div class="short-plan-cell"><span>Gatillo al alza</span><b class="up">${fmtUsd(s.upperTrigger)}</b></div>
+        <div class="short-plan-cell"><span>Gatillo a la baja</span><b class="down">${fmtUsd(s.lowerTrigger)}</b></div>
+        <div class="short-plan-cell"><span>Comprimido</span><b>${s.bars} ruedas</b></div>
+        <div class="short-plan-cell"><span>Movimiento esp.</span><b>±${s.expectedMovePct.toFixed(1)}%</b></div>
+      </div>
+      <div class="short-manage" style="margin-top:12px;">
+        <span title="Confirmá el largo si cierra por encima de la banda superior">▲ Largo si rompe <b>${fmtUsd(s.upperTrigger)}</b></span>
+        <span title="Confirmá el corto si cierra por debajo de la banda inferior">▼ Corto si pierde <b>${fmtUsd(s.lowerTrigger)}</b></span>
+      </div>
+    </div>`;
 }
 
 function reboundCardHTML(ticker, d) {
@@ -9619,6 +9740,8 @@ async function computeLightSignal(ticker, macro) {
   const planRaw = computePlan(technical, scoreResult.score).raw;
   const setup = shortTermSetup(technical, candles); // radar de trades cortos, sin pedidos extra
   const rebound = reboundSetup(technical, candles); // rebote de sobreventa de 1-2 días, sin pedidos extra
+  const pullback = pullbackSetup(technical, candles); // retroceso a favor de tendencia (continuación)
+  const squeeze = squeezeSetup(technical, candles); // "por explotar": compresión de volatilidad
   const gap = computeGap(candles, technical); // radar de gaps de apertura, sin pedidos extra
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
@@ -9642,6 +9765,8 @@ async function computeLightSignal(ticker, macro) {
     planRaw, // stop/objetivos numéricos (USD) — para la columna de stop del Portfolio
     setup, // setup de trade corto (o null) — para el Radar de Trades Cortos
     rebound, // rebote de sobreventa de 1-2 días (o null) — sección de rebotes en Trades Cortos
+    pullback, // retroceso a favor de tendencia (o null) — sección de pullbacks en Trades Cortos
+    squeezeWatch: squeeze, // compresión de volatilidad (o null) — sección "por explotar"
     gap, // hueco de apertura de la última rueda (o null) — para el Radar de Gaps
   };
 }
@@ -9833,6 +9958,86 @@ function reboundNarrative(technical, price, target, rsiNow) {
   const pct = (target - price) / price * 100;
   const proj = target > price ? ` Posible rebote de <b class="up">+${pct.toFixed(1)}%</b> hacia la media (${fmtUsd(target)}).` : '';
   return `🔄 ${lead}.${proj}`;
+}
+
+/* ─────────────────────── pullback en tendencia (continuación) ───────────────
+ * A diferencia del rebote (sobreventa CONTRA la tendencia), esto busca el
+ * retroceso a favor de la corriente: una tendencia alcista sana que "descansa"
+ * sobre la EMA20/50 y ofrece una recompra de continuación (mayor probabilidad
+ * que ir contra la tendencia). Solo largos en tendencia alcista alineada. */
+function pullbackSetup(technical, candles) {
+  const c = candles.c, l = candles.l, h = candles.h, n = c.length;
+  if (n < 30) return null;
+  const price = c[n - 1], atr = technical.atr;
+  if (!(atr > 0) || isNaN(atr)) return null;
+  const e20 = technical.ema20, e50 = technical.ema50, e200 = technical.ema200;
+  const uptrend = e20 && e50 && e200 && e20 > e50 && e50 > e200 && price > e200;
+  if (!uptrend) return null; // pullback SOLO a favor de una tendencia alcista alineada
+  const strongTrend = technical.adx > 20;
+  const triggers = [], risks = [];
+  let score = 0;
+  const add = (pts, label, primary = false) => { score += pts; triggers.push({ label, primary }); };
+  add(strongTrend ? 22 : 12, `Tendencia alcista${strongTrend ? ` fuerte (ADX ${technical.adx.toFixed(0)})` : ''} — EMAs alineadas`, true);
+  // El retroceso: cerca de la EMA20 (leve) o EMA50 (más profundo).
+  const nearE20 = Math.abs(price - e20) / price <= 0.02;
+  const nearE50 = price <= e20 && price >= e50 * 0.985 && Math.abs(price - e50) / price <= 0.03;
+  if (nearE20) add(22, 'Retrocedió a la EMA20 (zona de recompra)', true);
+  else if (nearE50) add(20, 'Retrocedió a la EMA50 (soporte dinámico más profundo)', true);
+  else if (price > e20 && (price - e20) / price < 0.05) add(10, 'Descansando cerca de la EMA20');
+  else return null; // sin un retroceso claro no es un pullback
+  const rArr = rsi(c, 14); const rNow = technical.rsi, rPrev = rArr[n - 2];
+  if (!isNaN(rNow) && rNow >= 40 && rNow <= 58) add(12, `RSI en zona de pausa (${rNow.toFixed(0)}) — ni caro ni sobrevendido`);
+  if (rPrev != null && rNow > rPrev && rNow < 60) add(8, 'RSI girando al alza');
+  if (technical.candlePattern?.bias === 'bullish') add(12, technical.candlePattern.label, true);
+  let downDays = 0;
+  for (let i = n - 1; i > Math.max(0, n - 5); i--) { if (c[i] < c[i - 1]) downDays++; else break; }
+  if (downDays >= 1 && downDays <= 3) add(6, `Retroceso corto de ${downDays} rueda(s)`);
+  if (technical.divergence?.type === 'bearish') { score -= 8; risks.push('Divergencia bajista — el retroceso podría profundizar'); }
+  if (technical.obvConfirms === false) risks.push('El volumen no está acompañando el retroceso');
+  score = Math.max(0, Math.min(100, score));
+  const qualifies = triggers.some(t => t.primary) && score >= 48;
+  const swingHigh = Math.max(...h.slice(-15));
+  const target = Math.max(swingHigh, technical.resistance ?? 0, price + 1.5 * atr);
+  const swingLow = Math.min(...l.slice(-4));
+  const stop = Math.min(e50 - 0.3 * atr, swingLow - 0.3 * atr);
+  const risk = price - stop, reward = target - price;
+  const rr = risk > 0 && reward > 0 ? reward / risk : null;
+  const expectedMovePct = (target - price) / price * 100;
+  return {
+    qualifies, score, triggers, risks,
+    entry: price, target, stop, rr, entryTrigger: h[n - 1], expectedMovePct,
+    confidence: score >= 72 ? 'muy alta' : score >= 60 ? 'alta' : score >= 48 ? 'media' : 'baja',
+    timeStopDays: 3,
+    narrative: pullbackNarrative(technical, price, target, nearE20 ? e20 : e50, nearE20 ? 'EMA20' : 'EMA50'),
+  };
+}
+function pullbackNarrative(technical, price, target, emaLevel, emaName) {
+  const pct = (target - price) / price * 100;
+  const proj = target > price ? ` Si retoma, apunta al máximo reciente en <b>${fmtUsd(target)}</b> (<b class="up">+${pct.toFixed(1)}%</b>).` : '';
+  return `📈 Tendencia alcista sana que <b>descansó sobre la ${esc(emaName)}</b> (${fmtUsd(emaLevel)}) — retroceso a favor de la corriente.${proj}`;
+}
+
+/* ─────────────────────── "por explotar": squeeze de volatilidad ─────────────
+ * Activos con las Bandas de Bollinger comprimidas dentro de las de Keltner
+ * (squeeze): la volatilidad está en mínimos y suele preceder a un movimiento
+ * fuerte. La dirección todavía no está definida — se marcan los niveles de
+ * ruptura (bandas) y un sesgo tentativo por la posición vs. la EMA20. */
+function squeezeSetup(technical, candles) {
+  const sq = technical.squeeze;
+  if (!sq || (!sq.active && !sq.justFired)) return null;
+  const c = candles.c, n = c.length, price = c[n - 1], atr = technical.atr;
+  if (!(atr > 0) || technical.bbUpper == null || technical.bbLower == null) return null;
+  const bars = sq.barsInSqueeze ?? 0;
+  if (!sq.justFired && bars < 3) return null; // muy poco comprimido todavía
+  const bias = price > technical.ema20 ? 'alcista' : price < technical.ema20 ? 'bajista' : 'neutral';
+  const expectedMovePct = (atr / price) * 100 * 2; // una ruptura suele mover ~2 ATR
+  const score = Math.min(100, 42 + bars * 3 + (sq.justFired ? 20 : 0));
+  return {
+    qualifies: true, justFired: !!sq.justFired, bars,
+    upperTrigger: technical.bbUpper, lowerTrigger: technical.bbLower, price,
+    bias, expectedMovePct, score,
+    confidence: sq.justFired ? 'alta' : bars >= 8 ? 'alta' : 'media',
+  };
 }
 
 function shortTermSetup(technical, candles) {
