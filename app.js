@@ -4799,7 +4799,26 @@ const shortState = {
   category: 'all',  // 'all' | 'arg' | 'cedear'
   sort: 'score',    // 'score' | 'rr' | 'move'
   riskPct: 1,       // % de la cuenta a arriesgar por trade (position sizing)
+  earnings: {},     // ticker -> próximo balance (carga perezosa para el aviso de earnings cercano)
+  earningsLoading: false,
+  hideEarnings: false, // ocultar setups con balance ≤5 días
 };
+
+/* ── Seguimiento de trades cortos tomados (localStorage) ─────────────────────
+ * Marcás un setup/rebote/pullback como "tomado" y se sigue en vivo: R actual,
+ * progreso al objetivo, P&L y vigencia, usando el precio del momento. */
+const SHORT_TRADES_KEY = 'icp_short_trades';
+function getShortTrades() {
+  try { const a = JSON.parse(localStorage.getItem(SHORT_TRADES_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+function saveShortTrades(list) { try { localStorage.setItem(SHORT_TRADES_KEY, JSON.stringify(list.slice(0, 40))); } catch { /* no-op */ } }
+function addShortTrade(t) {
+  const list = getShortTrades();
+  if (list.some(x => x.ticker === t.ticker && x.kind === t.kind)) return list; // no duplicar el mismo tipo por ticker
+  list.unshift({ ...t, id: `${t.ticker}-${t.kind}-${Date.now()}`, date: new Date().toISOString().slice(0, 10) });
+  saveShortTrades(list); return list;
+}
+function removeShortTrade(id) { const list = getShortTrades().filter(x => x.id !== id); saveShortTrades(list); return list; }
 
 // Position sizing: cuántas unidades comprar/vender arriesgando `riskPct` del
 // total de cuenta (Configuración/Portfolio) hasta el stop. Para CEDEARs se
@@ -4830,6 +4849,87 @@ function shortDirMeta(dir) {
     : { label: 'Largo', arrow: '▲', color: 'var(--up-text)', bg: 'var(--up-soft)', word: 'alcista' };
 }
 
+// Aviso de balance (earnings) cercano: catalizador que puede romper cualquier setup técnico.
+function earningsSoonDays(ticker) {
+  const e = shortState.earnings[ticker];
+  if (!e?.nextDate) return null;
+  const d = daysUntil(e.nextDate);
+  return d != null && d >= 0 && d <= 5 ? d : null;
+}
+function earningsSoonBadge(ticker) {
+  const d = earningsSoonDays(ticker);
+  if (d == null) return '';
+  return `<span class="short-earn-badge" title="Reporta balance ${d === 0 ? 'hoy' : `en ${d} día(s)`} — un earnings cercano puede disparar movimientos que ningún indicador técnico anticipa. Cuidado.">⚠ Balance ${d === 0 ? 'hoy' : `en ${d}d`}</span>`;
+}
+// Botón "Tomar este trade" → guarda el trade en el seguimiento.
+function shortTakeBtn(ticker, kind, dir, entry, target, stop) {
+  if (entry == null || target == null || stop == null) return '';
+  return `<button class="short-take" data-short-take="${esc(ticker)}" data-take-kind="${kind}" data-take-dir="${esc(dir)}" data-take-entry="${entry}" data-take-target="${target}" data-take-stop="${stop}">📌 Tomar este trade (seguimiento)</button>`;
+}
+// Carga perezosa de earnings de los tickers visibles (para el aviso de balance cercano).
+async function loadShortEarnings() {
+  if (shortState.earningsLoading) return;
+  const tickers = [...new Set([...els.report.querySelectorAll('[data-short-ticker]')].map(el => el.dataset.shortTicker))]
+    .filter(t => t && !(t in shortState.earnings)).slice(0, 30);
+  if (!tickers.length) return;
+  shortState.earningsLoading = true;
+  try {
+    await Promise.all(tickers.map(async (t) => {
+      try { shortState.earnings[t] = await getEarnings(t); } catch { shortState.earnings[t] = { nextDate: null }; }
+    }));
+  } finally {
+    shortState.earningsLoading = false;
+    if (state.view === 'shorttrades' && !state.asset) renderReport();
+  }
+}
+
+/* Seguimiento de trades cortos tomados: R actual, P&L y progreso al objetivo en
+ * vivo, usando el último precio del universo/watchlist. */
+function shortTakenTradesHTML() {
+  const trades = getShortTrades();
+  if (!trades.length) return '';
+  const kindLabel = { setup: 'Setup', rebound: 'Rebote', pullback: 'Pullback' };
+  const row = (t) => {
+    const d = dashState.data[t.ticker] || watchState.data[t.ticker];
+    const price = d?.price ?? null;
+    const long = t.direction !== 'short';
+    let rNow = null, progress = null, plPct = null, status = 'en curso', statusCls = 'flat';
+    if (price != null) {
+      plPct = (long ? price - t.entry : t.entry - price) / t.entry * 100;
+      const riskUnit = long ? t.entry - t.stop : t.stop - t.entry;
+      if (riskUnit > 0) rNow = (long ? price - t.entry : t.entry - price) / riskUnit;
+      const span = long ? t.target - t.entry : t.entry - t.target;
+      if (span > 0) progress = (long ? price - t.entry : t.entry - price) / span * 100;
+      if (long ? price <= t.stop : price >= t.stop) { status = 'stop tocado'; statusCls = 'down'; }
+      else if (long ? price >= t.target : price <= t.target) { status = 'objetivo alcanzado'; statusCls = 'up'; }
+    }
+    const days = Math.max(0, Math.round((Date.now() - new Date(t.date + 'T00:00:00').getTime()) / 86400000));
+    return `<div class="stk-row">
+      <div class="stk-head">
+        <span class="stk-tk" data-short-ticker="${esc(t.ticker)}">${esc(t.ticker)}</span>
+        <span class="stk-kind">${kindLabel[t.kind] ?? esc(t.kind)} ${long ? '▲' : '▼'}</span>
+        <span class="stk-status ${statusCls}">${status}</span>
+        <span class="stk-age">hace ${days}d</span>
+        <button class="stk-close" data-short-close="${esc(t.id)}" title="Cerrar seguimiento" aria-label="Cerrar seguimiento de ${esc(t.ticker)}">×</button>
+      </div>
+      <div class="stk-metrics">
+        <span>Entrada <b>${fmtUsd(t.entry)}</b></span>
+        <span>Ahora <b>${price != null ? fmtUsd(price) : 'N/D'}</b></span>
+        <span>P&amp;L <b class="${plPct == null ? '' : plPct >= 0 ? 'up' : 'down'}">${plPct == null ? 'N/D' : `${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%`}</b></span>
+        <span>R actual <b class="${rNow == null ? '' : rNow >= 0 ? 'up' : 'down'}">${rNow == null ? 'N/D' : `${rNow >= 0 ? '+' : ''}${rNow.toFixed(2)}R`}</b></span>
+        <span>Obj <b class="up">${fmtUsd(t.target)}</b> · Stop <b class="down">${fmtUsd(t.stop)}</b></span>
+      </div>
+      ${progress != null ? `<div class="stk-bar"><i style="width:${Math.max(0, Math.min(100, progress))}%; background:${progress >= 0 ? 'var(--up)' : 'var(--down)'};"></i></div>` : ''}
+    </div>`;
+  };
+  return `
+    ${sectionTitleHTML('📌 Tus trades cortos en curso', 'bookmark')}
+    <div class="card stk-card">
+      ${trades.map(row).join('')}
+      <div class="stk-foot">Seguimiento manual guardado en este navegador. El R actual y el P&amp;L usan el último precio real. Cerralo cuando salgas de la operación. No es asesoramiento.</div>
+    </div>`;
+}
+
 function shortTradesPageHTML() {
   // Combina universo curado + watchlist (sin duplicar), tomando el setup ya
   // calculado por computeLightSignal — sin pedidos extra.
@@ -4856,6 +4956,7 @@ function shortTradesPageHTML() {
     if (shortState.minRR > 0 && !(s.rr != null && s.rr >= shortState.minRR)) return false;
     if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
     if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
+    if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
     return true;
   });
   // ── Orden ──
@@ -4881,6 +4982,7 @@ function shortTradesPageHTML() {
     if (shortState.minConf !== 'all' && (SHORT_CONF_RANK[d.rebound.confidence] ?? 0) < (SHORT_CONF_RANK[shortState.minConf] ?? 0)) return false;
     if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
     if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
+    if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
     return true;
   });
   rebounds.sort((a, b) => b.d.rebound.score - a.d.rebound.score);
@@ -4889,6 +4991,7 @@ function shortTradesPageHTML() {
   const catOk = (ticker, d) => {
     if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
     if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
+    if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
     return true;
   };
   const confOk = (conf) => shortState.minConf === 'all' || (SHORT_CONF_RANK[conf] ?? 0) >= (SHORT_CONF_RANK[shortState.minConf] ?? 0);
@@ -4917,6 +5020,8 @@ function shortTradesPageHTML() {
       <strong>⚠ Riesgo alto:</strong> el trading de corto plazo es especulativo. Esto es un <strong>tamiz técnico</strong>, no una recomendación ni una garantía — muchos setups fallan. Operá siempre con stop, arriesgá solo lo que puedas perder, y recordá que un balance (earnings) cercano puede disparar movimientos que ningún indicador anticipa.
     </div>
 
+    ${shortTakenTradesHTML()}
+
     ${(() => {
       const bull = longN + totalRebounds + totalPullbacks, bear = shortN;
       const bias = bull > bear * 1.3 ? { t: 'sesgo comprador', cls: 'up' } : bear > bull * 1.3 ? { t: 'sesgo vendedor', cls: 'down' } : { t: 'sesgo mixto', cls: 'flat' };
@@ -4942,6 +5047,7 @@ function shortTradesPageHTML() {
       <label class="short-ctrl"><span>Categoría</span><select id="short-cat" class="watch-select">${opt('all', shortState.category, 'Todas')}${opt('arg', shortState.category, '🇦🇷 Argentina')}${opt('cedear', shortState.category, 'CEDEAR')}</select></label>
       <label class="short-ctrl"><span>Ordenar</span><select id="short-sort" class="watch-select">${opt('score', shortState.sort, 'Score')}${opt('rr', shortState.sort, 'Riesgo/Beneficio')}${opt('move', shortState.sort, 'Rango esperado')}</select></label>
       <label class="short-ctrl"><span>Riesgo/​trade</span><select id="short-risk" class="watch-select">${opt('0.5', String(shortState.riskPct), '0,5% cuenta')}${opt('1', String(shortState.riskPct), '1% cuenta')}${opt('2', String(shortState.riskPct), '2% cuenta')}</select></label>
+      <label class="short-ctrl short-ctrl-check"><input type="checkbox" id="short-hide-earn" ${shortState.hideEarnings ? 'checked' : ''} /> <span>Ocultar con balance ≤5d</span></label>
     </div>
     <div class="short-count">${rows.length} de ${totalQualifying} setup(s)${shortState.direction !== 'all' || shortState.minConf !== 'all' || shortState.minRR > 0 || shortState.category !== 'all' ? ' con los filtros actuales' : ''}</div>
 
@@ -4990,7 +5096,7 @@ function pullbackCardHTML(ticker, d) {
           <div class="short-name">${esc(d.name ?? '')}</div>
         </div>
         <div class="short-head-right">
-          <span class="short-dir-badge" style="color:oklch(0.87 0.14 152); background:oklch(0.32 0.11 152 / 0.5);">🏄 Pullback</span>
+          <span class="short-dir-badge" style="color:oklch(0.87 0.14 152); background:oklch(0.32 0.11 152 / 0.5);">🏄 Pullback</span>${earningsSoonBadge(ticker)}
           <div class="short-conf" style="color:${conf};">
             <div class="short-conf-score">${s.score}</div>
             <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
@@ -5019,6 +5125,7 @@ function pullbackCardHTML(ticker, d) {
           <span title="Continuaciones de corto plazo: si no retoma en ~3 ruedas, revisá">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
         </div>
         ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
+        ${shortTakeBtn(ticker, 'pullback', 'long', s.entry, s.target, s.stop)}
       </div>
     </div>`;
 }
@@ -5038,7 +5145,7 @@ function squeezeCardHTML(ticker, d) {
           <div class="short-name">${esc(d.name ?? '')}</div>
         </div>
         <div class="short-head-right">
-          <span class="short-dir-badge" style="color:oklch(0.85 0.14 55); background:oklch(0.40 0.12 55 / 0.35);">💥 ${s.justFired ? 'Liberándose' : 'Comprimido'}</span>
+          <span class="short-dir-badge" style="color:oklch(0.85 0.14 55); background:oklch(0.40 0.12 55 / 0.35);">💥 ${s.justFired ? 'Liberándose' : 'Comprimido'}</span>${earningsSoonBadge(ticker)}
           <div class="short-conf" style="color:${conf};">
             <div class="short-conf-score">${s.score}</div>
             <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
@@ -5074,7 +5181,7 @@ function reboundCardHTML(ticker, d) {
           <div class="short-name">${esc(d.name ?? '')}</div>
         </div>
         <div class="short-head-right">
-          <span class="short-dir-badge" style="color:oklch(0.82 0.12 210); background:oklch(0.45 0.10 210 / 0.22);">🔄 Rebote</span>
+          <span class="short-dir-badge" style="color:oklch(0.82 0.12 210); background:oklch(0.45 0.10 210 / 0.22);">🔄 Rebote</span>${earningsSoonBadge(ticker)}
           <div class="short-conf" style="color:${conf};">
             <div class="short-conf-score">${s.score}</div>
             <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
@@ -5103,6 +5210,7 @@ function reboundCardHTML(ticker, d) {
           <span title="Los rebotes son de muy corto plazo: si no se activa en ~2 ruedas, conviene salir">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
         </div>
         ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
+        ${shortTakeBtn(ticker, 'rebound', 'long', s.entry, s.target, s.stop)}
       </div>
     </div>`;
 }
@@ -5125,7 +5233,7 @@ function shortTradeCardHTML(ticker, d) {
           <div class="short-name">${esc(d.name ?? '')}</div>
         </div>
         <div class="short-head-right">
-          <span class="short-dir-badge" style="color:${dm.color}; background:${dm.bg};">${dm.arrow} ${dm.label}</span>
+          <span class="short-dir-badge" style="color:${dm.color}; background:${dm.bg};">${dm.arrow} ${dm.label}</span>${earningsSoonBadge(ticker)}
           <div class="short-conf" style="color:${conf};">
             <div class="short-conf-score">${s.score}</div>
             <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
@@ -5155,6 +5263,7 @@ function shortTradeCardHTML(ticker, d) {
         </div>
         ${shortSizingHTML(sizing, s)}
         ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
+        ${shortTakeBtn(ticker, 'setup', s.direction, s.entry, s.target1, s.stop)}
         <div class="short-reliab" data-reliab-slot="${esc(ticker)}">
           ${cached ? shortReliabBodyHTML(cached, s.direction, s.rr) : cachedErr ? `<div class="short-reliab-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>` : `<button class="short-reliab-btn" data-reliab-ticker="${esc(ticker)}">📊 Medir confiabilidad + edge del setup</button>`}
         </div>
@@ -5217,6 +5326,23 @@ function wireShortTradesEvents() {
   document.getElementById('short-cat')?.addEventListener('change', e => { shortState.category = e.target.value; rerender(); });
   document.getElementById('short-sort')?.addEventListener('change', e => { shortState.sort = e.target.value; rerender(); });
   document.getElementById('short-risk')?.addEventListener('change', e => { shortState.riskPct = Number(e.target.value); rerender(); });
+  document.getElementById('short-hide-earn')?.addEventListener('change', e => { shortState.hideEarnings = e.target.checked; rerender(); });
+  // Tomar un trade → seguimiento; cerrar seguimiento.
+  els.report.querySelectorAll('[data-short-take]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      addShortTrade({
+        ticker: btn.dataset.shortTake, kind: btn.dataset.takeKind, direction: btn.dataset.takeDir,
+        entry: parseFloat(btn.dataset.takeEntry), target: parseFloat(btn.dataset.takeTarget), stop: parseFloat(btn.dataset.takeStop),
+      });
+      showToast(`${btn.dataset.shortTake} agregado a tu seguimiento de trades cortos`, 'success');
+      rerender();
+    });
+  });
+  els.report.querySelectorAll('[data-short-close]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); removeShortTrade(btn.dataset.shortClose); rerender(); });
+  });
+  loadShortEarnings(); // carga perezosa de balances de los tickers visibles (para el aviso)
   els.report.querySelectorAll('[data-short-dir]').forEach(el => {
     el.addEventListener('click', () => { shortState.direction = el.dataset.shortDir; rerender(); });
   });
