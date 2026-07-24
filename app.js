@@ -147,6 +147,7 @@ const portState = {
   cclHistory: null, // serie histórica del CCL (argentinadatos) para medir la cartera en dólares reales
   dividends: {}, // ticker -> historial de dividendos, para el yield agregado de la cartera
   earnings: {}, // ticker -> próximo balance (para el calendario de catalizadores de "Mi Día")
+  rotation: undefined, rotationKey: null, // idea de rotación sectorial (computada en la capa de datos)
   compact: lsGetSafe('icp_port_compact', '0') === '1',
   privacy: lsGetSafe('icp_port_privacy', '0') === '1',
   allocAmount: '', allocResult: null, // asignador "¿qué compro con AR$X?"
@@ -7145,6 +7146,166 @@ function portfolioBenchmarkVerdict(stats) {
   return { usdPct, realPct };
 }
 
+/* ═══════════════════ ROTACIÓN SECTORIAL INTELIGENTE ════════════════════════
+ * Detecta si la cartera está sobre-cargada en un sector, mide si ese sector
+ * viene "corrido" (RSI alto, cerca de máximos de 52 semanas, mucho run-up, muy
+ * por encima de la EMA200) y busca en el universo curado un destino de rotación:
+ * un papel de OTRO sector, con buen score, golpeado (lejos de su máximo o cerca
+ * de soporte), con baja correlación de retornos contra tu sector cargado y —
+ * cuando hay dato— barato por fundamentales (P/E vs. su sector). Todo con datos
+ * ya calculados; nada se inventa. No es una orden: es una idea para analizar. */
+const ROTATION_CONC_THRESHOLD = 0.35; // ≥35% del valor en un sector = "cargado"
+
+function sectorStretchProfile(rows) {
+  if (!rows.length) return { stretchScore: 0, reasons: [], avgRsi: null };
+  let rsiSum = 0, rsiN = 0, nearHigh = 0, runupSum = 0, runupN = 0, aboveSum = 0, aboveN = 0;
+  for (const r of rows) {
+    const c = r.d.closes, n = c.length, price = c[n - 1];
+    if (r.d.rsi != null) { rsiSum += r.d.rsi; rsiN++; }
+    const hi = Math.max(...c.slice(-252));
+    if (hi > 0 && (price - hi) / hi > -0.05) nearHigh++;
+    if (n > 63) { runupSum += (price / c[n - 64] - 1) * 100; runupN++; }
+    const e = ema(c, 200); const e200 = e[e.length - 1];
+    if (e200 > 0) { aboveSum += (price / e200 - 1) * 100; aboveN++; }
+  }
+  const avgRsi = rsiN ? rsiSum / rsiN : null;
+  const nearHighShare = nearHigh / rows.length;
+  const avgRunup = runupN ? runupSum / runupN : null;
+  const avgAbove = aboveN ? aboveSum / aboveN : null;
+  const reasons = [];
+  if (avgRsi != null && avgRsi >= 65) reasons.push(`RSI promedio ${avgRsi.toFixed(0)} — sobrecomprado`);
+  if (nearHighShare >= 0.5) reasons.push(`${nearHigh} de ${rows.length} ${rows.length === 1 ? 'está' : 'están'} cerca de máximos de 52 semanas`);
+  if (avgRunup != null && avgRunup >= 15) reasons.push(`subió ~${avgRunup.toFixed(0)}% en 3 meses`);
+  if (avgAbove != null && avgAbove >= 12) reasons.push(`cotiza ~${avgAbove.toFixed(0)}% arriba de su promedio de 200 días`);
+  let stretch = 0;
+  if (avgRsi != null) stretch += Math.max(0, Math.min(35, (avgRsi - 50) * 1.75));
+  stretch += nearHighShare * 30;
+  if (avgRunup != null) stretch += Math.max(0, Math.min(20, avgRunup));
+  if (avgAbove != null) stretch += Math.max(0, Math.min(15, avgAbove));
+  return { stretchScore: Math.round(Math.min(100, stretch)), reasons, avgRsi, nearHighShare, avgRunup };
+}
+
+function aggregateSectorReturns(rows) {
+  const w = rows.filter(r => r.d?.closes?.length >= 60);
+  if (!w.length) return null;
+  const minLen = Math.min(...w.map(r => r.d.closes.length));
+  const agg = new Array(minLen).fill(0);
+  for (const r of w) {
+    const c = r.d.closes.slice(-minLen), base = c[0] || 1, val = r.value ?? 1;
+    for (let i = 0; i < minLen; i++) agg[i] += (c[i] / base) * val;
+  }
+  const rets = [];
+  for (let i = 1; i < agg.length; i++) rets.push(agg[i] / agg[i - 1] - 1);
+  return rets;
+}
+
+function candidateMetrics(d, owReturns) {
+  const c = d.closes, n = c.length, price = c[n - 1];
+  const hi = Math.max(...c.slice(-252));
+  const pctFromHigh = hi > 0 ? (price - hi) / hi * 100 : 0; // negativo = debajo del máximo
+  let correlation = null;
+  if (owReturns?.length) {
+    const rets = [];
+    for (let i = 1; i < n; i++) rets.push(c[i] / c[i - 1] - 1);
+    const k = Math.min(rets.length, owReturns.length);
+    if (k >= 30) correlation = pearsonCorr(rets.slice(-k), owReturns.slice(-k));
+  }
+  const supportRef = d.planRaw?.supportRef ?? d.alert?.support ?? null;
+  const nearSupport = supportRef && price > 0 ? (price - supportRef) / price < 0.06 : false;
+  return { score: d.score, sector: d.sector, name: d.name, rsi: d.rsi, price, pctFromHigh, correlation, nearSupport };
+}
+
+function candidateOpportunityScore(m) {
+  let s = (m.score - 50) * 0.8;                             // señal compuesta
+  s += Math.max(0, Math.min(25, -m.pctFromHigh - 8));        // golpeado: >8% debajo del máximo suma
+  if (m.rsi != null) s += Math.max(0, Math.min(15, (55 - m.rsi) * 0.8)); // no caro
+  if (m.rsi != null && m.rsi < 25) s -= 10;                  // demasiado roto: cautela
+  if (m.nearSupport) s += 12;                                // cerca de piso técnico
+  if (m.correlation != null) s += (1 - m.correlation) * 18;  // baja correlación con tu sector cargado
+  if (m.sectorWeight === 0) s += 8;                          // sector ausente en tu cartera
+  return s;
+}
+
+async function computeSectorRotation(stats) {
+  const top = stats.sectorRows?.[0];
+  if (!top || top.pct < ROTATION_CONC_THRESHOLD) return { concentrated: false, topSector: top?.sector ?? null, topPct: top?.pct ?? null };
+  const owSector = top.sector;
+  const owRows = stats.rows.filter(r => r.d?.sector === owSector && r.d?.closes?.length >= 120);
+  const prof = sectorStretchProfile(owRows);
+  const owReturns = aggregateSectorReturns(owRows);
+  const held = new Set(stats.rows.map(r => r.ticker));
+  const portSectorPct = {}; for (const s of stats.sectorRows) portSectorPct[s.sector] = s.pct;
+  const candidates = [];
+  for (const [ticker, d] of Object.entries(dashState.data || {})) {
+    if (!d || held.has(ticker) || !d.closes?.length || d.score == null || !d.sector) continue;
+    if (d.sector === owSector) continue;
+    const m = candidateMetrics(d, owReturns);
+    if (m.score < 50) continue;
+    m.sectorWeight = portSectorPct[d.sector] ?? 0;
+    m.opp = candidateOpportunityScore(m);
+    candidates.push({ ticker, d, ...m });
+  }
+  candidates.sort((a, b) => b.opp - a.opp);
+  const picks = candidates.slice(0, 3);
+  await Promise.all(picks.map(async (c) => {
+    try {
+      const f = await getFundamentals(c.ticker);
+      if (f?.peTTM != null && f.peTTM > 0) { c.peTTM = f.peTTM; const range = SECTOR_PE_RANGE[c.sector]; c.cheap = range ? f.peTTM < range[0] : f.peTTM < 15; }
+      if (f?.revenueGrowth != null) c.revenueGrowth = f.revenueGrowth;
+    } catch (_) { /* best-effort */ }
+  }));
+  return { concentrated: true, stretched: prof.stretchScore >= 45, overweight: { sector: owSector, pct: top.pct, ...prof }, targets: picks.slice(0, 2) };
+}
+
+async function maybeComputeRotation(holdings) {
+  if (!holdings.length) { portState.rotation = { concentrated: false }; portState.rotationKey = 'empty'; return; }
+  if (!holdings.every(h => portState.data[h.ticker])) return; // faltan señales
+  const universeN = Object.keys(dashState.data || {}).length;
+  const key = holdings.map(h => `${h.ticker}:${h.shares}`).join(',') + '|u' + (universeN >= 20 ? 'ok' : universeN);
+  if (portState.rotationKey === key && portState.rotation !== undefined) return;
+  try {
+    const rot = await computeSectorRotation(computePortfolioStats(holdings));
+    portState.rotation = rot; portState.rotationKey = key;
+    if (!state.asset && state.view === 'portfolio') renderReport();
+  } catch (e) { console.warn('[rotation] no se pudo computar', e.message); }
+}
+
+function sectorRotationCardHTML() {
+  const rot = portState.rotation;
+  if (rot === undefined || !rot.concentrated) return '';
+  const ow = rot.overweight;
+  const why = ow.reasons.length
+    ? `Ese sector viene <b>corrido</b>: ${ow.reasons.join('; ')}.`
+    : `No está técnicamente sobre-extendido, pero tener tanto en un solo sector ya es un riesgo de concentración.`;
+  const targetCard = (t) => {
+    const bits = [];
+    if (t.pctFromHigh <= -8) bits.push(`golpeado (${t.pctFromHigh.toFixed(0)}% de su máximo de 52 semanas)`);
+    else bits.push('con recorrido por delante');
+    if (t.nearSupport) bits.push('cerca de un soporte técnico');
+    if (t.correlation != null) bits.push(`baja correlación (${t.correlation.toFixed(2)}) con tu ${esc(ow.sector)}`);
+    if (t.peTTM != null) bits.push(t.cheap ? `barata para su sector (P/E ${t.peTTM.toFixed(0)})` : `P/E ${t.peTTM.toFixed(0)}`);
+    if (t.revenueGrowth != null && t.revenueGrowth >= 8) bits.push(`ingresos creciendo ${t.revenueGrowth.toFixed(0)}%/año`);
+    return `<div class="rot-target" data-port-ticker="${esc(t.ticker)}" title="Ver análisis de ${esc(t.ticker)}">
+      <div class="rot-target-head">
+        <span class="rot-target-tk">${esc(t.ticker)}</span>
+        <span class="rot-target-sector">${esc(t.sector)}</span>
+        <span class="rot-target-score">score ${t.d.score}</span>
+      </div>
+      <div class="rot-target-why">${bits.map(b => `<span>${esc(b)}</span>`).join('')}</div>
+    </div>`;
+  };
+  return `
+    ${sectionTitleHTML('Idea de rotación sectorial', 'shuffle')}
+    <div class="card rot-card">
+      <div class="rot-diag"><span class="rot-pct">${Math.round(ow.pct * 100)}%</span> de tu cartera está en <b>${esc(ow.sector)}</b>. ${why}</div>
+      ${rot.targets.length ? `
+        <div class="rot-sub">${rot.stretched ? '💡 Considerá <b>rotar una parte</b> hacia algo más barato y menos correlacionado:' : 'Si querés bajar la concentración, mirá:'}</div>
+        ${rot.targets.map(targetCard).join('')}
+      ` : `<div class="rot-empty">No encontré un buen destino de rotación en el universo curado ahora mismo.</div>`}
+      <div class="rot-foot">Regla determinística sobre datos reales: peso por sector, RSI, distancia a máximos y a soporte, correlación de retornos y P/E vs. su sector. Es una idea para analizar —abrí la ficha de cada candidato—, no una orden ni asesoramiento financiero.</div>
+    </div>`;
+}
+
 /* ═══════════════════ "MI DÍA" — cockpit personalizado de la cartera ═════════
  * Una sola pantalla que responde "¿qué pasó hoy con lo mío y qué tengo que
  * mirar?": P&L del día, tus mayores movimientos, alertas activas en tus activos,
@@ -7447,6 +7608,7 @@ function portfolioHTML() {
     ${tab === 'resumen' ? `
       ${portfolioCopilotCardHTML(copilot, health)}
       ${actionPlanCardHTML(stats, risk)}
+      ${sectorRotationCardHTML()}
       ${portfolioAttributionHTML(stats)}
       ${breadthCardHTML(stats)}
       ${portfolioTreemapSVG(stats.rows)}
@@ -7912,6 +8074,7 @@ async function loadPortfolioData() {
   const missing = holdings.filter(h => !portState.data[h.ticker] && !portState.loading.has(h.ticker));
   if (!missing.length) {
     if (contextLoaded && !state.asset && state.view === 'portfolio') renderReport();
+    maybeComputeRotation(holdings); // fire-and-forget: re-renderiza cuando termina
     return;
   }
   await Promise.all(missing.map(async (h) => {
@@ -7931,6 +8094,7 @@ async function loadPortfolioData() {
       if (!state.asset && (state.view === 'portfolio' || state.view === 'dashboard' || state.view === 'simulator')) renderReport();
     }
   }));
+  maybeComputeRotation(holdings); // con todas las señales ya cargadas
 }
 
 /** Sincroniza (ticker, cantidad) de la cartera con el servidor de alertas,
