@@ -4846,6 +4846,8 @@ function shortTradesPageHTML() {
   pushFrom(watchState.data);
 
   const totalQualifying = rows.length;
+  const longN = rows.filter(r => r.d.setup.direction === 'long').length;
+  const shortN = totalQualifying - longN;
   // ── Filtros ──
   rows = rows.filter(({ ticker, d }) => {
     const s = d.setup;
@@ -4914,6 +4916,22 @@ function shortTradesPageHTML() {
     <div class="cedear-note" style="margin-bottom:18px; border-color:oklch(0.55 0.15 23 / 0.4);">
       <strong>⚠ Riesgo alto:</strong> el trading de corto plazo es especulativo. Esto es un <strong>tamiz técnico</strong>, no una recomendación ni una garantía — muchos setups fallan. Operá siempre con stop, arriesgá solo lo que puedas perder, y recordá que un balance (earnings) cercano puede disparar movimientos que ningún indicador anticipa.
     </div>
+
+    ${(() => {
+      const bull = longN + totalRebounds + totalPullbacks, bear = shortN;
+      const bias = bull > bear * 1.3 ? { t: 'sesgo comprador', cls: 'up' } : bear > bull * 1.3 ? { t: 'sesgo vendedor', cls: 'down' } : { t: 'sesgo mixto', cls: 'flat' };
+      const chip = (n, label, cls) => `<div class="radar-therm-chip"><span class="radar-therm-n ${cls}">${n}</span><span class="radar-therm-l">${label}</span></div>`;
+      return `<div class="radar-therm">
+        <div class="radar-therm-chips">
+          ${chip(longN, '▲ Largos', 'up')}
+          ${chip(shortN, '▼ Cortos', 'down')}
+          ${chip(totalRebounds, '🔄 Rebotes', 'cyan')}
+          ${chip(totalPullbacks, '🏄 Pullbacks', 'up')}
+          ${chip(totalSqueezes, '💥 Por explotar', 'amber')}
+        </div>
+        <div class="radar-therm-bias ${bias.cls}">Corto plazo: <b>${bias.t}</b></div>
+      </div>`;
+    })()}
 
     <div class="short-controls">
       <div class="short-seg" role="group" aria-label="Dirección">
@@ -5138,7 +5156,7 @@ function shortTradeCardHTML(ticker, d) {
         ${shortSizingHTML(sizing, s)}
         ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
         <div class="short-reliab" data-reliab-slot="${esc(ticker)}">
-          ${cached ? shortReliabBodyHTML(cached, s.direction) : cachedErr ? `<div class="short-reliab-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>` : `<button class="short-reliab-btn" data-reliab-ticker="${esc(ticker)}">📊 Medir confiabilidad histórica del setup</button>`}
+          ${cached ? shortReliabBodyHTML(cached, s.direction, s.rr) : cachedErr ? `<div class="short-reliab-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>` : `<button class="short-reliab-btn" data-reliab-ticker="${esc(ticker)}">📊 Medir confiabilidad + edge del setup</button>`}
         </div>
       </div>
     </div>`;
@@ -5157,7 +5175,7 @@ function shortSizingHTML(sizing, s) {
 }
 
 // Confiabilidad histórica del setup: reusa el backtester walk-forward cacheado.
-function shortReliabBodyHTML(res, direction) {
+function shortReliabBodyHTML(res, direction, rr = null) {
   if (res.insufficientData) return `<div class="short-reliab-note">Sin historial suficiente (${res.candleCount}/${res.needed} velas) para medir la confiabilidad en ${esc(res.ticker)}.</div>`;
   const row = (res.setupRows ?? []).find(r => r.direction === direction);
   if (!row) return `<div class="short-reliab-note">El motor no disparó suficientes setups ${direction === 'short' ? 'bajistas' : 'alcistas'} en el histórico de ${esc(res.ticker)} para medir su precisión.</div>`;
@@ -5170,9 +5188,24 @@ function shortReliabBodyHTML(res, direction) {
     { k: `Retorno medio a ${pick.h} ruedas`, v: fmtSignedPct(pick.avgPct), tone: favor ? 'good' : 'warn' },
     { k: 'Casos', v: `${pick.n}`, tone: small ? 'warn' : 'mut' },
   ];
+  // ── Edge / valor esperado (#3): win-rate histórico × R:R en múltiplos de R.
+  // Es la ventaja matemática: cuánto ganás en promedio por trade, midiendo el
+  // riesgo en unidades de R (lo que arriesgás hasta el stop). >0 = ventaja.
+  let edgeHTML = '';
+  if (rr != null && rr > 0) {
+    const wr = pick.winRate / 100;
+    const edgeR = wr * rr - (1 - wr); // asume perder 1R en las fallidas
+    const verdict = edgeR >= 0.25 ? 'ventaja clara' : edgeR >= 0.05 ? 'ligera ventaja' : edgeR >= -0.05 ? 'neutro' : 'sin ventaja';
+    const tone = edgeR >= 0.05 ? 'good' : edgeR <= -0.05 ? 'bad' : 'flat';
+    edgeHTML = `<div class="short-edge ${tone}">
+      <span class="short-edge-v">${edgeR >= 0 ? '+' : ''}${edgeR.toFixed(2)}R</span>
+      <span class="short-edge-txt"><b>Valor esperado por trade</b> · ${verdict}<br>win-rate ${pick.winRate}% × R:R ${rr.toFixed(1)} − las fallidas</span>
+    </div>`;
+  }
   return `
-    <div class="short-reliab-head">Confiabilidad histórica del setup ${direction === 'short' ? 'bajista' : 'alcista'} en ${esc(res.ticker)}</div>
+    <div class="short-reliab-head">Confiabilidad histórica + edge del setup ${direction === 'short' ? 'bajista' : 'alcista'} en ${esc(res.ticker)}</div>
     <div class="short-reliab-tiles">${tiles.map(t => `<div class="short-reliab-tile reliab-tone-${t.tone}"><div class="short-reliab-v">${esc(t.v)}</div><div class="short-reliab-k">${esc(t.k)}</div></div>`).join('')}</div>
+    ${edgeHTML}
     <div class="short-reliab-row">${row.horizons.filter(h => h.n).map(h => `<span>${h.h}r: <b class="${(direction === 'long' ? h.avgPct >= 0 : h.avgPct <= 0) ? 'up' : 'down'}">${h.winRate}%</b> · ${fmtSignedPct(h.avgPct)}</span>`).join('')}</div>
     ${small ? `<div class="short-reliab-note">Muestra chica: estadística orientativa, no concluyente.</div>` : ''}`;
 }
