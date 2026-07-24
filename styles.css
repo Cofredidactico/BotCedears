@@ -1185,6 +1185,25 @@ a.news-headline:hover { color: var(--accent-text); }
 .short-more-btn { width: 100%; margin-top: 4px; padding: 8px 12px; border-radius: 9px; border: 1px solid var(--border-soft); background: var(--surface-2); color: var(--text-dim); font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: border-color 0.15s, color 0.15s, background 0.15s; }
 .short-more-btn:hover { border-color: var(--border-strong); color: var(--text); }
 .short-more-caret { font-size: 10px; transition: transform 0.18s; }
+/* ═══════════════════ Idea de rotación sectorial ═══════════════════════════ */
+.rot-card { padding: 18px 20px; }
+.rot-diag { font-size: 14px; line-height: 1.6; color: var(--text-dim); }
+.rot-diag b { color: var(--text); font-weight: 700; }
+.rot-pct { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 700; color: var(--amber-text); margin-right: 4px; vertical-align: -1px; }
+.rot-sub { font-size: 13px; color: var(--text-dim); margin: 16px 0 10px; }
+.rot-sub b { color: var(--text); font-weight: 700; }
+.rot-target { padding: 12px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--up); margin-bottom: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s, background 0.15s; }
+.rot-target:hover { border-color: var(--border-strong); border-left-color: var(--up); transform: translateY(-2px); background: var(--surface-3); }
+.rot-target-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.rot-target-tk { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 15px; color: var(--text); }
+.rot-target-sector { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent-text); }
+.rot-target-score { margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--up-text); font-weight: 700; }
+.rot-target-why { display: flex; flex-wrap: wrap; gap: 6px; }
+.rot-target-why span { font-size: 11.5px; color: var(--text-dim); background: var(--bg-card); border: 1px solid var(--border-soft); padding: 3px 9px; border-radius: 14px; }
+.rot-empty { font-size: 12.5px; color: var(--text-mute); padding: 6px 0; }
+.rot-foot { font-size: 11px; color: var(--text-faint); line-height: 1.5; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-soft); }
+
 /* ═══════════════════ "Mi Día" — cockpit personalizado de la cartera ═══════ */
 .today-hero { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
   padding: 22px 26px; margin-bottom: 18px; border-left: 4px solid var(--border-strong);
