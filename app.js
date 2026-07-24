@@ -4863,6 +4863,26 @@ function shortTradesPageHTML() {
     return b.d.setup.score - a.d.setup.score;
   });
 
+  // ── Rebotes de sobreventa (1-2 días): escaneo aparte, cualquier activo ──
+  const rebSeen = new Set();
+  let rebounds = [];
+  const pushReb = (map) => {
+    for (const [ticker, d] of Object.entries(map)) {
+      if (!d || rebSeen.has(ticker) || !d.rebound?.qualifies) continue;
+      rebSeen.add(ticker);
+      rebounds.push({ ticker, d });
+    }
+  };
+  pushReb(dashState.data); pushReb(watchState.data);
+  const totalRebounds = rebounds.length;
+  rebounds = rebounds.filter(({ ticker, d }) => {
+    if (shortState.minConf !== 'all' && (SHORT_CONF_RANK[d.rebound.confidence] ?? 0) < (SHORT_CONF_RANK[shortState.minConf] ?? 0)) return false;
+    if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
+    if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
+    return true;
+  });
+  rebounds.sort((a, b) => b.d.rebound.score - a.d.rebound.score);
+
   const loadingCurated = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
   const opt = (val, cur, txt) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${txt}</option>`;
   const seg = (val, txt) => `<button class="short-seg-btn ${shortState.direction === val ? 'active' : ''}" data-short-dir="${val}">${txt}</button>`;
@@ -4890,7 +4910,62 @@ function shortTradesPageHTML() {
     <div class="short-grid">
       ${rows.map(({ ticker, d }) => shortTradeCardHTML(ticker, d)).join('')}
     </div>`}
+
+    ${sectionTitleHTML('🔄 Rebotes de 1-2 días (sobreventa)', 'zap', 'margin-top:34px;')}
+    <div class="dash-intro">Activos <strong>sobrevendidos de corto plazo</strong> (acciones y CEDEARs) con chances de un <strong>rebote técnico de 1-2 ruedas</strong> hacia su media. Se detectan combinando varios indicadores: RSI en sobreventa, banda inferior de Bollinger, estiramiento debajo de la EMA20, vela de reversión, divergencia alcista, volumen de capitulación y rebote sobre soporte. Es un juego de <strong>mean-reversion</strong> (comprar la caída para el rebote), no una tendencia nueva — objetivo corto y stop ajustado.</div>
+    <div class="short-count">${rebounds.length}${totalRebounds !== rebounds.length ? ` de ${totalRebounds}` : ''} candidato(s) a rebote${shortState.category !== 'all' || shortState.minConf !== 'all' ? ' con los filtros actuales' : ''}</div>
+    ${!rebounds.length ? `<div class="card watch-empty">${loadingCurated ? 'Buscando activos sobrevendidos…' : totalRebounds ? 'Ningún rebote pasa los filtros actuales.' : 'No hay activos claramente sobrevendidos con señal de rebote ahora mismo.'}</div>` : `
+    <div class="short-grid">
+      ${rebounds.map(({ ticker, d }) => reboundCardHTML(ticker, d)).join('')}
+    </div>`}
   `;
+}
+
+function reboundCardHTML(ticker, d) {
+  const s = d.rebound;
+  const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
+  const cat = AR_TICKERS.has(ticker) ? 'dcv-cat-arg' : d.category === 'ETF' ? 'dcv-cat-etf' : d.category === 'Cripto' ? 'dcv-cat-crypto' : 'dcv-cat-cedear';
+  const catLabel = AR_TICKERS.has(ticker) ? '🇦🇷 Arg' : esc(d.category ?? '');
+  const primary = s.triggers.filter(t => t.primary), secondary = s.triggers.filter(t => !t.primary);
+  return `
+    <div class="card short-card rebound-card" data-short-ticker="${esc(ticker)}" style="--dir-color:oklch(0.75 0.13 210);">
+      <div class="short-head">
+        <div>
+          <div class="short-ticker">${esc(ticker)} <span class="dcv-cat ${cat}">${catLabel}</span></div>
+          <div class="short-name">${esc(d.name ?? '')}</div>
+        </div>
+        <div class="short-head-right">
+          <span class="short-dir-badge" style="color:oklch(0.82 0.12 210); background:oklch(0.45 0.10 210 / 0.22);">🔄 Rebote</span>
+          <div class="short-conf" style="color:${conf};">
+            <div class="short-conf-score">${s.score}</div>
+            <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
+      ${s.narrative ? `<div class="short-narrative up">${s.narrative}</div>` : ''}
+      <div class="short-plan">
+        <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
+        <div class="short-plan-cell"><span>Objetivo (media)</span><b class="up">${fmtUsd(s.target)}</b></div>
+        <div class="short-plan-cell"><span>Stop</span><b class="down">${fmtUsd(s.stop)}</b></div>
+        <div class="short-plan-cell"><span>Rebote esperado</span><b class="up">+${s.expectedBouncePct.toFixed(1)}%</b></div>
+        <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
+        <div class="short-plan-cell"><span>Vigencia</span><b>~${s.timeStopDays} ruedas</b></div>
+      </div>
+      <button class="short-more-btn" data-short-more aria-expanded="false">Ver detalle <span class="short-more-caret">▾</span></button>
+      <div class="short-more" hidden>
+        <div class="short-triggers">
+          ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
+          ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
+        </div>
+        <div class="short-manage">
+          <span title="Confirmá el rebote si el precio recupera el máximo de la última rueda">🎯 Gatillo: superar <b>${fmtUsd(s.entryTrigger)}</b></span>
+          <span title="Si cierra por debajo del mínimo reciente, el rebote falló">✖ Invalida: cierre bajo <b>${fmtUsd(s.stop)}</b></span>
+          <span title="Los rebotes son de muy corto plazo: si no se activa en ~2 ruedas, conviene salir">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
+        </div>
+        ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
+      </div>
+    </div>`;
 }
 
 function shortTradeCardHTML(ticker, d) {
@@ -9543,6 +9618,7 @@ async function computeLightSignal(ticker, macro) {
   // para stop sugerido y distancia al stop de cada tenencia.
   const planRaw = computePlan(technical, scoreResult.score).raw;
   const setup = shortTermSetup(technical, candles); // radar de trades cortos, sin pedidos extra
+  const rebound = reboundSetup(technical, candles); // rebote de sobreventa de 1-2 días, sin pedidos extra
   const gap = computeGap(candles, technical); // radar de gaps de apertura, sin pedidos extra
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
@@ -9565,6 +9641,7 @@ async function computeLightSignal(ticker, macro) {
     highlight: technicalHighlight(technical),
     planRaw, // stop/objetivos numéricos (USD) — para la columna de stop del Portfolio
     setup, // setup de trade corto (o null) — para el Radar de Trades Cortos
+    rebound, // rebote de sobreventa de 1-2 días (o null) — sección de rebotes en Trades Cortos
     gap, // hueco de apertura de la última rueda (o null) — para el Radar de Gaps
   };
 }
@@ -9673,6 +9750,89 @@ function directionalSetup(technical, candles, dir) {
     entryTrigger, invalidation: stop,
     expectedMovePct: (atr / price) * 100,
   };
+}
+
+/* ─────────────────────── detector de rebote de 1-2 días ─────────────────────
+ * Distinto del setup de tendencia: busca activos SOBREVENDIDOS de corto plazo
+ * con chances de un rebote técnico de 1-2 ruedas (mean-reversion). Combina
+ * varios indicadores de corto plazo: RSI en/saliendo de sobreventa, precio en la
+ * banda inferior de Bollinger, estiramiento debajo de la EMA20, vela de reversión
+ * alcista, divergencia alcista, volumen de capitulación, rebote sobre un soporte
+ * y racha bajista. El objetivo del rebote es la vuelta a la media (EMA20/banda
+ * media) — un objetivo realista a pocos días, no una tendencia nueva. Todo sobre
+ * indicadores ya calculados; nada se inventa. */
+function reboundSetup(technical, candles) {
+  const c = candles.c, l = candles.l, n = c.length;
+  if (n < 25) return null;
+  const price = c[n - 1], atr = technical.atr;
+  if (!(atr > 0) || isNaN(atr)) return null;
+  const rArr = rsi(c, 14);
+  const rsiNow = technical.rsi, rsiPrev = rArr[n - 2];
+  const triggers = [], risks = [];
+  let score = 0;
+  const add = (pts, label, primary = false) => { score += pts; triggers.push({ label, primary }); };
+
+  // 1 · RSI en sobreventa (o girando desde zona baja) — el corazón del rebote.
+  if (!isNaN(rsiNow)) {
+    if (rsiNow < 30) add(26, `RSI en sobreventa (${rsiNow.toFixed(0)})`, true);
+    else if (rsiNow < 40 && rsiPrev != null && rsiNow > rsiPrev) add(16, `RSI girando al alza desde zona baja (${rsiNow.toFixed(0)})`, true);
+  }
+  // 2 · Precio tocando o debajo de la banda inferior de Bollinger.
+  if (technical.bbLower != null && price <= technical.bbLower * 1.01) add(22, 'Precio en la banda inferior de Bollinger', true);
+  // 3 · Estirado debajo de la EMA20 (goma estirada que tiende a volver).
+  const belowEma = technical.ema20 ? (technical.ema20 - price) / price * 100 : 0;
+  if (belowEma >= 4) add(14, `Estirado ${belowEma.toFixed(0)}% debajo de la EMA20`);
+  // 4 · Vela de reversión alcista (martillo, envolvente…).
+  if (technical.candlePattern?.bias === 'bullish') add(15, technical.candlePattern.label, true);
+  // 5 · Divergencia alcista (RSI hace piso más alto que el precio).
+  if (technical.divergence?.type === 'bullish') add(15, 'Divergencia alcista (RSI vs. precio)', true);
+  // 6 · Volumen de capitulación (venta con volumen alto suele marcar el piso).
+  if (technical.relVolume != null && technical.relVolume >= 1.5) add(9, `Volumen de capitulación (${technical.relVolume.toFixed(1)}× el promedio)`);
+  // 7 · Rebotando sobre un soporte técnico.
+  if (technical.support && price <= technical.support * 1.02 && price >= technical.support * 0.98) add(12, 'Rebotando sobre un soporte', true);
+  // 8 · Racha bajista corta (sobreventa de muy corto plazo).
+  let downDays = 0;
+  for (let i = n - 1; i > Math.max(0, n - 5); i--) { if (c[i] < c[i - 1]) downDays++; else break; }
+  if (downDays >= 2) add(8, `${downDays} ruedas seguidas de baja`);
+
+  // Advertencias (no invalidan, avisan): un rebote contra tendencia fuerte es más frágil.
+  if (technical.bearishAlign && technical.adx > 25) risks.push('Tendencia bajista de fondo fuerte — el rebote puede ser breve');
+  if (technical.divergence?.type === 'bearish') { score -= 8; risks.push('Divergencia bajista activa — cautela'); }
+  if (technical.obvConfirms === false) risks.push('El volumen todavía no acompaña un giro');
+
+  score = Math.max(0, Math.min(100, score));
+  const hasPrimary = triggers.some(t => t.primary);
+  const qualifies = hasPrimary && score >= 45;
+
+  // Objetivo: la vuelta a la media (EMA20 / banda media), lo primero que busca un rebote.
+  const meanTarget = Math.min(technical.ema20 ?? Infinity, technical.bbMid ?? Infinity);
+  const target = isFinite(meanTarget) && meanTarget > price ? meanTarget : price + 1.5 * atr;
+  const recentLow = Math.min(l[n - 1], l[n - 2] ?? l[n - 1]);
+  const stop = recentLow - 0.3 * atr;
+  const risk = price - stop, reward = target - price;
+  const rr = risk > 0 && reward > 0 ? reward / risk : null;
+  const expectedBouncePct = (target - price) / price * 100;
+  const entryTrigger = Math.max(c[n - 1], candles.h[n - 1]); // confirmación: superar el máximo de la última rueda
+
+  return {
+    qualifies, score, triggers, risks,
+    entry: price, target, stop, rr, entryTrigger,
+    expectedBouncePct,
+    confidence: score >= 70 ? 'muy alta' : score >= 58 ? 'alta' : score >= 45 ? 'media' : 'baja',
+    timeStopDays: 2,
+    narrative: reboundNarrative(technical, price, target, rsiNow),
+  };
+}
+function reboundNarrative(technical, price, target, rsiNow) {
+  const parts = [];
+  if (!isNaN(rsiNow) && rsiNow < 35) parts.push(`RSI en <b>${rsiNow.toFixed(0)}</b> (sobreventa)`);
+  if (technical.bbLower != null && price <= technical.bbLower * 1.01) parts.push('en la <b>banda inferior</b>');
+  if (technical.candlePattern?.bias === 'bullish') parts.push('con <b>vela de reversión</b>');
+  if (technical.divergence?.type === 'bullish') parts.push('y <b>divergencia alcista</b>');
+  const lead = parts.length ? parts.join(', ') : 'Sobrevendido de corto plazo';
+  const pct = (target - price) / price * 100;
+  const proj = target > price ? ` Posible rebote de <b class="up">+${pct.toFixed(1)}%</b> hacia la media (${fmtUsd(target)}).` : '';
+  return `🔄 ${lead}.${proj}`;
 }
 
 function shortTermSetup(technical, candles) {
