@@ -112,6 +112,8 @@ const DASH_WIDGETS = [
   { key: 'buyzone', label: 'En Zona de Compra Ahora', icon: 'target', accent: 'green', full: true },
   { key: 'breadth', label: 'Amplitud del Mercado', icon: 'radar', accent: 'blue', full: false },
   { key: 'movers', label: 'Destacados del Día', icon: 'trend', accent: 'blue', full: true },
+  { key: 'breakouts', label: 'Rupturas de Hoy', icon: 'trend', accent: 'green', full: true },
+  { key: 'volume', label: 'Volumen Inusual', icon: 'radar', accent: 'orange', full: true },
   { key: 'argentina', label: 'Panel Argentina', icon: 'flag', accent: 'cyan', full: true },
   { key: 'cripto', label: 'Termómetro Cripto', icon: 'zap', accent: 'orange', full: true },
   { key: 'heatmap', label: 'Heatmap Sectorial', icon: 'grid', accent: 'violet', full: false },
@@ -3678,6 +3680,61 @@ function moversWidgetBody(loaded) {
     </div>`}`;
 }
 
+/* ── Radar de rupturas (#15): activos del universo rompiendo su máximo de 52
+ * semanas o su resistencia HOY, con confirmación de volumen. ── */
+function breakoutsWidgetBody(loaded) {
+  const rows = [];
+  for (const e of loaded) {
+    const d = e.d, c = d.closes, price = d.price;
+    if (!c?.length || price == null || d.changePct == null || d.changePct <= 0) continue;
+    const hi52 = Math.max(...c.slice(-252));
+    const newHigh = hi52 > 0 && price >= hi52 * 0.997;
+    const resRef = d.planRaw?.resistanceRef ?? null;
+    const brokeRes = resRef != null && price >= resRef && !newHigh;
+    if (!newHigh && !brokeRes) continue;
+    rows.push({ ticker: e.ticker, d, price, changePct: d.changePct, relVol: d.relVolume, newHigh, resRef, hi52 });
+  }
+  rows.sort((a, b) => (b.newHigh - a.newHigh) || ((b.relVol ?? 0) - (a.relVol ?? 0)) || (b.changePct - a.changePct));
+  const top = rows.slice(0, 9);
+  const row = (r) => `<div class="brk-row" data-dash-ticker="${esc(r.ticker)}" title="Ver análisis de ${esc(r.ticker)}">
+    <span class="brk-tk">${esc(r.ticker)}</span>
+    <span class="brk-tag ${r.newHigh ? 'high' : 'res'}">${r.newHigh ? '🚀 Nuevo máximo 52s' : `📈 Rompió resistencia ${fmtUsd(r.resRef)}`}</span>
+    <span class="brk-price">${fmtUsd(r.price)}</span>
+    <span class="brk-chg up">▲ ${fmtPct(r.changePct)}</span>
+    <span class="brk-vol ${r.relVol != null && r.relVol >= 1.5 ? 'hot' : ''}">${r.relVol != null ? `${r.relVol.toFixed(1)}× vol` : ''}</span>
+  </div>`;
+  return `
+    <div class="dash-intro" style="margin-bottom:12px;">Activos del universo que <b>hoy</b> superan su máximo de 52 semanas o rompen una resistencia, con el volumen relativo como confirmación. ${infoTip('Una ruptura con volumen alto (≥1,5×) tiene más chances de sostenerse; sin volumen, cuidado con el amague.')}</div>
+    ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>`
+      : !top.length ? `<div class="card watch-empty">Ningún activo del universo está rompiendo máximos o resistencias al alza en este momento.</div>`
+      : `<div class="card brk-card">${top.map(row).join('')}</div>`}`;
+}
+
+/* ── Detector de volumen inusual (#16): actividad muy por encima del promedio,
+ * posible catalizador antes (o después) de la noticia. ── */
+function volumeAnomalyWidgetBody(loaded) {
+  const rows = loaded
+    .filter(e => e.d?.relVolume != null && e.d.relVolume >= 1.8 && e.d.changePct != null)
+    .map(e => ({ ticker: e.ticker, d: e.d, relVol: e.d.relVolume, changePct: e.d.changePct }))
+    .sort((a, b) => b.relVol - a.relVol)
+    .slice(0, 9);
+  const row = (r) => {
+    const up = r.changePct >= 0;
+    const bias = Math.abs(r.changePct) < 0.4 ? { t: '→ sin dirección clara', cls: 'flat' } : up ? { t: '▲ acumulación (sube)', cls: 'up' } : { t: '▼ distribución (baja)', cls: 'down' };
+    return `<div class="vol-row" data-dash-ticker="${esc(r.ticker)}" title="Ver análisis de ${esc(r.ticker)}">
+      <span class="vol-tk">${esc(r.ticker)}</span>
+      <span class="vol-x">${r.relVol.toFixed(1)}× <i>el volumen promedio</i></span>
+      <span class="vol-bias ${bias.cls}">${bias.t}</span>
+      <span class="vol-chg ${up ? 'up' : 'down'}">${fmtPct(r.changePct)}</span>
+    </div>`;
+  };
+  return `
+    <div class="dash-intro" style="margin-bottom:12px;">Activos operando con <b>volumen muy por encima de lo normal</b> hoy — suele anticipar (o acompañar) un catalizador. El volumen mueve al precio: sube con compras (acumulación) o baja con ventas (distribución). ${infoTip('Volumen relativo = volumen de hoy ÷ promedio reciente. ≥1,8× ya es inusual.')}</div>
+    ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>`
+      : !rows.length ? `<div class="card watch-empty">Sin volumen inusual en el universo ahora mismo — actividad dentro de lo normal.</div>`
+      : `<div class="card vol-card">${rows.map(row).join('')}</div>`}`;
+}
+
 function dashboardHTML() {
   const entries = DASHBOARD_UNIVERSE.map(ticker => ({ ticker, d: dashState.data[ticker] }));
   const loaded = entries.filter(e => e.d);
@@ -3822,6 +3879,8 @@ function dashWidgetBody(key, ctx) {
     case 'agenda': return agendaWidgetBody(loaded);
     case 'breadth': return marketBreadthWidgetBody(loaded);
     case 'movers': return moversWidgetBody(loaded);
+    case 'breakouts': return breakoutsWidgetBody(loaded);
+    case 'volume': return volumeAnomalyWidgetBody(loaded);
     case 'opportunities': return `
       ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
       ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}`;
@@ -9415,6 +9474,7 @@ async function computeLightSignal(ticker, macro) {
     alert: priceAlert,
     structure: technical.structure, // BOS/CHoCH — ya calculado acá, sin pedidos extra
     rsi: isNaN(technical.rsi) ? null : technical.rsi, // ya calculado acá — sin pedidos extra, para el Screener
+    relVolume: technical.relVolume != null && !isNaN(technical.relVolume) ? technical.relVolume : null, // volumen de hoy vs. promedio — para los radares de rupturas y volumen inusual
     sparkline: candles.c.slice(-30), // últimos cierres reales, ya obtenidos acá — sin pedidos extra
     closes: candles.c, // serie completa (~220 ruedas) — reusada para volatilidad/drawdown de la cartera, sin pedidos extra
     highlight: technicalHighlight(technical),
