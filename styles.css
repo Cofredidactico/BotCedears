@@ -1185,6 +1185,29 @@ a.news-headline:hover { color: var(--accent-text); }
 .short-more-btn { width: 100%; margin-top: 4px; padding: 8px 12px; border-radius: 9px; border: 1px solid var(--border-soft); background: var(--surface-2); color: var(--text-dim); font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: border-color 0.15s, color 0.15s, background 0.15s; }
 .short-more-btn:hover { border-color: var(--border-strong); color: var(--text); }
 .short-more-caret { font-size: 10px; transition: transform 0.18s; }
+/* ═══════════════════ Salud financiera (score compuesto) ═══════════════════ */
+.fhealth { padding: 16px; border-radius: 13px; margin-bottom: 14px; border: 1px solid var(--border-soft); border-left-width: 3px;
+  background: var(--surface-2); }
+.fhealth.good { border-left-color: var(--up); } .fhealth.warn { border-left-color: var(--amber); } .fhealth.bad { border-left-color: var(--down); }
+.fhealth-top { display: flex; align-items: center; gap: 14px; }
+.fhealth-grade { flex-shrink: 0; width: 60px; height: 60px; border: 2.5px solid; border-radius: 13px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
+.fhealth-grade b { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 700; }
+.fhealth-grade span { font-size: 10px; margin-top: 3px; opacity: 0.85; font-family: 'IBM Plex Mono', monospace; }
+.fhealth-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-mute); font-weight: 600; }
+.fhealth-verdict { font-family: 'IBM Plex Sans', sans-serif; font-weight: 700; font-size: 15px; margin-top: 2px; }
+.fhealth.good .fhealth-verdict { color: var(--up-text); } .fhealth.warn .fhealth-verdict { color: var(--amber-text); } .fhealth.bad .fhealth-verdict { color: var(--down-text); }
+.fhealth-text { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; margin-top: 3px; }
+.fhealth-dims { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px 16px; margin-top: 14px; }
+.fhealth-dim-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px; }
+.fhealth-dim-top b { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--text); }
+.fhealth-bar { height: 6px; border-radius: 5px; background: var(--bg-input); overflow: hidden; }
+.fhealth-bar i { display: block; height: 100%; border-radius: 5px; }
+.fhealth-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.fhealth-flag { font-size: 11.5px; padding: 3px 10px; border-radius: 14px; border: 1px solid var(--border-soft); }
+.fhealth-flag.good { color: var(--up-text); background: oklch(0.76 0.18 152 / 0.08); border-color: oklch(0.76 0.18 152 / 0.28); }
+.fhealth-flag.bad { color: var(--down-text); background: oklch(0.70 0.21 23 / 0.08); border-color: oklch(0.70 0.21 23 / 0.28); }
+.fhealth-foot { font-size: 10.5px; color: var(--text-faint); line-height: 1.5; margin-top: 12px; }
+
 /* ═══════════════════ Idea de rotación sectorial ═══════════════════════════ */
 .rot-card { padding: 18px 20px; }
 .rot-diag { font-size: 14px; line-height: 1.6; color: var(--text-dim); }
