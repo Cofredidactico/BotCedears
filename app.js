@@ -106,8 +106,10 @@ const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
 // Cada widget declara su ícono, color de acento (para la cabecera) y si ocupa
 // el ancho completo del bento (tablas/grids grandes) o media columna.
 const DASH_WIDGETS = [
+  { key: 'digest', label: 'Resumen del Día', icon: 'briefcase', accent: 'violet', full: true },
   { key: 'idea', label: 'Idea del Día', icon: 'zap', accent: 'violet', full: false },
   { key: 'agenda', label: 'Qué Mirar Hoy', icon: 'target', accent: 'amber', full: false },
+  { key: 'calendar', label: 'Calendario Económico', icon: 'calendar', accent: 'amber', full: false },
   { key: 'opportunities', label: 'Oportunidades del Día', icon: 'trend', accent: 'green', full: true },
   { key: 'buyzone', label: 'En Zona de Compra Ahora', icon: 'target', accent: 'green', full: true },
   { key: 'breadth', label: 'Amplitud del Mercado', icon: 'radar', accent: 'blue', full: false },
@@ -3735,6 +3737,87 @@ function volumeAnomalyWidgetBody(loaded) {
       : `<div class="card vol-card">${rows.map(row).join('')}</div>`}`;
 }
 
+/* ── Resumen del día (#13): digest generado del mercado en pocas frases, sobre
+ * el universo ya cargado (amplitud, líder/rezagado, señales, rupturas, volumen). ── */
+function countBreakouts(loaded) {
+  let n = 0;
+  for (const e of loaded) {
+    const c = e.d?.closes;
+    if (!c?.length || e.d.changePct == null || e.d.changePct <= 0) continue;
+    const hi = Math.max(...c.slice(-252));
+    if (hi > 0 && e.d.price >= hi * 0.997) n++;
+  }
+  return n;
+}
+function dailyDigestWidgetBody(ctx) {
+  const { loaded } = ctx;
+  if (!loaded.length) return `<div class="card watch-empty">Cargando universo curado…</div>`;
+  const withChg = loaded.filter(e => e.d?.changePct != null);
+  const total = withChg.length || 1;
+  const upN = withChg.filter(e => e.d.changePct > 0).length;
+  const upPct = Math.round(upN / total * 100);
+  const tone = upPct >= 60 ? { t: 'con sesgo comprador', icon: '🟢' } : upPct <= 40 ? { t: 'con sesgo vendedor', icon: '🔴' } : { t: 'mixto', icon: '🟡' };
+  const sorted = [...withChg].sort((a, b) => b.d.changePct - a.d.changePct);
+  const g = sorted[0], l = sorted[sorted.length - 1];
+  const strongBuy = loaded.filter(e => e.d?.scoreLabel === 'Compra Fuerte' || e.d?.scoreLabel === 'Compra Moderada').length;
+  const brk = countBreakouts(loaded);
+  const volN = loaded.filter(e => e.d?.relVolume != null && e.d.relVolume >= 1.8).length;
+  const bullets = [];
+  bullets.push({ icon: tone.icon, t: `El mercado abre <b>${tone.t}</b>: ${upPct}% del universo (${upN}/${total}) sube hoy.` });
+  if (g) bullets.push({ icon: '▲', t: `Lidera <b>${esc(g.ticker)}</b> (${fmtPct(g.d.changePct)})${l && l !== g ? `; el más flojo es <b>${esc(l.ticker)}</b> (${fmtPct(l.d.changePct)})` : ''}.` });
+  if (strongBuy) bullets.push({ icon: '🎯', t: `<b>${strongBuy}</b> activo(s) del universo están en zona de compra según el score compuesto.` });
+  if (brk) bullets.push({ icon: '🚀', t: `<b>${brk}</b> activo(s) rompen máximos de 52 semanas hoy — mirá <b>Rupturas de Hoy</b>.` });
+  if (volN) bullets.push({ icon: '🔊', t: `<b>${volN}</b> activo(s) con volumen inusual — posible catalizador (ver <b>Volumen Inusual</b>).` });
+  const dateTxt = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+  return `
+    <div class="digest-head">📋 <span>Resumen del día</span> · <i>${esc(dateTxt)}</i></div>
+    <div class="digest-list">${bullets.map(b => `<div class="digest-item"><span class="digest-ic">${b.icon}</span><span>${b.t}</span></div>`).join('')}</div>
+    <div class="digest-foot">Síntesis automática del universo curado de hoy — un vistazo rápido antes de entrar en detalle. No es asesoramiento.</div>`;
+}
+
+/* ── Calendario económico global (#14): eventos macro que mueven al mercado, con
+ * cuenta regresiva. FOMC y empleo con fecha exacta publicada; el IPC va estimado
+ * (~mediados de mes) hasta que se confirma. ── */
+const FOMC_DATES = ['2025-01-29', '2025-03-19', '2025-05-07', '2025-06-18', '2025-07-30', '2025-09-17', '2025-10-29', '2025-12-10', '2026-01-28', '2026-03-18', '2026-04-29', '2026-06-17', '2026-07-29', '2026-09-16', '2026-11-04', '2026-12-16'];
+function firstFridayOf(year, month) { // month 0-based
+  const d = new Date(Date.UTC(year, month, 1));
+  const offset = (5 - d.getUTCDay() + 7) % 7; // hacia el viernes (5)
+  return new Date(Date.UTC(year, month, 1 + offset));
+}
+function economicCalendarEvents() {
+  const out = [];
+  const iso = (d) => d.toISOString().slice(0, 10);
+  for (const ds of FOMC_DATES) {
+    const dd = daysUntil(ds);
+    if (dd != null && dd >= 0 && dd <= 75) out.push({ date: ds, days: dd, type: 'fomc', label: 'Decisión de tasas de la Fed (FOMC)', impact: 'Mueve todo el mercado: acciones, bonos y el dólar.', exact: true });
+  }
+  const now = new Date();
+  const y = now.getUTCFullYear(), m = now.getUTCMonth();
+  for (let k = 0; k <= 2; k++) {
+    const idx = m + k, yy = y + Math.floor(idx / 12), mo = ((idx % 12) + 12) % 12;
+    const nfp = firstFridayOf(yy, mo), nfpDays = daysUntil(iso(nfp));
+    if (nfpDays != null && nfpDays >= 0 && nfpDays <= 75) out.push({ date: iso(nfp), days: nfpDays, type: 'nfp', label: 'Empleo USA (nóminas no agrícolas)', impact: 'Termómetro de la economía; influye en las tasas.', exact: true });
+    const cpi = new Date(Date.UTC(yy, mo, 13)), cpiDays = daysUntil(iso(cpi));
+    if (cpiDays != null && cpiDays >= 0 && cpiDays <= 75) out.push({ date: iso(cpi), days: cpiDays, type: 'cpi', label: 'Inflación USA (IPC)', impact: 'Define el tono de la Fed sobre las tasas.', exact: false });
+  }
+  return out.sort((a, b) => a.days - b.days).slice(0, 7);
+}
+function economicCalendarWidgetBody() {
+  const evs = economicCalendarEvents();
+  const icon = { fomc: '🏛️', nfp: '👷', cpi: '📈' };
+  const row = (e) => {
+    const when = e.days === 0 ? 'hoy' : e.days === 1 ? 'mañana' : `en ${e.days} días`;
+    return `<div class="econ-row">
+      <span class="econ-icon">${icon[e.type] ?? '📅'}</span>
+      <span class="econ-body"><span class="econ-label">${esc(e.label)}${!e.exact ? ' <i>(fecha estimada)</i>' : ''}</span><span class="econ-impact">${esc(e.impact)}</span></span>
+      <span class="econ-when ${e.days <= 3 ? 'soon' : ''}">${when}</span>
+    </div>`;
+  };
+  return `
+    <div class="dash-intro" style="margin-bottom:12px;">Los eventos macro que mueven al mercado global, con cuenta regresiva. ${infoTip('FOMC y empleo (nóminas) con fecha exacta publicada; el IPC va con fecha estimada (~mediados de mes) hasta que se confirma.')}</div>
+    ${!evs.length ? `<div class="card watch-empty">Sin eventos macro grandes en las próximas semanas.</div>` : `<div class="card econ-card">${evs.map(row).join('')}</div>`}`;
+}
+
 function dashboardHTML() {
   const entries = DASHBOARD_UNIVERSE.map(ticker => ({ ticker, d: dashState.data[ticker] }));
   const loaded = entries.filter(e => e.d);
@@ -3876,6 +3959,8 @@ function dashWidgetBody(key, ctx) {
   const { loaded, opportunities, buyZone, loadingCount, heatmapRows, sectorRows, bySignal, gainers, losers } = ctx;
   switch (key) {
     case 'idea': return ideaWidgetBody(loaded);
+    case 'digest': return dailyDigestWidgetBody(ctx);
+    case 'calendar': return economicCalendarWidgetBody();
     case 'agenda': return agendaWidgetBody(loaded);
     case 'breadth': return marketBreadthWidgetBody(loaded);
     case 'movers': return moversWidgetBody(loaded);
