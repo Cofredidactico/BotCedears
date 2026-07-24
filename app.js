@@ -2538,7 +2538,7 @@ function renderReportImpl() {
           ${(() => {
             const cards = didacticFundamentalCards(f, earnings, daysToEarnings, dividends, asset);
             if (!cards) return `<div class="didactic-empty">No hay datos fundamentales (balance, ganancias, deuda) para este activo en la fuente gratuita — suele pasar con CEDEARs de empresas menos seguidas, ETFs y cripto. El análisis técnico de al lado sí está disponible.</div>`;
-            return cards.map(didacticCardHTML).join('') + `<div class="narrative">${esc(fundamentalNarrative(f, asset.sector))}</div>
+            return financialHealthHTML(f) + cards.map(didacticCardHTML).join('') + `<div class="narrative">${esc(fundamentalNarrative(f, asset.sector))}</div>
             <details class="advanced-details">
               <summary>Ver todos los datos fundamentales (avanzado)</summary>
               <div class="metrics-grid" style="margin-top:12px;">
@@ -2918,6 +2918,81 @@ function insiderFlowCardHTML(ins, asset) {
       </details>` : ''}
       <div class="insider-disclaimer">Fuente: formularios 3/4/5 de la SEC vía Finnhub. Solo se cuentan compras/ventas de mercado abierto (códigos P/S) — se excluyen ejercicios de opciones, grants y regalos, que no son decisiones de mercado. La compra de insiders tiene valor de señal; la venta, mucho menos.</div>
     </div>`;
+}
+
+/* ═══════════════════ SALUD FINANCIERA (score compuesto propio) ══════════════
+ * Un puntaje de salud fundamental (0-100) + grado (A-D) construido con las
+ * métricas que expone el proveedor: rentabilidad (ROE, margen), solvencia
+ * (deuda, caja), crecimiento (ingresos, EPS) y generación de caja (FCF). No es
+ * un Piotroski/Altman formal —esos requieren detalle de balance y flujo de caja
+ * año contra año que el tier gratuito no da— así que se presenta honestamente
+ * como un compuesto propio. Además clasifica "empresa de calidad" vs. posible
+ * "trampa de valor". Nada se inventa: si falta una métrica, esa dimensión no
+ * puntúa. */
+function financialHealthScore(f) {
+  if (!f?.hasData) return null;
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+  const dims = [];
+  const prof = [];
+  if (f.roe != null) prof.push(clamp01(f.roe / 25));
+  if (f.netMargin != null) prof.push(clamp01(f.netMargin / 20));
+  if (prof.length) dims.push({ key: 'Rentabilidad', v: mean(prof) });
+  const solv = [];
+  if (f.debtEquity != null) solv.push(clamp01(1 - f.debtEquity / 3));
+  if (f.fcfPerShare != null) solv.push(f.fcfPerShare > 0 ? 1 : 0.25);
+  if (solv.length) dims.push({ key: 'Solvencia', v: mean(solv) });
+  const grow = [];
+  if (f.revenueGrowth != null) grow.push(clamp01((f.revenueGrowth + 5) / 25));
+  if (f.epsGrowth != null) grow.push(clamp01((f.epsGrowth + 5) / 30));
+  if (grow.length) dims.push({ key: 'Crecimiento', v: mean(grow) });
+  if (f.fcfPerShare != null) dims.push({ key: 'Generación de caja', v: f.fcfPerShare > 0 ? clamp01(0.6 + f.fcfPerShare / 20) : 0.2 });
+  if (dims.length < 2) return null; // muy poco para un veredicto honesto
+  const score = Math.round(mean(dims.map(d => d.v)) * 100);
+  const grade = score >= 75 ? 'A' : score >= 60 ? 'B' : score >= 45 ? 'C' : 'D';
+  const flags = [];
+  if (f.roe != null && f.roe >= 18) flags.push({ bad: false, t: `Muy rentable (ROE ${f.roe.toFixed(0)}%)` });
+  if (f.debtEquity != null && f.debtEquity <= 0.8) flags.push({ bad: false, t: 'Deuda baja — balance sólido' });
+  if (f.revenueGrowth != null && f.revenueGrowth >= 12) flags.push({ bad: false, t: `Crece fuerte (${f.revenueGrowth.toFixed(0)}%/año)` });
+  if (f.fcfPerShare != null && f.fcfPerShare > 0) flags.push({ bad: false, t: 'Genera caja libre' });
+  if (f.debtEquity != null && f.debtEquity > 2.5) flags.push({ bad: true, t: `Deuda alta (${f.debtEquity.toFixed(1)}x su capital)` });
+  if (f.fcfPerShare != null && f.fcfPerShare < 0) flags.push({ bad: true, t: 'No genera caja (FCF negativo)' });
+  if (f.revenueGrowth != null && f.revenueGrowth < 0) flags.push({ bad: true, t: 'Ingresos en baja' });
+  if (f.netMargin != null && f.netMargin < 0) flags.push({ bad: true, t: 'Pierde plata (margen negativo)' });
+  const strongProfit = f.roe != null && f.roe >= 15;
+  const lowDebt = f.debtEquity != null && f.debtEquity <= 1;
+  const growing = f.revenueGrowth != null && f.revenueGrowth >= 8;
+  const cashPos = f.fcfPerShare != null && f.fcfPerShare > 0;
+  const falling = f.revenueGrowth != null && f.revenueGrowth < 0;
+  const highDebt = f.debtEquity != null && f.debtEquity > 2.5;
+  const cashNeg = f.fcfPerShare != null && f.fcfPerShare < 0;
+  let verdict;
+  if (strongProfit && lowDebt && (growing || cashPos)) verdict = { tag: 'Empresa de calidad', tone: 'good', text: 'Rentable, poco endeudada y con el negocio creciendo o generando caja — el perfil de una empresa sólida para el largo plazo.' };
+  else if ((falling && highDebt) || (cashNeg && highDebt)) verdict = { tag: 'Señales de alerta', tone: 'bad', text: 'Combina deuda alta con caída de ingresos o falta de caja. Cuidado con la "trampa de valor": puede estar barata por buenas razones.' };
+  else if (score >= 60) verdict = { tag: 'Fundamentales sanos', tone: 'good', text: 'Sin banderas rojas importantes en rentabilidad, deuda ni crecimiento.' };
+  else verdict = { tag: 'Fundamentales flojos', tone: 'warn', text: 'Señales mezcladas: revisá deuda, márgenes y crecimiento antes de entrar por lo fundamental.' };
+  return { score, grade, dims, flags, verdict };
+}
+function financialHealthHTML(f) {
+  const h = financialHealthScore(f);
+  if (!h) return '';
+  const gradeColor = h.grade === 'A' ? GREEN : h.grade === 'B' ? 'oklch(0.80 0.14 130)' : h.grade === 'C' ? AMBER : RED;
+  const barColor = (v) => v >= 0.6 ? 'var(--up)' : v >= 0.4 ? 'var(--amber)' : 'var(--down)';
+  return `<div class="fhealth ${h.verdict.tone}">
+    <div class="fhealth-top">
+      <div class="fhealth-grade" style="border-color:${gradeColor}; color:${gradeColor};"><b>${h.grade}</b><span>${h.score}/100</span></div>
+      <div class="fhealth-head">
+        <div class="fhealth-eyebrow">🩺 Salud financiera</div>
+        <div class="fhealth-verdict">${esc(h.verdict.tag)}</div>
+        <div class="fhealth-text">${esc(h.verdict.text)}</div>
+      </div>
+    </div>
+    <div class="fhealth-dims">
+      ${h.dims.map(d => `<div class="fhealth-dim"><div class="fhealth-dim-top"><span>${esc(d.key)}</span><b>${Math.round(d.v * 100)}</b></div><div class="fhealth-bar"><i style="width:${Math.round(d.v * 100)}%; background:${barColor(d.v)};"></i></div></div>`).join('')}
+    </div>
+    ${h.flags.length ? `<div class="fhealth-flags">${h.flags.slice(0, 6).map(fl => `<span class="fhealth-flag ${fl.bad ? 'bad' : 'good'}">${fl.bad ? '⚠' : '✓'} ${esc(fl.t)}</span>`).join('')}</div>` : ''}
+    <div class="fhealth-foot">Compuesto propio (rentabilidad · solvencia · crecimiento · caja) con los datos del proveedor. No es un Piotroski/Altman formal —requieren detalle de balance y flujo de caja que la fuente gratuita no expone—. No es asesoramiento financiero.</div>
+  </div>`;
 }
 
 function didacticFundamentalCards(f, earnings, daysToEarnings, dividends, asset) {
