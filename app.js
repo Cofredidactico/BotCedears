@@ -7345,13 +7345,22 @@ async function maybeComputeRotation(holdings) {
   } catch (e) { console.warn('[rotation] no se pudo computar', e.message); }
 }
 
-function sectorRotationCardHTML() {
+function sectorRotationCardHTML(stats) {
   const rot = portState.rotation;
   if (rot === undefined || !rot.concentrated) return '';
   const ow = rot.overweight;
   const why = ow.reasons.length
     ? `Ese sector viene <b>corrido</b>: ${ow.reasons.join('; ')}.`
     : `No está técnicamente sobre-extendido, pero tener tanto en un solo sector ya es un riesgo de concentración.`;
+  // ── Dimensionar la rotación en pesos (#6) ──
+  const targetPct = ow.pct > 0.40 ? 0.40 : 0.35; // objetivo de concentración del sector
+  const rotatePct = Math.max(0, ow.pct - targetPct);
+  const totalArs = stats?.totalValueArs ?? null;
+  const rotateArs = totalArs != null ? rotatePct * totalArs : null;
+  const topTk = rot.targets?.[0]?.ticker;
+  const sizing = (rotateArs != null && rotateArs > 0)
+    ? `<div class="rot-size">💸 Para bajar <b>${esc(ow.sector)}</b> de <b>${Math.round(ow.pct * 100)}%</b> a <b>${Math.round(targetPct * 100)}%</b>, rotá <b>~${pv(fmtArs(rotateArs))}</b>${topTk ? ` — por ejemplo, vendé esa parte y poné ~${pv(fmtArs(rotateArs))} en <b>${esc(topTk)}</b>` : ''}.</div>`
+    : '';
   const targetCard = (t) => {
     const bits = [];
     if (t.pctFromHigh <= -8) bits.push(`golpeado (${t.pctFromHigh.toFixed(0)}% de su máximo de 52 semanas)`);
@@ -7373,11 +7382,53 @@ function sectorRotationCardHTML() {
     ${sectionTitleHTML('Idea de rotación sectorial', 'shuffle')}
     <div class="card rot-card">
       <div class="rot-diag"><span class="rot-pct">${Math.round(ow.pct * 100)}%</span> de tu cartera está en <b>${esc(ow.sector)}</b>. ${why}</div>
+      ${sizing}
       ${rot.targets.length ? `
         <div class="rot-sub">${rot.stretched ? '💡 Considerá <b>rotar una parte</b> hacia algo más barato y menos correlacionado:' : 'Si querés bajar la concentración, mirá:'}</div>
         ${rot.targets.map(targetCard).join('')}
       ` : `<div class="rot-empty">No encontré un buen destino de rotación en el universo curado ahora mismo.</div>`}
       <div class="rot-foot">Regla determinística sobre datos reales: peso por sector, RSI, distancia a máximos y a soporte, correlación de retornos y P/E vs. su sector. Es una idea para analizar —abrí la ficha de cada candidato—, no una orden ni asesoramiento financiero.</div>
+    </div>`;
+}
+
+/* ═══════════════════ PLAN DE TOMA DE GANANCIAS (#12) ════════════════════════
+ * Para cada tenencia que ya está en ganancia, propone objetivos escalonados
+ * (por resistencia/ATR del Plan Operativo) y un stop de protección tipo
+ * chandelier (trailing) — la idea de "asegurar una parte sin cortar la corrida".
+ * Todo en USD del subyacente, sobre datos ya calculados por posición. */
+function profitTakingCardHTML(stats) {
+  const rows = [];
+  for (const r of stats.rows) {
+    if (r.gainPct == null || r.gainPct < 0.12) continue; // solo posiciones con ganancia relevante (≥12%)
+    const pr = r.d?.planRaw, price = r.d?.price;
+    if (!pr || !(price > 0) || pr.tp1 == null || pr.tp1 <= price) continue;
+    const up = (v) => ((v - price) / price) * 100;
+    const trail = pr.chandelierStop != null && pr.chandelierStop < price ? pr.chandelierStop : null;
+    rows.push({ ticker: r.ticker, gainPct: r.gainPct, price, tp1: pr.tp1, tp2: pr.tp2, tp3: pr.tp3, trail });
+  }
+  if (!rows.length) return '';
+  rows.sort((a, b) => b.gainPct - a.gainPct);
+  const up = (v, price) => ((v - price) / price) * 100;
+  const dn = (v, price) => ((price - v) / price) * 100;
+  const ptRow = (p) => `<div class="pt-row" data-port-ticker="${esc(p.ticker)}" title="Ver análisis de ${esc(p.ticker)}">
+    <div class="pt-row-head">
+      <span class="pt-tk">${esc(p.ticker)}</span>
+      <span class="pt-gain up">+${(p.gainPct * 100).toFixed(1)}%</span>
+      <span class="pt-price">${fmtUsd(p.price)}</span>
+    </div>
+    <div class="pt-levels">
+      <span class="pt-lv up">🎯 Obj 1 <b>${fmtUsd(p.tp1)}</b> <i>+${up(p.tp1, p.price).toFixed(1)}%</i></span>
+      ${p.tp2 != null ? `<span class="pt-lv up">🎯 Obj 2 <b>${fmtUsd(p.tp2)}</b> <i>+${up(p.tp2, p.price).toFixed(1)}%</i></span>` : ''}
+      ${p.trail != null ? `<span class="pt-lv down">🛡️ Stop protección <b>${fmtUsd(p.trail)}</b> <i>−${dn(p.trail, p.price).toFixed(1)}%</i></span>` : ''}
+    </div>
+    <div class="pt-advice">Tomá ~⅓ en el Objetivo 1, ⅓ en el Objetivo 2 y dejá correr el resto${p.trail != null ? ' subiendo el stop de protección' : ' con un stop ajustado'}.</div>
+  </div>`;
+  return `
+    ${sectionTitleHTML('Plan de toma de ganancias', 'target')}
+    <div class="card pt-card">
+      <div class="pt-intro">Tus posiciones <b>en ganancia</b> y cómo asegurar una parte sin cortar la corrida: objetivos escalonados y un stop de protección (trailing) por activo.</div>
+      ${rows.map(ptRow).join('')}
+      <div class="pt-foot">Objetivos por resistencia/ATR y stop tipo chandelier, en USD del subyacente. Regla determinística sobre el Plan Operativo de cada posición — no es una orden ni asesoramiento financiero.</div>
     </div>`;
 }
 
@@ -7683,7 +7734,8 @@ function portfolioHTML() {
     ${tab === 'resumen' ? `
       ${portfolioCopilotCardHTML(copilot, health)}
       ${actionPlanCardHTML(stats, risk)}
-      ${sectorRotationCardHTML()}
+      ${sectorRotationCardHTML(stats)}
+      ${profitTakingCardHTML(stats)}
       ${portfolioAttributionHTML(stats)}
       ${breadthCardHTML(stats)}
       ${portfolioTreemapSVG(stats.rows)}
