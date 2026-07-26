@@ -2610,8 +2610,38 @@ button:focus-visible, a:focus-visible, input:focus-visible,
   outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px;
 }
 
+/* ── Alertas de Cashflow (Dividendos): doble ganancia renta + zona de compra ─ */
+.cfa-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 14px; margin-bottom: 18px;
+}
+.cfa-card {
+  position: relative; padding: 15px 16px 16px; cursor: pointer;
+  border-left: 3px solid var(--card-accent, var(--accent));
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+}
+.cfa-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px oklch(0 0 0 / 0.22); }
+.cfa-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cfa-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.cfa-tk { font-weight: 800; font-size: 17px; letter-spacing: 0.3px; color: var(--text); }
+.cfa-name { font-size: 11.5px; color: var(--text-faint); margin-top: 1px; line-height: 1.3; }
+.cfa-yield { text-align: right; flex-shrink: 0; }
+.cfa-yield b { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 19px; font-weight: 700; color: var(--up-text); line-height: 1; }
+.cfa-yield span { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-faint); }
+.cfa-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 10px; }
+.cfa-badge {
+  font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border-soft); white-space: nowrap;
+}
+.cfa-badge.buy { background: oklch(0.32 0.07 152 / 0.35); border-color: oklch(0.5 0.12 152 / 0.5); color: var(--up-text); }
+.cfa-badge.grow { color: var(--text-dim); }
+.cfa-thesis { font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+.cfa-thesis b { color: var(--text); }
+
 /* ── Reduce motion: desactiva TODO lo que se mueve por interacción ─────────── */
 @media (prefers-reduced-motion: reduce) {
+  .cfa-card { transition: none; }
+  .cfa-card:hover { transform: none; }
   .pdx-tile, .pdx-period, .dash-hero-stat, .seg-btn, .advisor-seg-btn,
   .short-filter-btn, .chip, .pill, .tf-btn { transition: none; }
   .pdx-tile:hover, .pdx-period:hover, .seg-btn:hover, .advisor-seg-btn:hover,
