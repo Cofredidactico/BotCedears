@@ -4374,8 +4374,14 @@ const DIVIDEND_UNIVERSE = [
   'XOM', 'CVX', 'COP', 'KMI', 'VZ', 'T', 'IBM', 'CSCO', 'TXN', 'AVGO', 'QCOM', 'AAPL', 'MSFT',
   'JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'AXP', 'BLK', 'PFE', 'MRK', 'ABBV', 'AMGN', 'JNJ',
   'CAT', 'DE', 'LMT', 'RTX', 'HON', 'UPS', 'NKE', 'SBUX', 'LOW', 'TGT', 'GGAL', 'BMA', 'SPY', 'DIA',
+  // Pagadores de calidad sumados con el lote ampliado de CEDEARs (aristócratas
+  // y dividend growers) — alimentan también las Alertas de Cashflow.
+  'LIN', 'APD', 'SHW', 'WM', 'RSG', 'AMT', 'PLD', 'PSA', 'CMI', 'PH',
+  'AFL', 'ALL', 'TRV', 'PRU', 'ICE', 'CME', 'MCO', 'AON', 'MMC', 'CLX',
+  'KDP', 'CI', 'CVS', 'MDT', 'DUK', 'SO', 'NEE', 'D', 'O',
 ];
-const divState = { data: {}, prices: {}, loading: new Set(), started: false, sortBy: 'nextEx', detailTicker: '', detail: null, detailLoading: false };
+const divState = { data: {}, prices: {}, signal: {}, loading: new Set(), sigLoading: new Set(), started: false, sortBy: 'nextEx', detailTicker: '', detail: null, detailLoading: false };
+function getPayerSignal(ticker) { return dashState.data[ticker] ?? divState.signal[ticker] ?? null; }
 
 function dividendPrice(ticker) {
   return dashState.data[ticker]?.price ?? watchState.data[ticker]?.price ?? portState.data[ticker]?.price ?? divState.prices[ticker] ?? null;
@@ -4525,6 +4531,28 @@ async function loadDividendsData() {
     }));
     if (i + 6 < pending.length) await new Promise(res => setTimeout(res, 250));
   }
+  // Señal técnica/fundamental (score + zona de compra) de los pagadores con renta
+  // relevante que el Dashboard no cubre — para las Alertas de Cashflow. Solo los
+  // que rinden ≥2,5% (acota los pedidos) y no tienen ya señal.
+  try {
+    const macro = await getMacro();
+    const needSig = wanted.filter(t => {
+      const d = divState.data[t];
+      if (!d?.items?.length || getPayerSignal(t) || divState.sigLoading.has(t)) return false;
+      const y = dividendYield(t, d.ttm);
+      return y != null && y >= 2.5;
+    });
+    for (let i = 0; i < needSig.length; i += 5) {
+      const batch = needSig.slice(i, i + 5);
+      await Promise.all(batch.map(async (ticker) => {
+        divState.sigLoading.add(ticker);
+        try { divState.signal[ticker] = await computeLightSignal(ticker, macro); }
+        catch (_) { divState.signal[ticker] = null; }
+        finally { divState.sigLoading.delete(ticker); if (!state.asset && state.view === 'dividends') renderReport(); }
+      }));
+      if (i + 5 < needSig.length) await new Promise(res => setTimeout(res, 300));
+    }
+  } catch (_) { /* las alertas de cashflow caen a lo que haya en dashState */ }
 }
 
 /** Backtest de "captura de dividendo": para cada ex-dividend histórico simula
@@ -4641,6 +4669,60 @@ function dividendConsistencyCardHTML(loaded) {
     </div>`;
 }
 
+/* ═══════════════════ ALERTAS DE CASHFLOW ════════════════════════════════════
+ * Doble ganancia: pagadores de dividendo con renta relevante y sostenible QUE
+ * ADEMÁS están en zona de compra técnica con score sólido — no solo cobrás el
+ * dividendo, sino que el papel tiene potencial de apreciación desde un buen
+ * punto de entrada. Combina yield + crecimiento/consistencia del dividendo +
+ * score compuesto + señal de zona de compra. Todo sobre datos ya cargados. */
+function cashflowAlertsHTML() {
+  const cands = [];
+  for (const t of new Set(DIVIDEND_UNIVERSE)) {
+    const d = divState.data[t];
+    if (!d?.items?.length) continue;
+    const y = dividendYield(t, d.ttm);
+    if (y == null || y < 2.5) continue; // renta relevante
+    const sig = getPayerSignal(t);
+    if (!sig || sig.score == null) continue;
+    const buyZone = sig.alert?.type === 'buy';
+    const buyLabel = ['Compra Fuerte', 'Compra Moderada'].includes(sig.scoreLabel);
+    if (sig.score < 55 || !(buyZone || buyLabel)) continue; // exige buen score Y entrada
+    const cons = dividendConsistency(d.items);
+    if (cons?.cuts) continue; // descartamos los que recortaron el dividendo
+    const yScore = Math.min(1, y / 6);
+    const grScore = cons?.cagr != null ? Math.max(0, Math.min(1, (cons.cagr + 2) / 12)) : 0.3;
+    const entryScore = sig.score / 100;
+    const buyBonus = buyZone ? 1 : buyLabel ? 0.6 : 0;
+    const safety = cons && cons.cuts === 0 ? 1 : 0.6;
+    const cashflow = 0.26 * yScore + 0.30 * entryScore + 0.18 * grScore + 0.16 * buyBonus + 0.10 * safety;
+    cands.push({ ticker: t, name: universe.find(a => a.ticker === t)?.name ?? t, yield: y, sig, cons, buyZone, cashflow });
+  }
+  cands.sort((a, b) => b.cashflow - a.cashflow);
+  const top = cands.slice(0, 9);
+  if (!top.length) return '';
+  const card = (c) => {
+    const sc = scoreLabelColor(c.sig.scoreLabel);
+    const grow = c.cons?.cagr != null && c.cons.cagr >= 1 ? `dividendo +${c.cons.cagr.toFixed(0)}%/año` : c.cons?.cuts === 0 ? 'dividendo estable' : '';
+    return `<div class="card cfa-card" data-dash-ticker="${esc(c.ticker)}" title="Ver análisis de ${esc(c.ticker)}" style="--card-accent:${c.buyZone ? GREEN : sc.color};">
+      <div class="cfa-head">
+        <div><div class="cfa-tk">${esc(c.ticker)}</div><div class="cfa-name">${esc(c.name)}</div></div>
+        <div class="cfa-yield"><b>${c.yield.toFixed(1)}%</b><span>renta anual</span></div>
+      </div>
+      <div class="cfa-badges">
+        ${c.buyZone ? '<span class="cfa-badge buy">🟢 En zona de compra</span>' : ''}
+        <span class="cfa-badge" style="color:${sc.color};">${esc(c.sig.scoreLabel)} · ${c.sig.score}</span>
+        ${grow ? `<span class="cfa-badge grow">📈 ${grow}</span>` : ''}
+      </div>
+      <div class="cfa-thesis"><b>Doble ganancia:</b> cobrás ~${c.yield.toFixed(1)}%/año de renta ${c.buyZone ? 'y el papel está en <b>zona de compra</b>' : `y el score es <b>${esc(c.sig.scoreLabel.toLowerCase())}</b>`} (${c.sig.score}/100) — potencial de suba <em>más</em> el dividendo.</div>
+    </div>`;
+  };
+  return `
+    ${sectionTitleHTML('🏦 Alertas de Cashflow', 'coins')}
+    <div class="dash-intro">Pagadores de dividendo <strong>con renta relevante y sostenible</strong> que además están <strong>en zona de compra</strong> con score sólido: no solo cobrás el dividendo, el papel tiene potencial de apreciación desde un buen punto de entrada. Ordenados por atractivo combinado (renta + crecimiento del dividendo + calidad del score + zona de compra).</div>
+    <div class="cfa-grid">${top.map(card).join('')}</div>
+    <div class="bt-disclaimer" style="margin-bottom:24px;">Combina yield TTM, consistencia/crecimiento histórico del dividendo, el score compuesto y la señal de zona de compra — todo determinístico sobre datos reales. No es asesoramiento financiero; un dividendo alto también puede señalar riesgo, revisá cada caso.</div>`;
+}
+
 function dividendsPageHTML() {
   const loaded = DIVIDEND_UNIVERSE.filter((t, i) => DIVIDEND_UNIVERSE.indexOf(t) === i).map(t => ({ t, d: divState.data[t] })).filter(e => e.d && e.d.items?.length);
   const loadingCount = new Set(DIVIDEND_UNIVERSE).size - loaded.length;
@@ -4662,6 +4744,8 @@ function dividendsPageHTML() {
     <div class="cedear-note" style="margin-bottom:22px;">
       <strong>CEDEARs y dividendos:</strong> el tenedor de un CEDEAR también cobra los dividendos del activo subyacente, ajustados por el ratio de conversión, acreditados en dólares/pesos por el agente — habitualmente con una pequeña comisión de custodia y la retención impositiva que corresponda. El yield mostrado es el del activo subyacente en USD.
     </div>
+
+    ${cashflowAlertsHTML()}
 
     ${sectionTitleHTML('Próximos Ex-Dividends', 'calendar')}
     ${!upcoming.length ? `<div class="card watch-empty">${loadingCount > 0 ? 'Cargando calendario de dividendos…' : 'No hay ex-dividends próximos estimados en el universo cargado.'}</div>` : `
