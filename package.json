@@ -1,0 +1,10 @@
+{
+  "name": "botcedears",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BotCedears — análisis de CEDEARs/acciones/ETFs/cripto para inversores argentinos. El frontend son ES modules servidos estáticamente; este package.json es solo para las herramientas de Node (tests). No agrega dependencias ni pasos de build al deploy.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
