@@ -144,6 +144,23 @@ Abrir `index.html` con cualquier servidor estático (ej. `npx serve .`) y
 agregar `?mode=mock` a la URL para forzar datos simulados sin pegarle a
 `/api/*` (útil para ver el diseño sin tener las keys a mano).
 
+### Tests del motor
+
+El núcleo de cálculo (`indicators.js` y `scoring.js` — funciones puras, sin
+dependencias) tiene una red de tests con el runner nativo de Node (sin
+paquetes que instalar):
+
+```
+npm test        # equivale a: node --test
+```
+
+Cubren indicadores (EMA/SMA/RSI/ATR/MACD/Bollinger/OBV), `computeTechnical`,
+`computeScore` (incluye un test de comportamiento: una tendencia alcista debe
+puntuar más que una bajista), `computePlan` y el contrato de
+`detectPriceAlert`. El `package.json` es **solo para estas herramientas de
+Node**: no agrega dependencias ni pasos de build, y el frontend se sigue
+sirviendo como estáticos igual que antes.
+
 ## Mejoras de precisión del motor técnico (timing de compra/venta)
 
 Sobre el motor de indicadores/score original se agregaron 5 refinamientos
@@ -771,26 +788,6 @@ Cierran el círculo análisis → acción → seguimiento en el Portfolio Adviso
 Refactor: el motor de sugerencias de compra se extrajo a `suggestBuys(...)`,
 reutilizado por Efectivo & Compras y por el Plan de Trading. Nada garantiza
 ganancias — todo maximiza la ventaja y controla el riesgo.
-
-## Tenencias: comprar más + Libro de Operaciones
-
-- **Comprar más por fila** (botón ➕ en la tabla de tenencias): registrás una
-  compra adicional de un activo (cantidad + precio) y actualiza el **precio
-  promedio de compra (PPC) ponderado** — `(costo viejo × cant. vieja + precio
-  nuevo × cant. nueva) / cantidad total` — suma la cantidad y guarda la
-  operación. El PPC ahora se muestra en cada fila.
-- **Libro de Operaciones** (pestaña Operar): guarda TODAS tus compras y ventas
-  y muestra el **resultado total real** = realizado (ganancia/pérdida de las
-  ventas cerradas) + no realizado (lo que llevás ganado en las posiciones
-  abiertas), separado por moneda, con el retorno % sobre el costo abierto — la
-  respuesta directa a "cuánto realmente voy ganando con el tiempo". Lista
-  completa de operaciones con **filtro por activo**, **exportar a CSV** y
-  **borrar** cada operación (para corregir errores). Reemplaza al resumen
-  anterior de P&L realizado.
-
-Las operaciones se guardan solo en este navegador. El botón ⤓ (vender) y el ＋
-(comprar más) alimentan el libro automáticamente; ejecutar órdenes desde el
-Plan de Trading del Día también.
 
 ## Límites conocidos del MVP (léase antes de operar con esto)
 
