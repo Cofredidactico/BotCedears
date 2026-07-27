@@ -1,10 +1,9 @@
-import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, getRecommendations, isLive } from './dataSource.js';
-import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged, macd, rsi, ema } from './indicators.js';
+import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, isLive } from './dataSource.js';
+import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged, macd, rsi } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
-import { fmtUsd, fmtArs, fmtPct, fmtNum, esc, withAlpha, clampNum } from './format.js';
 
 const GREEN = 'oklch(0.76 0.18 152)', AMBER = 'oklch(0.75 0.15 70)', RED = 'oklch(0.70 0.21 23)', BLUE = 'oklch(0.72 0.15 250)', GOLD = 'oklch(0.82 0.14 85)';
 
@@ -107,16 +106,12 @@ const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
 // Cada widget declara su ícono, color de acento (para la cabecera) y si ocupa
 // el ancho completo del bento (tablas/grids grandes) o media columna.
 const DASH_WIDGETS = [
-  { key: 'digest', label: 'Resumen del Día', icon: 'briefcase', accent: 'violet', full: true },
   { key: 'idea', label: 'Idea del Día', icon: 'zap', accent: 'violet', full: false },
   { key: 'agenda', label: 'Qué Mirar Hoy', icon: 'target', accent: 'amber', full: false },
-  { key: 'calendar', label: 'Calendario Económico', icon: 'calendar', accent: 'amber', full: false },
   { key: 'opportunities', label: 'Oportunidades del Día', icon: 'trend', accent: 'green', full: true },
   { key: 'buyzone', label: 'En Zona de Compra Ahora', icon: 'target', accent: 'green', full: true },
   { key: 'breadth', label: 'Amplitud del Mercado', icon: 'radar', accent: 'blue', full: false },
   { key: 'movers', label: 'Destacados del Día', icon: 'trend', accent: 'blue', full: true },
-  { key: 'breakouts', label: 'Rupturas de Hoy', icon: 'trend', accent: 'green', full: true },
-  { key: 'volume', label: 'Volumen Inusual', icon: 'radar', accent: 'orange', full: true },
   { key: 'argentina', label: 'Panel Argentina', icon: 'flag', accent: 'cyan', full: true },
   { key: 'cripto', label: 'Termómetro Cripto', icon: 'zap', accent: 'orange', full: true },
   { key: 'heatmap', label: 'Heatmap Sectorial', icon: 'grid', accent: 'violet', full: false },
@@ -151,17 +146,15 @@ const portState = {
   spy: null, // cierres de SPY para beta/benchmark de la cartera
   cclHistory: null, // serie histórica del CCL (argentinadatos) para medir la cartera en dólares reales
   dividends: {}, // ticker -> historial de dividendos, para el yield agregado de la cartera
-  earnings: {}, // ticker -> próximo balance (para el calendario de catalizadores de "Mi Día")
-  rotation: undefined, rotationKey: null, // idea de rotación sectorial (computada en la capa de datos)
   compact: lsGetSafe('icp_port_compact', '0') === '1',
   privacy: lsGetSafe('icp_port_privacy', '0') === '1',
   allocAmount: '', allocResult: null, // asignador "¿qué compro con AR$X?"
   accountTotalArs: (() => { const v = parseFloat(lsGetSafe('icp_port_account', '')); return isNaN(v) || v <= 0 ? null : v; })(), // valor total declarado de la cuenta (ARS) → habilita el motor de liquidez
-  investedArs: (() => { const v = parseFloat(lsGetSafe('icp_port_invested', '')); return isNaN(v) || v <= 0 ? null : v; })(), // total que el usuario declara haber invertido (ARS) → resumen didáctico de ganancia
   goalUsd: (() => { const v = parseFloat(lsGetSafe('icp_port_goal', '')); return isNaN(v) || v <= 0 ? null : v; })(), // meta de patrimonio (USD)
   goalMonthlyUsd: (() => { const v = parseFloat(lsGetSafe('icp_port_goal_m', '')); return isNaN(v) || v < 0 ? 0 : v; })(), // aporte mensual (USD)
   _planCache: null, // último Plan de Trading calculado, para ejecutar por índice
-  tab: 'hoy', // pestaña activa de la Radiografía de Cartera (arranca en el cockpit "Mi Día")
+  opsFilter: 'all', // filtro del Libro de Operaciones por ticker
+  tab: 'resumen', // pestaña activa de la Radiografía de Cartera
   stressShock: null, // shock de mercado elegido en el panel de estrés (o null)
   optMode: 'minvar', // criterio del optimizador de cartera
 };
@@ -238,20 +231,6 @@ function showOnboarding() {
   renderOnboarding();
 }
 els.helpBtn?.addEventListener('click', () => showOnboarding());
-
-/* ── Tema claro/oscuro ──────────────────────────────────────────────────────
- * La preferencia ya se aplicó en index.html (antes de pintar, sin flash); acá
- * solo cableamos el toggle y actualizamos el color de la barra del navegador. */
-function applyTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  try { localStorage.setItem('icp_theme', theme); } catch (e) {}
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'light' ? '#f6f7fb' : '#0a0b12');
-}
-document.getElementById('theme-toggle')?.addEventListener('click', () => {
-  const now = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-  applyTheme(now === 'light' ? 'dark' : 'light');
-});
 els.onboardingOverlay?.addEventListener('click', (e) => { if (e.target === els.onboardingOverlay) closeOnboarding(true); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && els.onboardingOverlay?.style.display === 'flex') closeOnboarding(true);
@@ -309,78 +288,9 @@ function alertConfidenceSuffix(a) {
 function alertTitleAttr(a) {
   if (!a) return '';
   const parts = [];
-  const narr = alertNarrativeText(a);
-  if (narr) parts.push(narr);
-  else if (a.reason) parts.push(a.reason);
+  if (a.reason) parts.push(a.reason);
   if (a.confirmations?.length) parts.push('✓ ' + a.confirmations.join(' · '));
   return parts.length ? ` title="${esc(parts.join('  |  '))}"` : '';
-}
-
-/* ── Narrativa de la alerta (mismo estilo que la de Trades Cortos) ───────────
- * Traduce la señal de precio (zona de compra/venta/stop) a una frase clara con
- * la proyección real hasta el nivel opuesto: la resistencia como objetivo de un
- * rebote de compra, o el soporte como objetivo de una caída de venta. Usa los
- * niveles S/R que detectPriceAlert ya adjunta a la alerta — no inventa nada:
- * es un objetivo estructural, no una promesa. Devuelve null si no aplica. */
-function alertNarrative(a) {
-  if (!a) return null;
-  const sup = a.support, res = a.resistance, price = a.entry;
-  const conf = a.confluences?.length ? ` (el nivel confluye con ${a.confluences.join(', ')})` : '';
-  const rrTxt = a.rr != null ? ` Riesgo/beneficio ${a.rr}:1.` : '';
-  const lead = a.pending ? 'Está tocando' : 'Llegó a';
-  if (a.type === 'buy') {
-    const projPct = (res != null && price > 0 && res > price) ? ((res - price) / price) * 100 : null;
-    const proj = projPct != null ? ` Si rebota, el objetivo es la resistencia en <b>${fmtUsd(res)}</b> (<b class="up">+${projPct.toFixed(1)}%</b>).` : '';
-    return `🟢 ${lead} la <b>zona de compra</b>${sup != null ? ` — tocó el soporte de <b>${fmtUsd(sup)}</b>` : ''}${conf}.${proj}${rrTxt}`;
-  }
-  if (a.type === 'sell') {
-    const projPct = (sup != null && price > 0 && sup < price) ? ((price - sup) / price) * 100 : null;
-    const proj = projPct != null ? ` Si gira, el objetivo es el soporte en <b>${fmtUsd(sup)}</b> (<b class="down">−${projPct.toFixed(1)}%</b>).` : '';
-    return `🔴 ${lead} la <b>zona de venta</b>${res != null ? ` — tocó la resistencia de <b>${fmtUsd(res)}</b>` : ''}${conf}.${proj}${rrTxt}`;
-  }
-  if (a.type === 'stop') {
-    return `⛔ <b>Rompió el soporte</b>${sup != null ? ` de <b>${fmtUsd(sup)}</b>` : ''} — el piso técnico cedió; el plan de compra queda invalidado hasta que recupere el nivel.`;
-  }
-  return null;
-}
-// Versión en texto plano (para tooltips y notificaciones).
-function alertNarrativeText(a) {
-  const html = alertNarrative(a);
-  return html ? html.replace(/<[^>]+>/g, '') : null;
-}
-
-/* ── "Qué mirar hoy" ─────────────────────────────────────────────────────────
- * El paso siguiente accionable de la alerta: qué falta para confirmar la señal
- * (las confirmaciones del motor que todavía NO se cumplen) y a qué nivel se
- * invalida. Convierte "está en zona de compra" en un plan concreto. Todo sale
- * de datos ya calculados (factors + niveles de la alerta); no inventa nada. */
-function alertWatchToday(a) {
-  if (!a) return null;
-  if (a.type === 'stop') return 'Esperá señales de piso (una vela de reversión con volumen) antes de pensar en recomprar — no atajes el cuchillo cayendo.';
-  const parts = [];
-  if (a.pending) parts.push('Esperá un <b>segundo cierre dentro de la zona</b> — un solo toque puede ser un amague.');
-  // Confirmaciones que faltan (lo que hay que vigilar), priorizando las de mayor peso.
-  const missing = (a.factors || []).filter(f => f.ok !== true);
-  const missingPrimary = missing.filter(f => f.primary).map(f => f.label.toLowerCase());
-  const missingOther = missing.filter(f => !f.primary).map(f => f.label.toLowerCase());
-  const toWatch = (missingPrimary.length ? missingPrimary : missingOther).slice(0, 2);
-  if (toWatch.length) parts.push(`Para confirmar, mirá que se cumpla: <b>${toWatch.join('</b> y <b>')}</b>.`);
-  else if (!a.pending) parts.push('Las señales clave ya están alineadas — vigilá que el <b>volumen</b> sostenga el movimiento.');
-  // Nivel de invalidación (dónde el setup deja de tener sentido).
-  if (a.type === 'buy' && a.support != null) parts.push(`Se invalida si <b>cierra por debajo del soporte</b> (${fmtUsd(a.support)}).`);
-  if (a.type === 'sell' && a.resistance != null) parts.push(`Se invalida si <b>cierra por encima de la resistencia</b> (${fmtUsd(a.resistance)}).`);
-  return parts.length ? parts.join(' ') : null;
-}
-// Tarjeta narrativa de la alerta en la ficha del activo (narrativa + qué mirar hoy).
-function alertNarrativeCardHTML(a) {
-  const txt = alertNarrative(a);
-  if (!txt) return '';
-  const cls = a.type === 'buy' ? 'up' : a.type === 'sell' ? 'down' : 'stop';
-  const watch = alertWatchToday(a);
-  return `<div class="card alert-narrative ${cls}">
-    <div class="alert-narrative-lead">${txt}</div>
-    ${watch ? `<div class="alert-watch">👀 <span class="alert-watch-tag">Qué mirar hoy</span> ${watch}</div>` : ''}
-  </div>`;
 }
 
 /** Tarjeta didáctica del GRADO de la zona de compra/venta en la ficha del
@@ -413,147 +323,6 @@ function alertGradeCardHTML(a) {
       <div class="agc-foot">El grado combina, con distinto peso, la reversión del precio, el filtro de tendencia, el volumen, la confluencia del nivel y el riesgo/beneficio — no es una recomendación, es cuán alineadas están las señales técnicas ahora.</div>
     </div>`;
 }
-/* ── Confiabilidad histórica de la señal de alerta ──────────────────────────
- * El grado A/B/C dice cuán alineadas están las señales HOY; esto responde la
- * otra mitad: cuando el motor dio esta MISMA señal (tipo + confianza) en el
- * pasado de ESTE activo, ¿qué pasó después? Reusa el backtester walk-forward
- * (sin look-ahead) — no dispara pedidos extra más allá de las velas del ticker,
- * y cachea el resultado por activo. Es lo que convierte una lectura cualitativa
- * ("zona de compra grado A") en una con respaldo empírico ("acertó 68% con
- * retorno medio +4% a 20 ruedas, n=31"). No garantiza nada a futuro: describe
- * el comportamiento pasado del precio tras señales equivalentes. */
-const alertReliabilityCache = {}; // ticker -> { at, promise?, result?, error? }
-const RELIAB_HORIZON = 20; // ~1 mes de rueda — horizonte principal de lectura
-const RELIAB_MIN_N = 12;   // debajo de esto la muestra es chica: se avisa
-
-function ensureBacktestFor(ticker) {
-  const c = alertReliabilityCache[ticker];
-  if (c?.result && Date.now() - c.at < 30 * 60 * 1000) return Promise.resolve(c.result);
-  if (c?.promise) return c.promise;
-  const promise = runBacktest(ticker)
-    .then(res => { alertReliabilityCache[ticker] = { at: Date.now(), result: res }; return res; })
-    .catch(err => { alertReliabilityCache[ticker] = { at: Date.now(), error: err }; throw err; });
-  alertReliabilityCache[ticker] = { at: Date.now(), promise };
-  return promise;
-}
-
-const fmtSignedPct = (x, dp = 1) => x == null || isNaN(x) ? 'N/D' : `${x >= 0 ? '+' : ''}${x.toFixed(dp)}%`;
-
-// Lectura numérica de los indicadores más importantes — todo ya calculado en
-// `technical`, sin pedidos extra. Da "más estadísticas de indicadores" a la vista.
-function keyIndicatorReadouts(t, plan, price, alert) {
-  const out = [];
-  const atrPct = t.atr && price ? (t.atr / price) * 100 : null;
-  const distStop = plan?.raw?.stopLoss && price ? ((price - plan.raw.stopLoss) / price) * 100 : null;
-  if (!isNaN(t.rsi)) {
-    const z = t.rsi >= 70 ? { s: 'sobrecomprado', tone: 'warn' } : t.rsi <= 30 ? { s: 'sobrevendido', tone: 'good' }
-      : t.rsi >= 55 ? { s: 'con fuerza', tone: 'good' } : t.rsi <= 45 ? { s: 'flojo', tone: 'warn' } : { s: 'neutral', tone: 'mut' };
-    out.push({ k: 'RSI (14)', v: t.rsi.toFixed(0), sub: z.s, tone: z.tone });
-  }
-  if (!isNaN(t.adx)) {
-    const z = t.adx >= 40 ? { s: 'muy fuerte', tone: 'good' } : t.adx >= 25 ? { s: 'fuerte', tone: 'good' }
-      : t.adx >= 20 ? { s: 'incipiente', tone: 'mut' } : { s: 'sin tendencia', tone: 'warn' };
-    out.push({ k: 'ADX (tendencia)', v: t.adx.toFixed(0), sub: z.s, tone: z.tone });
-  }
-  if (atrPct != null) out.push({ k: 'Volatilidad (ATR)', v: `${atrPct.toFixed(1)}%`, sub: atrPct >= 4 ? 'alta' : atrPct <= 1.5 ? 'baja' : 'media', tone: 'mut' });
-  if (t.relVolume != null) out.push({ k: 'Volumen vs. prom.', v: `${t.relVolume.toFixed(1)}×`, sub: t.relVolume >= 1.5 ? 'clímax' : t.relVolume >= 1 ? 'normal-alto' : 'flojo', tone: t.relVolume >= 1.5 ? 'good' : 'mut' });
-  if (alert?.rr != null) out.push({ k: 'Riesgo / Beneficio', v: `${alert.rr}:1`, sub: alert.rr >= 2 ? 'muy favorable' : alert.rr >= 1.5 ? 'favorable' : 'ajustado', tone: alert.rr >= 1.5 ? 'good' : 'warn' });
-  if (distStop != null) out.push({ k: 'Distancia al stop', v: `${Math.abs(distStop).toFixed(1)}%`, sub: 'riesgo si falla', tone: 'mut' });
-  return out;
-}
-
-// Tarjeta sincrónica: cabecera + lectura de indicadores + un hueco (#alert-bt-slot)
-// que se completa con la estadística histórica cuando termina el backtest.
-function alertReliabilityCardHTML(alert, t, plan, price, ticker) {
-  if (!alert || (alert.type !== 'buy' && alert.type !== 'sell') || !alert.grade) return '';
-  const reads = keyIndicatorReadouts(t, plan, price, alert);
-  const readGrid = reads.length ? `<div class="reliab-reads">${reads.map(r => `<div class="reliab-read reliab-tone-${r.tone}"><div class="reliab-read-k">${esc(r.k)}</div><div class="reliab-read-v">${esc(r.v)}</div><div class="reliab-read-sub">${esc(r.sub)}</div></div>`).join('')}</div>` : '';
-  return `
-    ${sectionTitleHTML('Confiabilidad histórica de la señal', 'award', '', 'sec-conf')}
-    <div class="card reliab-card">
-      <div class="reliab-lead">Cuando el motor dio esta misma señal (<strong>${alert.type === 'buy' ? 'zona de compra' : 'zona de venta'} · confianza ${esc(alert.pending ? 'tentativa' : alert.confidence)}</strong>) en el pasado de ${esc(ticker)}, ¿qué pasó después? Medido sobre sus velas diarias reales, sin mirar el futuro.</div>
-      <div id="alert-bt-slot" class="reliab-bt reliab-bt-loading">Midiendo la confiabilidad histórica…</div>
-      <div class="reliab-subtitle">Lectura de indicadores clave ahora</div>
-      ${readGrid}
-      <div class="reliab-foot">La estadística histórica describe el comportamiento pasado del precio tras señales equivalentes; no garantiza resultados futuros. Usala junto al grado de la zona y a tu propia gestión de riesgo.</div>
-    </div>`;
-}
-
-// Agrega varias filas de alerta del mismo tipo (distintas confianzas) ponderando
-// por nº de casos — para cuando la confianza exacta no tiene muestra suficiente.
-function aggregateAlertRows(rows) {
-  const type = rows[0].type;
-  const horizons = BACKTEST_HORIZONS.map(h => {
-    let n = 0, sumRet = 0, sumWin = 0;
-    for (const r of rows) {
-      const x = r.horizons.find(z => z.h === h);
-      if (x && x.n) { n += x.n; sumRet += x.avgPct * x.n; sumWin += x.winRate * x.n; }
-    }
-    if (!n) return { h, n: 0, avgPct: null, winRate: null };
-    return { h, n, avgPct: sumRet / n, winRate: Math.round(sumWin / n) };
-  });
-  return { type, confidence: 'todas', horizons };
-}
-
-function reliabBtBodyHTML(row, alert, price, plan, aggregated) {
-  const pick = row.horizons.find(h => h.h === RELIAB_HORIZON && h.n)
-    || row.horizons.slice().sort((a, b) => (b.n || 0) - (a.n || 0))[0];
-  if (!pick || !pick.n) return `<div class="reliab-bt-note">Sin casos históricos suficientes para esta señal.</div>`;
-  const buy = alert.type === 'buy';
-  const favor = buy ? pick.avgPct >= 0 : pick.avgPct <= 0; // retorno del precio a favor de la señal
-  const riskPct = plan?.raw?.stopLoss && price ? Math.abs((price - plan.raw.stopLoss) / price) * 100 : null;
-  const expR = (buy && riskPct && pick.avgPct != null) ? pick.avgPct / riskPct : null;
-  const small = pick.n < RELIAB_MIN_N;
-  const tiles = [
-    { k: 'Acierto histórico', v: `${pick.winRate}%`, tone: pick.winRate >= 55 ? 'good' : pick.winRate >= 45 ? 'mut' : 'warn', sub: buy ? 'subió después' : 'bajó después' },
-    { k: `Retorno medio a ${pick.h} ruedas`, v: fmtSignedPct(pick.avgPct), tone: favor ? 'good' : 'warn', sub: 'del precio, por señal' },
-    { k: 'Casos analizados', v: `${pick.n}`, tone: small ? 'warn' : 'mut', sub: small ? 'muestra chica' : 'histórico real' },
-  ];
-  if (expR != null) tiles.push({ k: 'Expectativa', v: `${expR >= 0 ? '+' : ''}${expR.toFixed(2)} R`, tone: expR >= 0.3 ? 'good' : expR >= 0 ? 'mut' : 'warn', sub: 'ganancia / riesgo por señal' });
-  const table = `<table class="reliab-htable"><thead><tr><th>Horizonte</th><th>Acierto</th><th>Retorno medio</th><th>Casos</th></tr></thead><tbody>
-    ${row.horizons.map(h => h.n ? `<tr><td>${h.h} ruedas</td><td class="${h.winRate >= 50 ? 'bt-pos' : 'bt-neg'}">${h.winRate}%</td><td class="${(buy ? h.avgPct >= 0 : h.avgPct <= 0) ? 'bt-pos' : 'bt-neg'}">${fmtSignedPct(h.avgPct)}</td><td>${h.n}</td></tr>` : '').join('')}
-  </tbody></table>`;
-  return `
-    <div class="reliab-tiles">${tiles.map(t => `<div class="reliab-tile reliab-tone-${t.tone}"><div class="reliab-tile-v">${esc(t.v)}</div><div class="reliab-tile-k">${esc(t.k)}</div><div class="reliab-tile-sub">${esc(t.sub)}</div></div>`).join('')}</div>
-    ${aggregated ? `<div class="reliab-agg-note">Muestra agregada de todas las confianzas de ${buy ? 'compra' : 'venta'} (no hubo suficientes casos de confianza ${esc(alert.confidence)} sola).</div>` : ''}
-    ${table}
-    ${expR != null ? `<div class="reliab-agg-note">Expectativa en R = retorno medio ÷ riesgo al stop (${riskPct.toFixed(1)}%): cuánto se ganó o perdió, en múltiplos del riesgo asumido, por señal.</div>` : ''}
-    ${small ? `<div class="reliab-bt-note">Ojo: con pocos casos la estadística es orientativa, no concluyente.</div>` : ''}`;
-}
-
-async function hydrateAlertReliability(ticker, alert, technical, price, plan) {
-  const slot = document.getElementById('alert-bt-slot');
-  if (!slot) return;
-  let res;
-  try { res = await ensureBacktestFor(ticker); }
-  catch (e) {
-    if (!state.asset || state.asset.ticker !== ticker) return;
-    slot.classList.remove('reliab-bt-loading');
-    slot.innerHTML = `<div class="reliab-bt-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>`;
-    return;
-  }
-  if (!state.asset || state.asset.ticker !== ticker) return; // el usuario cambió de activo
-  slot.classList.remove('reliab-bt-loading');
-  if (res.insufficientData) {
-    slot.innerHTML = `<div class="reliab-bt-note">Todavía no hay suficiente historial (${res.candleCount}/${res.needed} velas) para medir la confiabilidad de las señales en ${esc(ticker)}.</div>`;
-    return;
-  }
-  const rows = res.alertRows ?? [];
-  const conf = alert.pending ? null : alert.confidence;
-  let row = conf ? rows.find(r => r.type === alert.type && r.confidence === conf) : null;
-  let aggregated = false;
-  const exactN = row ? (row.horizons.find(h => h.h === RELIAB_HORIZON)?.n ?? 0) : 0;
-  if (!row || exactN < RELIAB_MIN_N) {
-    const same = rows.filter(r => r.type === alert.type);
-    if (same.length) { row = aggregateAlertRows(same); aggregated = true; }
-  }
-  if (!row) {
-    slot.innerHTML = `<div class="reliab-bt-note">El motor no disparó señales de ${alert.type === 'buy' ? 'compra' : 'venta'} suficientes en el histórico de ${esc(ticker)} para medir su precisión.</div>`;
-    return;
-  }
-  slot.innerHTML = reliabBtBodyHTML(row, alert, price, plan, aggregated);
-}
-
 let alertsEnabled = lsGetSafe('icp_alerts_enabled', '0') === '1';
 const lastAlertByTicker = {}; // ticker -> 'buy'|'sell'|'stop'|null, para notificar solo en la transición
 const lastStructureByTicker = {}; // ticker -> structure.short ('BOS alcista'|'BOS bajista'|'CHoCH'|'Rango'), para notificar solo en el cambio
@@ -934,9 +703,15 @@ async function loadChartTf(tf) {
   }
 }
 
-/* ───────────────────────── utilidades ─────────────────────────
- * Los helpers puros de formato/número viven ahora en format.js (importados
- * arriba). clampNum también salió allá. */
+/* ───────────────────────── utilidades ───────────────────────── */
+const fmtUsd = (n) => n == null || isNaN(n) ? 'N/D' : (Math.abs(n) >= 1000 ? `US$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : `$${n.toFixed(2)}`);
+const fmtArs = (n) => n == null || isNaN(n) ? 'N/D' : `AR$${Math.round(n).toLocaleString('es-AR')}`;
+const fmtPct = (n, digits = 1) => n == null || isNaN(n) ? 'N/D' : `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`;
+const fmtNum = (n, digits = 2) => n == null || isNaN(n) ? 'N/D' : n.toFixed(digits);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Inserta un canal alpha en un oklch(...) sin parsear componentes — solo
+// para glows/sombras decorativas sobre colores ya definidos en el código.
+const withAlpha = (oklchStr, alpha) => oklchStr.replace(/\)\s*$/, ` / ${alpha})`);
 
 /* ───────────────────────── iconografía (SVG inline, sin dependencias) ───────────────────────── */
 const ICON_ATTR = 'class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
@@ -965,8 +740,8 @@ const ICONS = {
   filter: `<svg ${ICON_ATTR}><path d="M3.5 4.5h17l-6.2 8v6.5l-4.6 2v-8.5Z"/></svg>`,
   shuffle: `<svg ${ICON_ATTR}><path d="M3 6h3.5c2.5 0 3.8 1.6 5 3.5"/><path d="M11.5 14.5c1.2 1.9 2.5 3.5 5 3.5H21"/><polyline points="17.5,4.5 21,6 17.5,7.5"/><polyline points="17.5,15 21,16.5 17.5,18"/><path d="M3 18h3.5c2.5 0 3.8-1.6 5-3.5"/><path d="M11.5 9.5C12.7 7.6 14 6 16.5 6"/></svg>`,
 };
-function sectionTitleHTML(text, iconKey, style = '', id = '') {
-  return `<div class="sectiontitle${id ? ' has-anchor' : ''}" ${id ? `id="${id}"` : ''} ${style ? `style="${style}"` : ''}>${ICONS[iconKey] ?? ''}<span>${esc(text)}</span></div>`;
+function sectionTitleHTML(text, iconKey, style = '') {
+  return `<div class="sectiontitle" ${style ? `style="${style}"` : ''}>${ICONS[iconKey] ?? ''}<span>${esc(text)}</span></div>`;
 }
 
 /** Estado vacío con ícono — mismo mensaje real que antes, con más peso
@@ -1093,14 +868,13 @@ async function loadReport(ticker) {
     // (CEDEARs de mineras/tenedoras y ETFs spot) — BTC se cachea 60s en
     // dataSource, así que no multiplica requests al mirar varios seguidos.
     const wantsBtcBeta = CRYPTO_RELATED.has(ticker) && ticker !== 'BTC';
-    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, btcCandles, earnings, dividends, recommendations] = await Promise.all([
+    const [quote, candles, fundamentals, news, macro, ccl, weeklyNative, spyCandles, btcCandles, earnings, dividends] = await Promise.all([
       getQuote(ticker), getCandles(ticker, '1day', 260), getFundamentals(ticker), getNews(ticker), getMacro(), getCCL(),
       isCripto ? Promise.resolve(null) : getCandles(ticker, '1week', 130),
       ticker === 'SPY' ? Promise.resolve(null) : getCandles('SPY', '1day', 220),
       wantsBtcBeta ? getCandles('BTC', '1day', 220) : Promise.resolve(null),
       getEarnings(ticker),
       getDividends(ticker),
-      getRecommendations(ticker).catch(() => null),
     ]);
 
     // Operar en la ventana de unos días antes de que la empresa reporte
@@ -1149,7 +923,7 @@ async function loadReport(ticker) {
     const plan = computePlan(technical, scoreResult.score);
 
     state.report = {
-      asset, quote, candles, fundamentals, news, macro, ccl, recommendations,
+      asset, quote, candles, fundamentals, news, macro, ccl,
       technical, weeklyTechnical, confluence, marketCorrelation, relativeStrength, btcCorrelation, earnings, daysToEarnings, earningsSoon, dividends, ...scoreResult, plan,
       ts: { quote: now, candles: now, fundamentals: now, news: now },
     };
@@ -1497,167 +1271,6 @@ function risksAndCatalysts(r) {
   return { risks, catalysts };
 }
 
-/* ── Informe del Analista ────────────────────────────────────────────────────
- * Síntesis con voz propia sobre TODO lo que el motor ya calculó (score,
- * técnico, fundamental, plan, zona). Es determinístico y trazable: no llama a la
- * IA ni inventa nada — teje en lenguaje natural las mismas cifras que se ven
- * desglosadas más abajo, al estilo de un one-pager de research de banca. Este
- * es el "diferencial": pasa de mostrar indicadores a entregar una tesis. */
-function analystThesisParagraphs(r, priceAlert) {
-  const { asset, quote, technical: t, fundamentals: f, score, scoreLabel, confidence, plan, relativeStrength } = r;
-  const price = quote.usd;
-  const P = [];
-  // 1 · Identidad + veredicto
-  P.push(`${esc(asset.name)} (${esc(asset.ticker)})${asset.sector ? `, del sector ${esc(asset.sector.toLowerCase())},` : ''} cotiza a ${fmtUsd(price)} y obtiene un score compuesto de <strong>${score}/100</strong> — lectura de <strong>${esc(scoreLabel.toLowerCase())}</strong> con confianza ${esc(String(confidence).toLowerCase())}.`);
-  // 2 · Técnico
-  const rsiTxt = isNaN(t.rsi) ? '' : t.rsi >= 65 ? ` con momentum caliente (RSI ${t.rsi.toFixed(0)})` : t.rsi <= 35 ? ` con momentum deprimido (RSI ${t.rsi.toFixed(0)})` : ` con momentum neutro (RSI ${t.rsi.toFixed(0)})`;
-  const rsTxt = relativeStrength ? (relativeStrength.trend === 'up' ? `, y le viene ganando al S&P 500${relativeStrength.isNewHigh ? ' (en máximos de fuerza relativa, señal de liderazgo)' : ''}` : `, aunque viene rezagando frente al S&P 500`) : '';
-  const structTxt = t.structure?.short ? ` (${esc(t.structure.short.toLowerCase())})` : '';
-  P.push(`En el plano técnico, la tendencia primaria es <strong>${esc(String(t.primaryTrend).toLowerCase())}</strong>${structTxt}${rsiTxt}${rsTxt}.`);
-  // 3 · Fundamental
-  if (f?.hasData) {
-    const bits = [];
-    if (f.epsGrowth != null) bits.push(`el EPS crece ${f.epsGrowth.toFixed(0)}% interanual`);
-    else if (f.revenueGrowth != null) bits.push(`los ingresos crecen ${f.revenueGrowth.toFixed(0)}% interanual`);
-    if (f.roe != null) bits.push(`ROE de ${f.roe.toFixed(0)}%`);
-    if (f.netMargin != null) bits.push(`margen neto de ${f.netMargin.toFixed(0)}%`);
-    let val = '';
-    if (f.peg != null) val = ` La valuación luce ${f.peg > 2.5 ? 'exigente' : f.peg < 1 ? 'atractiva' : 'razonable'} (PEG ${f.peg.toFixed(1)}x).`;
-    else if (f.peTTM != null) val = ` Cotiza a ${f.peTTM.toFixed(0)}× ganancias (P/E TTM).`;
-    P.push(`En fundamentales, ${bits.length ? bits.join(', ') : 'con cobertura parcial del proveedor'}.${val}`);
-  } else {
-    P.push(`No hay cobertura de fundamentales del proveedor para este símbolo, así que el veredicto se apoya en precio, volumen e indicadores técnicos.`);
-  }
-  // 4 · Zona / plan
-  if (priceAlert && (priceAlert.type === 'buy' || priceAlert.type === 'sell') && priceAlert.grade) {
-    const dir = priceAlert.type === 'buy' ? 'compra' : 'venta';
-    P.push(`Hoy el precio está en <strong>zona de ${dir} grado ${priceAlert.grade}</strong> (calidad ${priceAlert.quality}/100)${priceAlert.rr != null ? `, con un riesgo/beneficio de ${priceAlert.rr}:1` : ''} — el plan operativo detalla stop y objetivos más abajo.`);
-  } else if (priceAlert && priceAlert.type === 'stop') {
-    P.push(`Atención: el precio <strong>rompió el soporte</strong> y activó el stop de riesgo — el plan prioriza proteger el capital.`);
-  } else {
-    P.push(`El precio no está en una zona operativa clara ahora mismo; el plan define la compra en ${esc(plan.compra)} con stop en ${esc(plan.stopLoss)}.`);
-  }
-  return P;
-}
-
-function analystVerdictLine(r, priceAlert) {
-  const { score } = r;
-  const inBuy = priceAlert?.type === 'buy';
-  const inSell = priceAlert?.type === 'sell';
-  if (score >= 65 && inBuy) return `El cuadro de fondo y el timing coinciden: setup de acumulación para el horizonte de ${horizonFor(r.technical)}, siempre respetando el stop del plan.`;
-  if (score >= 65 && !inBuy) return `Sesgo comprador de fondo, pero el precio no está en zona óptima — conviene esperar un retroceso hacia la zona de compra del plan.`;
-  if (score >= 45 && score < 65) return `Cuadro mixto: ni compra ni venta claras. Mejor operar por los niveles del plan que tomar una posición direccional fuerte.`;
-  if (inSell || score < 45) return `El balance de señales no favorece nuevas compras${inSell ? ' y el precio está en zona de distribución' : ''}; en posiciones existentes, vigilar de cerca el stop.`;
-  return `Lectura neutral — seguir de cerca los niveles del plan.`;
-}
-
-function analystBriefHTML(r, priceAlert, subScores, subScoreLabels) {
-  const { score, scoreLabel, confidence, plan } = r;
-  const accent = scoreLabelColor(scoreLabel).color;
-  const paras = analystThesisParagraphs(r, priceAlert);
-  const { risks, catalysts } = risksAndCatalysts(r);
-  const verdict = analystVerdictLine(r, priceAlert);
-  const pillar = (sb) => `<div class="brief-pillar${sb.available ? '' : ' na'}">
-      <div class="brief-pillar-top"><span class="brief-pillar-label">${esc(subScoreLabels[sb.key] ?? sb.label)}</span><span class="brief-pillar-val">${sb.available ? Math.round(sb.pct) : 'N/D'}</span></div>
-      <div class="brief-pillar-bar"><i style="width:${sb.available ? sb.pct : 0}%;"></i></div>
-    </div>`;
-  return `
-    ${sectionTitleHTML('Informe del Analista', 'briefcase', '', 'sec-analisis')}
-    <div class="card brief-card" style="--brief-accent:${accent};">
-      <div class="brief-head">
-        <div class="brief-verdict">
-          <div class="brief-verdict-label">${esc(scoreLabel)}</div>
-          <div class="brief-verdict-score">${score}<span>/100</span></div>
-          <div class="brief-verdict-conf">confianza ${esc(String(confidence).toLowerCase())} · horizonte ${esc(horizonFor(r.technical))}</div>
-        </div>
-        <div class="brief-thesis">${paras.map(p => `<p>${p}</p>`).join('')}</div>
-      </div>
-      ${subScores.length ? `<div class="brief-pillars">${subScores.map(pillar).join('')}</div>` : ''}
-      <div class="brief-rc">
-        <div class="brief-rc-col">
-          <div class="brief-rc-title good">${ICONS.check} Catalizadores</div>
-          <ul>${catalysts.slice(0, 4).map(c => `<li>${esc(c)}</li>`).join('')}</ul>
-        </div>
-        <div class="brief-rc-col">
-          <div class="brief-rc-title bad">${ICONS.warning} Riesgos</div>
-          <ul>${risks.slice(0, 4).map(rk => `<li>${esc(rk)}</li>`).join('')}</ul>
-        </div>
-      </div>
-      <div class="brief-targets">
-        <div class="brief-target"><span>Entrada</span><b>${esc(plan.compra)}</b></div>
-        <div class="brief-target"><span>Stop loss</span><b>${esc(plan.stopLoss)}</b></div>
-        <div class="brief-target"><span>Objetivos</span><b>${esc(plan.tp1)} · ${esc(plan.tp2)} · ${esc(plan.tp3)}</b></div>
-        <div class="brief-target"><span>Riesgo / Beneficio</span><b>${esc(plan.riskReward)}</b></div>
-        ${plan.probabilityPct != null ? `<div class="brief-target"><span>Prob. estimada</span><b>${plan.probabilityPct}%</b></div>` : ''}
-      </div>
-      <div class="brief-verdict-line"><span class="brief-verdict-tag">Veredicto</span> ${esc(verdict)}</div>
-      <div class="brief-foot">Síntesis determinística de los indicadores ya calculados (técnico, fundamental, riesgo y plan) — no es asesoramiento financiero ni una recomendación garantizada. La confiabilidad histórica de la señal se detalla más abajo.</div>
-    </div>`;
-}
-
-/* ── Consenso de Wall Street ──────────────────────────────────────────────────
- * Visión EXTERNA e independiente: la distribución de recomendaciones de analistas
- * (compra/mantener/venta) y el precio objetivo, para contrastar con el score
- * cuantitativo propio. Es un dato reportado por la fuente, no una opinión de la
- * plataforma. Se oculta para cripto/ETF y símbolos sin cobertura. */
-const CONSENSUS_SEGMENTS = [
-  { k: 'strongBuy', label: 'Compra fuerte', color: 'oklch(0.60 0.16 152)' },
-  { k: 'buy', label: 'Compra', color: 'oklch(0.72 0.15 152)' },
-  { k: 'hold', label: 'Mantener', color: 'oklch(0.72 0.03 262)' },
-  { k: 'sell', label: 'Venta', color: 'oklch(0.70 0.15 45)' },
-  { k: 'strongSell', label: 'Venta fuerte', color: 'oklch(0.62 0.20 23)' },
-];
-function analystConsensusHTML(r) {
-  const rec = r.recommendations;
-  if (!rec) return '';
-  if (!rec.hasData || !rec.latest) {
-    return `${sectionTitleHTML('Consenso de Wall Street', 'globe')}
-    <div class="card consensus-card"><div class="consensus-empty">Sin cobertura de analistas para ${esc(r.asset.ticker)} en el proveedor de datos — habitual en CEDEARs/ADRs de menor seguimiento.</div></div>`;
-  }
-  const L = rec.latest;
-  const demo = rec.isReal === false;
-  const trendMeta = rec.trend === 'mejorando' ? { t: '▲ mejorando', cls: 'up' } : rec.trend === 'empeorando' ? { t: '▼ empeorando', cls: 'down' } : rec.trend === 'estable' ? { t: '● estable', cls: 'mut' } : null;
-  const bar = CONSENSUS_SEGMENTS.filter(s => L[s.k] > 0).map(s => `<div class="consensus-seg" style="flex:${L[s.k]}; background:${s.color};" title="${esc(s.label)}: ${L[s.k]}"></div>`).join('');
-  const legend = CONSENSUS_SEGMENTS.map(s => `<span class="consensus-leg"><i style="background:${s.color};"></i>${esc(s.label)} <b>${L[s.k]}</b></span>`).join('');
-  // Contraste con el motor propio.
-  const streetBull = L.scored >= 3.5, engineBull = r.score >= 55;
-  const streetBear = L.scored <= 2.5, engineBear = r.score < 45;
-  let contrast;
-  if ((streetBull && engineBull) || (streetBear && engineBear)) contrast = `El consenso de la calle <strong>coincide</strong> con tu motor: ambos con sesgo ${engineBull ? 'comprador' : 'vendedor/cauto'}.`;
-  else if ((streetBull && engineBear) || (streetBear && engineBull)) contrast = `Ojo: la calle y tu motor <strong>discrepan</strong> — la calle está ${streetBull ? 'más optimista' : 'más cauta'} que tu score cuantitativo (${r.score}/100). Cuando divergen, conviene entender por qué.`;
-  else contrast = `Lecturas parcialmente alineadas: tu motor da ${r.score}/100 (${esc(r.scoreLabel.toLowerCase())}) y la calle, ${esc(L.label.toLowerCase())}.`;
-  // Precio objetivo.
-  let ptHtml = '';
-  const pt = rec.priceTarget;
-  if (pt?.mean && r.quote?.usd > 0) {
-    const upside = (pt.mean / r.quote.usd - 1) * 100;
-    ptHtml = `
-      <div class="consensus-pt">
-        <div class="consensus-pt-main">
-          <div><span>Precio objetivo (promedio)</span><b>${fmtUsd(pt.mean)}</b></div>
-          <div class="consensus-pt-upside ${upside >= 0 ? 'up' : 'down'}">${upside >= 0 ? '+' : ''}${upside.toFixed(1)}% <small>vs. precio actual</small></div>
-        </div>
-        ${pt.low && pt.high ? `<div class="consensus-pt-range">Rango de objetivos: ${fmtUsd(pt.low)} — ${fmtUsd(pt.high)}</div>` : ''}
-      </div>`;
-  }
-  return `
-    ${sectionTitleHTML('Consenso de Wall Street', 'globe')}
-    <div class="card consensus-card">
-      <div class="consensus-head">
-        <div class="consensus-verdict">
-          <div class="consensus-verdict-label">${esc(L.label)}</div>
-          <div class="consensus-verdict-sub">${L.total} analista${L.total === 1 ? '' : 's'}${trendMeta ? ` · <span class="consensus-trend ${trendMeta.cls}">${trendMeta.t}</span>` : ''}</div>
-        </div>
-        <div class="consensus-bull"><b>${L.bullishPct}%</b><span>en compra</span></div>
-      </div>
-      <div class="consensus-bar">${bar}</div>
-      <div class="consensus-legend">${legend}</div>
-      ${ptHtml}
-      <div class="consensus-contrast">${contrast}</div>
-      <div class="brief-foot">${demo ? 'Datos de demostración (modo demo, sin API key). ' : ''}Distribución de recomendaciones de analistas reportada por el proveedor (Finnhub) — es una visión externa, no una recomendación de la plataforma.</div>
-    </div>`;
-}
-
 function reportSkeletonHTML() {
   const skelRow = (w = '100%') => `<div class="skel skel-line" style="width:${w};"></div>`;
   return `
@@ -1699,7 +1312,6 @@ function reportSkeletonHTML() {
  * 0..i. Después mide el retorno real hacia adelante desde ese punto, para
  * cada horizonte, y lo agrupa por la etiqueta que dio la señal en ese momento. */
 const BACKTEST_HORIZONS = [5, 10, 20, 40];
-const SHORT_SETUP_HORIZONS = [1, 3, 5]; // horizontes de Trades Cortos (1-5 ruedas)
 const BACKTEST_WARMUP = 210; // barras necesarias para que EMA200/ADX/etc. dejen de ser NaN
 const BACKTEST_STEP = 3; // muestrea cada 3 velas: alcanza para una lectura estable sin miles de cálculos por click
 const BACKTEST_LABELS = ['Compra Fuerte', 'Compra Moderada', 'Mantener', 'Reducir', 'Venta'];
@@ -1737,7 +1349,6 @@ async function runBacktest(ticker) {
   const buckets = {};
   const factorSamples = {}; // factorKey -> { label, values: [pct histórico], returns: [retorno fwd real] }
   const alertBuckets = {}; // "type:confidence" -> { h -> [retorno fwd real] }
-  const setupBuckets = {}; // "long"|"short" -> { h -> [retorno fwd real] } — Trades Cortos
   let sampleCount = 0;
   for (let i = BACKTEST_WARMUP; i <= n - maxHorizon - 1; i += BACKTEST_STEP) {
     const slice = {
@@ -1779,19 +1390,6 @@ async function runBacktest(ticker) {
         (alertBuckets[key][h] ??= []).push((fwd - priceNow) / priceNow);
       }
     }
-    // Mismo motor de Trades Cortos que ve el usuario en vivo, puesto a prueba:
-    // cuando calificó un setup en el pasado, ¿el precio se movió a su favor en
-    // las ruedas siguientes? Horizontes cortos (1-5 ruedas) acordes al setup.
-    const setup = shortTermSetup(technical, slice);
-    if (setup && setup.qualifies) {
-      const key = setup.direction; // 'long' | 'short'
-      if (!setupBuckets[key]) setupBuckets[key] = {};
-      for (const h of SHORT_SETUP_HORIZONS) {
-        const fwd = candles.c[i + h];
-        if (fwd == null) continue;
-        (setupBuckets[key][h] ??= []).push((fwd - priceNow) / priceNow);
-      }
-    }
     sampleCount++;
   }
 
@@ -1817,16 +1415,10 @@ async function runBacktest(ticker) {
     const byH = alertBuckets[key];
     const horizons = BACKTEST_HORIZONS.map(h => {
       const arr = byH[h] || [];
-      if (!arr.length) return { h, n: 0, avgPct: null, winRate: null, avgWinPct: null, avgLossPct: null };
+      if (!arr.length) return { h, n: 0, avgPct: null, winRate: null };
       const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-      const winsArr = arr.filter(r => alertBacktestWin(type, r));
-      const lossArr = arr.filter(r => !alertBacktestWin(type, r));
-      const mean = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
-      const mw = mean(winsArr), ml = mean(lossArr);
-      return {
-        h, n: arr.length, avgPct: avg * 100, winRate: Math.round((winsArr.length / arr.length) * 100),
-        avgWinPct: mw != null ? mw * 100 : null, avgLossPct: ml != null ? ml * 100 : null,
-      };
+      const wins = arr.filter(r => alertBacktestWin(type, r)).length;
+      return { h, n: arr.length, avgPct: avg * 100, winRate: Math.round((wins / arr.length) * 100) };
     });
     return {
       type, confidence, label: `${ALERT_BT_TYPE_LABEL[type] ?? type} · confianza ${confidence}`,
@@ -1834,333 +1426,16 @@ async function runBacktest(ticker) {
     };
   }).sort((a, b) => a.type.localeCompare(b.type) || (ALERT_BT_CONFIDENCE_ORDER[a.confidence] ?? 9) - (ALERT_BT_CONFIDENCE_ORDER[b.confidence] ?? 9));
 
-  // Trades Cortos: acierto y retorno medio del setup por dirección. Un largo
-  // "acierta" si el precio sube en el horizonte; un corto, si baja.
-  const setupRows = ['long', 'short'].map(dir => {
-    const byH = setupBuckets[dir] || {};
-    const horizons = SHORT_SETUP_HORIZONS.map(h => {
-      const arr = byH[h] || [];
-      if (!arr.length) return { h, n: 0, avgPct: null, winRate: null };
-      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-      const wins = arr.filter(r => dir === 'long' ? r > 0 : r < 0).length;
-      return { h, n: arr.length, avgPct: avg * 100, winRate: Math.round((wins / arr.length) * 100) };
-    });
-    return { direction: dir, horizons, occurrences: horizons.reduce((max, x) => Math.max(max, x.n), 0) };
-  }).filter(r => r.occurrences > 0);
-
   return {
     ticker, isReal: candles.isReal, insufficientData: false, candleCount: n, sampleCount,
     from: candles.t[BACKTEST_WARMUP], to: candles.t[n - 1], rows, factorCorrelations, factorHorizon: FACTOR_HORIZON,
-    alertRows, setupRows,
+    alertRows,
   };
 }
 
 /* ───────────────────────── render del reporte ───────────────────────── */
-/* ═══════════════════ Asesor de Inversión (asignación por perfil) ═══════════
- * "Tengo X pesos, ¿cómo lo reparto?". Modelo DETERMINÍSTICO de asignación por
- * clase de activo según el perfil de riesgo — no es asesoramiento personalizado
- * ni una recomendación garantizada. En equity (CEDEARs y acciones argentinas)
- * elige instrumentos concretos por su score real ya calculado; en renta fija
- * (letras, bonos soberanos, ONs) da una referencia curada de instrumentos
- * representativos (el análisis fino de TIR/paridad vive en Bonos Argentinos y no
- * se inventa acá). Toda la parte de equity usa datos reales; la de renta fija se
- * marca explícitamente como referencia. */
-const ADVISOR_CLASSES = [
-  { key: 'letras', label: 'Letras en pesos (tasa fija, corto plazo)', kind: 'rf', color: 'oklch(0.80 0.15 85)' },
-  { key: 'bonos', label: 'Bonos soberanos argentinos', kind: 'rf', color: 'oklch(0.72 0.15 250)' },
-  { key: 'ons', label: 'Obligaciones negociables (ONs)', kind: 'rf', color: 'oklch(0.78 0.13 199)' },
-  { key: 'cedears', label: 'CEDEARs', kind: 'eq', color: 'oklch(0.70 0.19 291)' },
-  { key: 'accionesarg', label: 'Acciones argentinas', kind: 'eq', color: 'oklch(0.76 0.18 152)' },
-];
-const ADVISOR_ALLOCATION = {
-  conservador: { letras: 30, bonos: 28, ons: 22, cedears: 12, accionesarg: 8 },
-  moderado: { letras: 15, bonos: 20, ons: 20, cedears: 28, accionesarg: 17 },
-  agresivo: { letras: 5, bonos: 12, ons: 13, cedears: 42, accionesarg: 28 },
-};
-const ADVISOR_PROFILE_DESC = {
-  conservador: 'Prioriza preservar capital: mayoría en renta fija en pesos y dólares, exposición acotada a acciones.',
-  moderado: 'Equilibrio entre renta fija y variable, buscando crecimiento con riesgo controlado.',
-  agresivo: 'Prioriza crecimiento: mayoría en acciones (CEDEARs y argentinas), con renta fija como amortiguador.',
-};
-// Referencia curada de renta fija (no hay análisis por instrumento acá — son
-// ejemplos representativos que el usuario pide a su broker; se marcan como tal).
-const ADVISOR_FIXED = {
-  letras: {
-    note: 'Instrumento de tasa fija en pesos, tramo corto (LECAPs). El papel específico rota con los vencimientos vigentes — pedile a tu broker la letra más corta con mejor tasa.',
-    items: [{ name: 'LECAP corta', desc: 'Letra del Tesoro capitalizable en pesos, < 6 meses' }],
-  },
-  bonos: {
-    note: 'Bonos soberanos en dólares. Referencia — mirá paridad y liquidez en el apartado Bonos Argentinos (con precios reales).',
-    items: [
-      { name: 'AL30', desc: 'Bonar 2030 · ley Argentina · USD' },
-      { name: 'GD30', desc: 'Global 2030 · ley Nueva York · USD' },
-      { name: 'AL35 / GD35', desc: 'tramo más largo, mayor duration' },
-    ],
-  },
-  ons: {
-    note: 'Obligaciones negociables corporativas hard-dollar de empresas líderes — suelen tener menos riesgo que el soberano, en dólares. Diversificá emisores.',
-    items: [
-      { name: 'ON YPF', desc: 'energía · dólar' },
-      { name: 'ON Pampa Energía', desc: 'energía · dólar' },
-      { name: 'ON Telecom / Vista / Cresud', desc: 'diversificar sector y emisor' },
-    ],
-  },
-};
-const advisorState = {
-  amount: (() => { const v = parseFloat(lsGetSafe('icp_advisor_amount', '')); return isNaN(v) || v <= 0 ? 1000000 : v; })(),
-  profile: lsGetSafe('icp_advisor_profile', settingsState.riskProfile || 'moderado'),
-  horizon: lsGetSafe('icp_advisor_horizon', 'medio'), // 'corto' | 'medio' | 'largo'
-};
-// Riesgo por clase (vol 1=baja..3=alta) y si es dólar-linked, para estimar el
-// perfil de riesgo y la exposición a moneda de la cartera propuesta.
-const ADVISOR_CLASS_RISK = {
-  letras: { vol: 1, usd: false }, bonos: { vol: 2, usd: true }, ons: { vol: 2, usd: true },
-  cedears: { vol: 3, usd: true }, accionesarg: { vol: 3, usd: true },
-};
-const ADVISOR_RETURN_GOAL = {
-  conservador: 'Preservar el capital: apunta a acompañar la inflación con algo de tasa real, priorizando estabilidad sobre crecimiento.',
-  moderado: 'Crecimiento moderado por encima de la inflación, aceptando variaciones intermedias en el camino.',
-  agresivo: 'Crecimiento real alto en el largo plazo, a costa de una variabilidad (y drawdowns) sensiblemente mayores.',
-};
-const ADVISOR_HORIZON_DESC = {
-  corto: 'Horizonte corto (< 1 año): más peso en letras y tramos cortos, menor sensibilidad a tasa.',
-  medio: 'Horizonte medio (1-3 años): balance entre tramos cortos y bonos.',
-  largo: 'Horizonte largo (> 3 años): más peso en bonos de mayor duration, que rinden más si podés esperar.',
-};
-
-// Estado de la renta fija en vivo (soberanos/ONs/letras vía /api/bonds); si el
-// proveedor no la expone, queda vacía y el Asesor usa la referencia curada.
-const advisorFixedState = { items: [], ons: [], letras: [], loaded: false, loading: false };
-async function loadAdvisorFixed() {
-  if (advisorFixedState.loaded || advisorFixedState.loading) return;
-  advisorFixedState.loading = true;
-  try {
-    const d = await getBonds();
-    advisorFixedState.items = Array.isArray(d?.items) ? d.items : [];
-    advisorFixedState.ons = Array.isArray(d?.ons) ? d.ons : [];
-    advisorFixedState.letras = Array.isArray(d?.letras) ? d.letras : [];
-    advisorFixedState.loaded = true;
-  } catch (e) { /* se usa la referencia curada */ }
-  advisorFixedState.loading = false;
-  if (state.view === 'advisor' && !state.asset) renderReport();
-}
-
-// Asignación por clase con ajuste por horizonte: mueve peso entre letras (corto)
-// y bonos (largo) preservando el total.
-function advisorAllocation(profile, horizon) {
-  const base = { ...ADVISOR_ALLOCATION[ADVISOR_ALLOCATION[profile] ? profile : 'moderado'] };
-  const want = horizon === 'corto' ? 8 : horizon === 'largo' ? -8 : 0;
-  if (want > 0) { const m = Math.min(want, base.bonos); base.letras += m; base.bonos -= m; }
-  else if (want < 0) { const m = Math.min(-want, base.letras); base.letras -= m; base.bonos += m; }
-  return base;
-}
-// Instrumentos de renta fija en vivo para una clase (o null → usar referencia).
-function advisorLiveFixed(key) {
-  const live = key === 'bonos' ? advisorFixedState.items : key === 'ons' ? advisorFixedState.ons : advisorFixedState.letras;
-  if (!live || !live.length) return null;
-  return live.slice().sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0)).slice(0, 3);
-}
-
-function advisorEquityPicks(kind, n) {
-  const entries = Object.entries(dashState.data).filter(([t, d]) => d && d.score != null);
-  const pool = kind === 'cedears'
-    ? entries.filter(([t, d]) => !AR_TICKERS.has(t) && d.category === 'CEDEAR')
-    : entries.filter(([t, d]) => AR_TICKERS.has(t));
-  return pool.sort((a, b) => b[1].score - a[1].score).slice(0, n).map(([ticker, d]) => ({ ticker, d }));
-}
-
-function advisorClassInstrumentsHTML(cls, classPeso) {
-  if (cls.kind === 'eq') {
-    const picks = advisorEquityPicks(cls.key, 4);
-    if (!picks.length) return `<div class="advisor-inst-empty">Cargando el universo para elegir los mejores ${cls.key === 'cedears' ? 'CEDEARs' : 'papeles argentinos'} por score…</div>`;
-    const totalScore = picks.reduce((s, p) => s + p.d.score, 0) || 1;
-    return picks.map(p => {
-      const peso = classPeso * (p.d.score / totalScore);
-      const units = p.d.cedearArs ? Math.floor(peso / p.d.cedearArs) : null;
-      const sig = scoreLabelColor(p.d.scoreLabel);
-      return `<div class="advisor-inst" data-advisor-ticker="${esc(p.ticker)}">
-        <div class="advisor-inst-id"><b>${esc(p.ticker)}</b> <span>${esc(p.d.name ?? '')}</span></div>
-        <div class="advisor-inst-mid"><span class="advisor-score" style="color:${sig.color};">${p.d.score}</span><span class="advisor-inst-sig">${esc(p.d.scoreLabel)}</span></div>
-        <div class="advisor-inst-amt"><b>${fmtArs(peso)}</b>${units != null ? `<span>~${units.toLocaleString('es-AR')} ${cls.key === 'cedears' ? 'CEDEARs' : 'papeles'}</span>` : ''}</div>
-      </div>`;
-    }).join('');
-  }
-  // Renta fija: instrumentos reales si el proveedor los expone; si no, referencia.
-  const live = advisorLiveFixed(cls.key);
-  if (live) {
-    const per = classPeso / live.length;
-    return `${live.map(x => `<div class="advisor-inst advisor-inst-live">
-        <div class="advisor-inst-id"><b>${esc(x.symbol)}</b> <span>${x.pctChange != null ? `${x.pctChange >= 0 ? '+' : ''}${Number(x.pctChange).toFixed(1)}% hoy` : ''}</span></div>
-        <div class="advisor-inst-mid"><span class="advisor-live-badge">● en vivo</span><span class="advisor-inst-sig">precio ${Number(x.price).toLocaleString('es-AR', { maximumFractionDigits: 2 })}</span></div>
-        <div class="advisor-inst-amt"><b>${fmtArs(per)}</b></div>
-      </div>`).join('')}
-      <div class="advisor-inst-note">Precios reales del mercado (data912). Distribución sugerida a partes iguales — el análisis fino de paridad/TIR conviene verlo aparte.</div>`;
-  }
-  const fx = ADVISOR_FIXED[cls.key];
-  const per = classPeso / fx.items.length;
-  return `${fx.items.map(it => `<div class="advisor-inst advisor-inst-ref">
-      <div class="advisor-inst-id"><b>${esc(it.name)}</b> <span>${esc(it.desc)}</span></div>
-      <div class="advisor-inst-mid"><span class="advisor-ref-badge">referencia</span></div>
-      <div class="advisor-inst-amt"><b>${fmtArs(per)}</b></div>
-    </div>`).join('')}
-    <div class="advisor-inst-note">${esc(fx.note)}</div>`;
-}
-
-// Perfil de riesgo estimado de la cartera propuesta (volatilidad ponderada +
-// exposición a moneda). Estimación ilustrativa, no una proyección.
-function advisorRiskHTML(alloc, amount) {
-  let wVol = 0, usdPct = 0;
-  for (const c of ADVISOR_CLASSES) {
-    const w = alloc[c.key] / 100;
-    wVol += w * (ADVISOR_CLASS_RISK[c.key]?.vol ?? 2);
-    if (ADVISOR_CLASS_RISK[c.key]?.usd) usdPct += alloc[c.key];
-  }
-  const volLabel = wVol < 2.0 ? 'Baja' : wVol < 2.5 ? 'Media' : 'Alta';
-  const volDots = wVol < 2.0 ? 1 : wVol < 2.5 ? 2 : 3;
-  const goal = ADVISOR_RETURN_GOAL[advisorState.profile] ?? '';
-  return `
-    ${sectionTitleHTML('Riesgo y objetivo de la cartera', 'radar')}
-    <div class="card advisor-risk">
-      <div class="advisor-risk-grid">
-        <div class="advisor-risk-tile">
-          <div class="advisor-risk-k">Volatilidad estimada</div>
-          <div class="advisor-risk-v">${volLabel}</div>
-          <div class="advisor-risk-meter">${[1, 2, 3].map(i => `<i class="${i <= volDots ? 'on' : ''}"></i>`).join('')}</div>
-        </div>
-        <div class="advisor-risk-tile">
-          <div class="advisor-risk-k">Exposición a dólar</div>
-          <div class="advisor-risk-v">${usdPct}%</div>
-          <div class="advisor-risk-sub">${100 - usdPct}% en pesos (letras)</div>
-        </div>
-        <div class="advisor-risk-tile">
-          <div class="advisor-risk-k">Diversificación</div>
-          <div class="advisor-risk-v">${ADVISOR_CLASSES.filter(c => alloc[c.key] > 0).length} clases</div>
-          <div class="advisor-risk-sub">renta fija + variable</div>
-        </div>
-      </div>
-      <div class="advisor-risk-goal"><span class="advisor-risk-goal-tag">Objetivo del perfil</span> ${esc(goal)}</div>
-      <div class="brief-foot">Estimación ilustrativa basada en supuestos de riesgo por clase — no es una proyección de rendimiento ni una garantía. La volatilidad real depende del mercado.</div>
-    </div>`;
-}
-
-function advisorPageHTML() {
-  const amount = advisorState.amount;
-  const profile = ADVISOR_ALLOCATION[advisorState.profile] ? advisorState.profile : 'moderado';
-  const horizon = ['corto', 'medio', 'largo'].includes(advisorState.horizon) ? advisorState.horizon : 'medio';
-  const alloc = advisorAllocation(profile, horizon);
-  const rfPct = alloc.letras + alloc.bonos + alloc.ons;
-  const eqPct = alloc.cedears + alloc.accionesarg;
-  const segBtn = (key, label) => `<button class="advisor-seg-btn ${profile === key ? 'active' : ''}" data-advisor-profile="${key}">${label}</button>`;
-  const horBtn = (key, label) => `<button class="advisor-seg-btn ${horizon === key ? 'active' : ''}" data-advisor-horizon="${key}">${label}</button>`;
-  const loadingUniverse = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
-
-  return `
-    ${sectionTitleHTML('Asesor de Inversión', 'target')}
-    <div class="dash-intro">Ingresá un monto en pesos, tu perfil de riesgo y tu horizonte, y el asesor te propone <strong>cómo repartirlo</strong> entre letras, bonos soberanos, obligaciones negociables, CEDEARs y acciones argentinas. Las acciones/CEDEARs se eligen por el <strong>score real</strong> de cada papel; la renta fija usa <strong>precios reales</strong> cuando están disponibles. ${loadingUniverse ? 'Cargando el universo…' : ''}</div>
-    <div class="cedear-note" style="margin-bottom:20px; border-color:oklch(0.55 0.15 70 / 0.4);">
-      <strong>⚠ No es asesoramiento financiero.</strong> Es un modelo determinístico y educativo de asignación por perfil — no considera tu situación personal ni impuestos, y ningún rendimiento está garantizado. Consultá a un asesor matriculado antes de invertir.
-    </div>
-
-    <div class="card advisor-form">
-      <label class="advisor-field">
-        <span>Monto a invertir (ARS)</span>
-        <div class="advisor-amount-wrap"><span class="advisor-amount-sign">AR$</span><input type="text" id="advisor-amount" class="advisor-amount-input" value="${amount.toLocaleString('es-AR')}" inputmode="numeric" autocomplete="off" /></div>
-      </label>
-      <div class="advisor-field">
-        <span>Perfil de inversor</span>
-        <div class="advisor-seg">${segBtn('conservador', 'Conservador')}${segBtn('moderado', 'Moderado')}${segBtn('agresivo', 'Agresivo')}</div>
-      </div>
-      <div class="advisor-field">
-        <span>Horizonte</span>
-        <div class="advisor-seg">${horBtn('corto', 'Corto')}${horBtn('medio', 'Medio')}${horBtn('largo', 'Largo')}</div>
-      </div>
-    </div>
-    <div class="advisor-profile-desc">${esc(ADVISOR_PROFILE_DESC[profile])} <span class="advisor-hor-desc">${esc(ADVISOR_HORIZON_DESC[horizon])}</span></div>
-
-    <div class="card advisor-summary">
-      <div class="advisor-summary-top">
-        <div><span>Total a invertir</span><b>${fmtArs(amount)}</b></div>
-        <div class="advisor-split"><span class="advisor-split-rf">${rfPct}% renta fija</span> · <span class="advisor-split-eq">${eqPct}% renta variable</span></div>
-      </div>
-      <div class="advisor-bar">${ADVISOR_CLASSES.map(c => alloc[c.key] > 0 ? `<div class="advisor-bar-seg" style="flex:${alloc[c.key]}; background:${c.color};" title="${esc(c.label)}: ${alloc[c.key]}%"></div>` : '').join('')}</div>
-      <div class="advisor-bar-legend">${ADVISOR_CLASSES.map(c => `<span class="advisor-leg"><i style="background:${c.color};"></i>${esc(c.label.split(' (')[0])} <b>${alloc[c.key]}%</b></span>`).join('')}</div>
-    </div>
-
-    ${advisorRiskHTML(alloc, amount)}
-
-    ${sectionTitleHTML('Cómo repartir el monto', 'briefcase')}
-    <div class="advisor-classes">
-      ${ADVISOR_CLASSES.map(c => {
-        const classPeso = amount * (alloc[c.key] / 100);
-        return `<div class="card advisor-class" style="--class-color:${c.color};">
-          <div class="advisor-class-head">
-            <div class="advisor-class-title">${esc(c.label)}</div>
-            <div class="advisor-class-amt"><b>${fmtArs(classPeso)}</b><span>${alloc[c.key]}% · ${c.kind === 'eq' ? 'renta variable' : 'renta fija'}</span></div>
-          </div>
-          <div class="advisor-inst-list">${advisorClassInstrumentsHTML(c, classPeso)}</div>
-        </div>`;
-      }).join('')}
-    </div>
-    <div class="advisor-actions">
-      <button class="advisor-cta" id="advisor-to-portfolio" title="Suma las acciones y CEDEARs sugeridos (con sus cantidades) a tu Portfolio para seguirlos">${ICONS.briefcase} Sumar acciones y CEDEARs a mi Portfolio</button>
-      <div class="advisor-actions-note">Suma solo la parte de renta variable (con cantidades estimadas) — la renta fija la cargás en tu broker. Después la seguís en Portfolio Advisor.</div>
-    </div>
-  `;
-}
-
-function wireAdvisorEvents() {
-  const amountInput = document.getElementById('advisor-amount');
-  if (amountInput) {
-    const commit = () => {
-      const raw = parseFloat(String(amountInput.value).replace(/[^\d]/g, ''));
-      advisorState.amount = isNaN(raw) || raw <= 0 ? 0 : raw;
-      try { localStorage.setItem('icp_advisor_amount', String(advisorState.amount)); } catch (e) {}
-      renderReport();
-    };
-    amountInput.addEventListener('change', commit);
-    amountInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
-  }
-  els.report.querySelectorAll('[data-advisor-profile]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      advisorState.profile = btn.dataset.advisorProfile;
-      try { localStorage.setItem('icp_advisor_profile', advisorState.profile); } catch (e) {}
-      renderReport();
-    });
-  });
-  els.report.querySelectorAll('[data-advisor-horizon]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      advisorState.horizon = btn.dataset.advisorHorizon;
-      try { localStorage.setItem('icp_advisor_horizon', advisorState.horizon); } catch (e) {}
-      renderReport();
-    });
-  });
-  els.report.querySelectorAll('[data-advisor-ticker]').forEach(el => {
-    el.addEventListener('click', () => selectTicker(el.dataset.advisorTicker));
-  });
-  document.getElementById('advisor-to-portfolio')?.addEventListener('click', () => {
-    const profile = ADVISOR_ALLOCATION[advisorState.profile] ? advisorState.profile : 'moderado';
-    const horizon = ['corto', 'medio', 'largo'].includes(advisorState.horizon) ? advisorState.horizon : 'medio';
-    const alloc = advisorAllocation(profile, horizon);
-    const today = new Date().toISOString().slice(0, 10);
-    let added = 0;
-    for (const key of ['cedears', 'accionesarg']) {
-      const classPeso = advisorState.amount * (alloc[key] / 100);
-      const picks = advisorEquityPicks(key, 4);
-      const totalScore = picks.reduce((s, p) => s + p.d.score, 0) || 1;
-      for (const p of picks) {
-        const peso = classPeso * (p.d.score / totalScore);
-        const units = p.d.cedearArs ? Math.floor(peso / p.d.cedearArs) : 0;
-        if (units >= 1 && p.d.cedearArs) { addHolding(p.ticker, units, Math.round(p.d.cedearArs), 'ARS', today); added++; }
-      }
-    }
-    if (added) { showToast(`${added} papel(es) sumado(s) a tu Portfolio en pesos. Miralo en Portfolio Advisor.`, 'success'); loadPortfolioData(); }
-    else showToast('No se pudo sumar todavía — esperá a que cargue el universo o subí el monto.', 'info');
-  });
-}
-
 const VIEW_PAGES = {
   dashboard: { html: dashboardHTML, wire: wireDashboardEvents, load: () => { if (!dashState.started) loadDashboardData(); loadPortfolioData(); } },
-  advisor: { html: advisorPageHTML, wire: wireAdvisorEvents, load: () => { if (!dashState.started) loadDashboardData(); loadAdvisorFixed(); } },
   portfolio: { html: portfolioHTML, wire: wirePortfolioEvents, load: loadPortfolioData },
   simulator: { html: simulatorHTML, wire: wireSimulatorEvents, load: loadSimulatorData },
   watchlist: { html: watchlistPageHTML, wire: wireWatchlistEvents, load: () => {} },
@@ -2174,67 +1449,13 @@ const VIEW_PAGES = {
   trackrecord: { html: trackRecordPageHTML, wire: wireTrackRecordEvents, load: () => { if (!trackState.started) loadTrackRecord(); } },
   dividends: { html: dividendsPageHTML, wire: wireDividendsEvents, load: loadDividendsData },
   compare: { html: comparePageHTML, wire: wireCompareEvents, load: () => {} },
-  basket: { html: basketPageHTML, wire: wireBasketEvents, load: () => {} },
   settings: { html: settingsPageHTML, wire: wireSettingsEvents, load: () => {} },
   bonds: { html: bondsPageHTML, wire: wireBondsEvents, load: loadBondsData },
-  academy: { html: academyPageHTML, wire: wireAcademyEvents, load: () => {} },
-  panorama: { html: panoramaPageHTML, wire: wirePanoramaEvents, load: () => { if (!dashState.started) loadDashboardData(); loadPanoramaData(); } },
 };
 
 function renderReport() {
   renderReportImpl();
   triggerReportTransition();
-  maybeRunCountUps();
-}
-
-/* ── Count-up de cifras clave ──────────────────────────────────────────────
- * Anima números importantes (tarjetas del resumen de cartera, etc.) hacia su
- * valor final la PRIMERA vez que aparecen en una vista. No re-anima en los
- * refrescos silenciosos de fondo (mismo problema de "titilar" que ya se cuidó
- * para el fade): se marca la vista como ya animada y solo se reinicia al
- * navegar a otra pantalla. Respeta prefers-reduced-motion y el modo privacidad. */
-const _countUpFmt = {
-  ars: (n) => fmtArs(n),
-  arsSigned: (n) => (n >= 0 ? '+' : '') + fmtArs(n),
-  usd: (n) => fmtUsd(n),
-  int: (n) => Math.round(n).toLocaleString('es-AR'),
-};
-function countUpFormatted(el, target, fmtKey, duration = 850) {
-  if (!Number.isFinite(target)) return;
-  const fmt = _countUpFmt[fmtKey] || _countUpFmt.int;
-  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (reduce) { el.textContent = fmt(target); return; }
-  const start = performance.now();
-  const ease = (t) => 1 - Math.pow(1 - t, 3);
-  (function tick(now) {
-    const p = Math.min(1, (now - start) / duration);
-    el.textContent = fmt(target * ease(p));
-    if (p < 1) requestAnimationFrame(tick);
-    else el.textContent = fmt(target);
-  })(performance.now());
-}
-function runCountUps(root) {
-  root.querySelectorAll('[data-countup]:not([data-counted])').forEach((el) => {
-    const target = parseFloat(el.dataset.countup);
-    if (!Number.isFinite(target)) return;
-    if (el.textContent.includes('•')) return; // enmascarado por privacidad
-    el.dataset.counted = '1';
-    countUpFormatted(el, target, el.dataset.cfmt || 'int');
-  });
-}
-let _countKeyPrev = null, _countWindowUntil = 0;
-function maybeRunCountUps() {
-  if (state.loading) return;
-  const key = state.asset && state.report ? `ticker:${state.asset.ticker}` : !state.asset ? `view:${state.view}` : null;
-  if (key === null) return;
-  // Al navegar a otra vista/ticker abrimos una ventana corta (~7s) durante la
-  // cual animamos cualquier cifra que aparezca —así los datos que llegan tarde
-  // (precios/CCL de la cartera) también cuentan hacia su valor. Fuera de esa
-  // ventana no animamos: los refrescos silenciosos de fondo (cada 180s)
-  // reconstruyen el HTML pero NO deben re-animar (evita el "titilar").
-  if (key !== _countKeyPrev) { _countKeyPrev = key; _countWindowUntil = performance.now() + 7000; }
-  if (performance.now() > _countWindowUntil) return;
-  runCountUps(els.report);
 }
 
 /** Anima SOLO cuando cambió lo que se está mostrando (otra vista, u otro
@@ -2268,27 +1489,6 @@ function animateCountUp(el, target, duration = 700) {
     if (progress < 1) requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
-}
-
-// Explicabilidad del score: qué mide cada factor y cómo leer su valor. Texto
-// estático y honesto (describe la metodología real de scoring.js), no inventa
-// drivers puntuales. Se muestra al expandir cada fila de la Composición del Score.
-const SCORE_FACTOR_INFO = {
-  trend: 'Mide si el precio está en tendencia sostenida: medias móviles alineadas, ADX (fuerza de la tendencia), confirmación en el timeframe semanal, volumen (OBV) y fuerza relativa vs. el mercado. Alto = tendencia clara y confirmada a favor.',
-  momentum: 'El envión de corto plazo: RSI, MACD, divergencias precio/RSI y patrón de la última vela. Alto = el movimiento tiene impulso; una divergencia lo baja porque suele anticipar agotamiento.',
-  fundamentals: 'La salud del negocio detrás del papel: crecimiento de ingresos y ganancias (EPS), ROE y margen neto. Alto = la empresa crece y es rentable. Requiere datos fundamentales — en muchos ETFs y cripto no aplica.',
-  valuation: 'Qué tan caro o barato cotiza comparado con su PROPIO sector (rangos de PE por industria, no un umbral único). Alto = múltiplo atractivo para su sector; bajo = exigente.',
-  news: 'Señal agregada del flujo de noticias reciente del activo. Alto = titulares mayormente favorables en las últimas semanas.',
-  macro: 'El contexto de mercado que rodea a todos los activos: volatilidad (VIX), riesgo país y clima general de riesgo. Alto = entorno favorable para tomar riesgo.',
-  risk: 'Penaliza volatilidad y drawdown elevados. Alto = el papel se movió de forma más estable; bajo = más brusco y arriesgado de aguantar.',
-  sentiment: 'Termómetro del ánimo del mercado (Fear & Greed, sentimiento de noticias). Complementa la lectura, no la manda: pesa poco a propósito.',
-  liquidity: 'Qué tan fácil es entrar y salir sin mover el precio (volumen operado). Alto = más líquido, con spreads más sanos y menos slippage.',
-};
-function scoreFactorReading(sb) {
-  if (!sb.available) return { txt: 'Sin datos suficientes para este factor: se excluye del score y su peso se reparte entre los demás.', cls: 'nd' };
-  if (sb.pct >= 66) return { txt: `Lectura fuerte (${sb.pct}/100): este factor suma a favor.`, cls: 'up' };
-  if (sb.pct >= 40) return { txt: `Lectura neutral (${sb.pct}/100): ni suma ni resta con claridad.`, cls: 'mid' };
-  return { txt: `Lectura débil (${sb.pct}/100): este factor resta al score.`, cls: 'down' };
 }
 
 function renderReportImpl() {
@@ -2399,15 +1599,8 @@ function renderReportImpl() {
 
   els.report.innerHTML = `
     <div class="breadcrumbs">Análisis <span>›</span> ${esc(breadcrumbLabel)} <span>›</span> <strong>${esc(asset.ticker)}</strong></div>
-    <nav class="report-subnav" id="report-subnav" aria-label="Secciones del informe">
-      <a class="report-subnav-chip" data-sec="sec-resumen">Resumen</a>
-      <a class="report-subnav-chip" data-sec="sec-analisis">Análisis</a>
-      <a class="report-subnav-chip" data-sec="sec-grafico">Gráfico</a>
-      <a class="report-subnav-chip" data-sec="sec-plan">Plan</a>
-      <a class="report-subnav-chip" data-sec="sec-conf">Confiabilidad</a>
-    </nav>
     ${degradedNote}
-    ${sectionTitleHTML('Resumen Ejecutivo', 'briefcase', '', 'sec-resumen')}
+    ${sectionTitleHTML('Resumen Ejecutivo', 'briefcase')}
     <div class="exec-grid">
       <div class="card exec-card">
         <div class="exec-name-row">
@@ -2435,7 +1628,6 @@ function renderReportImpl() {
         </div>
         <div class="gauge-label">${esc(scoreLabel)}</div>
         <div class="gauge-conviction" title="Convicción: ${esc(confidence)}">${convictionDotsHTML(confidence)}<span>Convicción: ${esc(confidence)}</span></div>
-        ${scoreProjectionHTML(t, quote.usd, scoreLabel)}
         ${subScores.length ? `
         <div class="gauge-subscores">
           ${subScores.map(sb => `
@@ -2448,8 +1640,13 @@ function renderReportImpl() {
       </div>
     </div>
 
-    ${analystBriefHTML(r, priceAlert, subScores, subScoreLabels)}
-    ${analystConsensusHTML(r)}
+    ${sectionTitleHTML('Resumen Ejecutivo IA', 'bulb')}
+    <div class="card ai-summary-card">
+      <ul class="ai-summary-list">
+        ${catalysts.slice(0, 3).map(c => `<li class="ok">${ICONS.check}<span>${esc(c)}</span></li>`).join('')}
+        ${risks.slice(0, 3).map(rk => `<li class="risk">${ICONS.warning}<span>${esc(rk)}</span></li>`).join('')}
+      </ul>
+    </div>
 
     <div class="card thermo-card">
       <div class="thermo-labels"><span>Venta</span><span>Reducir</span><span>Mantener</span><span>Compra</span><span>Compra Fuerte</span></div>
@@ -2503,7 +1700,7 @@ function renderReportImpl() {
       </div>
     </div>
 
-    ${sectionTitleHTML('Gráfico de Precio', 'chart', '', 'sec-grafico')}
+    ${sectionTitleHTML('Gráfico de Precio', 'chart')}
     <div class="card chart-card">
       <div class="chart-mode-tabs" role="tablist">
         <button class="chart-mode-tab ${chartState.mode === 'institucional' ? 'active' : ''}" data-mode="institucional" role="tab" aria-selected="${chartState.mode === 'institucional'}">Análisis Institucional</button>
@@ -2525,25 +1722,13 @@ function renderReportImpl() {
 
     <div class="card score-card">
       <div class="score-card-title">Composición del Score ${coverageWeight < fullWeight ? `<span style="text-transform:none; letter-spacing:0; color:oklch(0.58 0.018 260);">— calculado sobre ${coverageWeight}/${fullWeight} puntos de peso (categorías sin datos excluidas y redistribuidas)</span>` : ''}</div>
-      <div class="score-card-hint">Tocá cada factor para ver <strong>qué mide</strong> y <strong>cómo viene</strong>.</div>
       <div class="score-rows">
-        ${scoreBreakdown.map(sb => {
-          const rd = scoreFactorReading(sb);
-          const info = SCORE_FACTOR_INFO[sb.key];
-          return `
-          <details class="score-row-x">
-            <summary class="score-row">
-              <div class="score-label">${esc(sb.label)}${sb.available ? '' : ' (sin datos)'} <span class="score-why-caret" aria-hidden="true">▾</span></div>
-              <div class="score-bar-bg"><div class="score-bar-fill" style="width:${sb.pct}%; opacity:${sb.available ? 1 : 0.25};"></div></div>
-              <div class="score-fraction">${sb.value}/${sb.weight}</div>
-            </summary>
-            <div class="score-why">
-              <div class="score-why-read ${rd.cls}">${esc(rd.txt)}</div>
-              ${info ? `<div class="score-why-what">${esc(info)}</div>` : ''}
-              <div class="score-why-weight">Peso base en el score: <strong>${sb.weight}</strong> puntos.</div>
-            </div>
-          </details>`;
-        }).join('')}
+        ${scoreBreakdown.map(sb => `
+          <div class="score-row">
+            <div class="score-label">${esc(sb.label)}${sb.available ? '' : ' (sin datos)'}</div>
+            <div class="score-bar-bg"><div class="score-bar-fill" style="width:${sb.pct}%; opacity:${sb.available ? 1 : 0.25};"></div></div>
+            <div class="score-fraction">${sb.value}/${sb.weight}</div>
+          </div>`).join('')}
       </div>
     </div>
 
@@ -2559,7 +1744,7 @@ function renderReportImpl() {
           <details class="advanced-details">
             <summary>Ver todos los indicadores técnicos (avanzado)</summary>
             <div class="metrics-grid" style="margin-top:12px;">
-              ${technicalMetricRows(t, confluence, marketCorrelation, relativeStrength).map(m => `<div class="metric-row"><span class="metric-label">${glossify(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
+              ${technicalMetricRows(t, confluence, marketCorrelation, relativeStrength).map(m => `<div class="metric-row"><span class="metric-label">${esc(m.label)}</span><span class="metric-value">${esc(m.value)}</span></div>`).join('')}
             </div>
           </details>
         </div>
@@ -2573,7 +1758,7 @@ function renderReportImpl() {
           ${(() => {
             const cards = didacticFundamentalCards(f, earnings, daysToEarnings, dividends, asset);
             if (!cards) return `<div class="didactic-empty">No hay datos fundamentales (balance, ganancias, deuda) para este activo en la fuente gratuita — suele pasar con CEDEARs de empresas menos seguidas, ETFs y cripto. El análisis técnico de al lado sí está disponible.</div>`;
-            return financialHealthHTML(f) + cards.map(didacticCardHTML).join('') + `<div class="narrative">${esc(fundamentalNarrative(f, asset.sector))}</div>
+            return cards.map(didacticCardHTML).join('') + `<div class="narrative">${esc(fundamentalNarrative(f, asset.sector))}</div>
             <details class="advanced-details">
               <summary>Ver todos los datos fundamentales (avanzado)</summary>
               <div class="metrics-grid" style="margin-top:12px;">
@@ -2631,7 +1816,7 @@ function renderReportImpl() {
     ${seasonalityHTML(asset.ticker)}
 
     <div class="panel-header">
-      ${sectionTitleHTML('Plan Operativo', 'target', 'margin-bottom:0;', 'sec-plan')}
+      ${sectionTitleHTML('Plan Operativo', 'target', 'margin-bottom:0;')}
       <div style="display:flex; align-items:center; gap:10px;">
         ${priceAlertMeta ? `<div class="watch-alert plan-alert-badge" style="color:${priceAlertMeta.color};"${alertTitleAttr(priceAlert)}>⚡ ${esc(priceAlertMeta.label)}${alertConfidenceSuffix(priceAlert)}</div>` : ''}
         <div class="freshness" style="color:${freshPlan.color};"><span class="dot" style="background:${freshPlan.color};"></span>${esc(freshPlan.text)}</div>
@@ -2659,9 +1844,7 @@ function renderReportImpl() {
       </div>
     </div>
 
-    ${alertNarrativeCardHTML(priceAlert)}
     ${alertGradeCardHTML(priceAlert)}
-    ${alertReliabilityCardHTML(priceAlert, t, plan, quote.usd, asset.ticker)}
 
     ${sectionTitleHTML('Conclusión', 'check')}
     <div class="card conclusion-card">
@@ -2670,38 +1853,6 @@ function renderReportImpl() {
 
     ${cedearNote}
   `;
-
-  // Confiabilidad histórica de la señal: corre (una vez, cacheado) el backtester
-  // walk-forward del activo y completa el hueco de la tarjeta. No bloquea el
-  // primer paint del informe; se autocancela si el usuario cambia de activo.
-  if (priceAlert && (priceAlert.type === 'buy' || priceAlert.type === 'sell') && priceAlert.grade) {
-    hydrateAlertReliability(asset.ticker, priceAlert, t, quote.usd, plan);
-  }
-
-  // Sub-navegación de la ficha: salta a cada sección; quita los chips cuyo
-  // destino no existe en este informe (p. ej. sin alerta → sin Confiabilidad);
-  // marca el chip activo según la sección visible al hacer scroll.
-  const subnav = document.getElementById('report-subnav');
-  if (subnav) {
-    const chips = [...subnav.querySelectorAll('.report-subnav-chip')];
-    const byId = {};
-    chips.forEach(chip => {
-      const target = document.getElementById(chip.dataset.sec);
-      if (!target) { chip.remove(); return; }
-      byId[chip.dataset.sec] = chip;
-      chip.addEventListener('click', (e) => { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
-    });
-    const anchors = Object.keys(byId);
-    if (anchors.length <= 1) subnav.remove(); // una sola sección: no aporta
-    else if ('IntersectionObserver' in window) {
-      const obs = new IntersectionObserver((entries) => {
-        entries.forEach(en => {
-          if (en.isIntersecting) { chips.forEach(c => c.classList.remove('active')); byId[en.target.id]?.classList.add('active'); }
-        });
-      }, { rootMargin: '-90px 0px -72% 0px' });
-      anchors.forEach(id => obs.observe(document.getElementById(id)));
-    }
-  }
 
   const starBtn = document.getElementById('exec-star');
   if (starBtn) {
@@ -2737,6 +1888,7 @@ function renderReportImpl() {
   }
 }
 
+function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 function horizonFor(t) {
   return t.adx > 22 ? '3–6 meses' : '6–12 meses';
@@ -2954,81 +2106,6 @@ function insiderFlowCardHTML(ins, asset) {
     </div>`;
 }
 
-/* ═══════════════════ SALUD FINANCIERA (score compuesto propio) ══════════════
- * Un puntaje de salud fundamental (0-100) + grado (A-D) construido con las
- * métricas que expone el proveedor: rentabilidad (ROE, margen), solvencia
- * (deuda, caja), crecimiento (ingresos, EPS) y generación de caja (FCF). No es
- * un Piotroski/Altman formal —esos requieren detalle de balance y flujo de caja
- * año contra año que el tier gratuito no da— así que se presenta honestamente
- * como un compuesto propio. Además clasifica "empresa de calidad" vs. posible
- * "trampa de valor". Nada se inventa: si falta una métrica, esa dimensión no
- * puntúa. */
-function financialHealthScore(f) {
-  if (!f?.hasData) return null;
-  const clamp01 = (x) => Math.max(0, Math.min(1, x));
-  const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
-  const dims = [];
-  const prof = [];
-  if (f.roe != null) prof.push(clamp01(f.roe / 25));
-  if (f.netMargin != null) prof.push(clamp01(f.netMargin / 20));
-  if (prof.length) dims.push({ key: 'Rentabilidad', v: mean(prof) });
-  const solv = [];
-  if (f.debtEquity != null) solv.push(clamp01(1 - f.debtEquity / 3));
-  if (f.fcfPerShare != null) solv.push(f.fcfPerShare > 0 ? 1 : 0.25);
-  if (solv.length) dims.push({ key: 'Solvencia', v: mean(solv) });
-  const grow = [];
-  if (f.revenueGrowth != null) grow.push(clamp01((f.revenueGrowth + 5) / 25));
-  if (f.epsGrowth != null) grow.push(clamp01((f.epsGrowth + 5) / 30));
-  if (grow.length) dims.push({ key: 'Crecimiento', v: mean(grow) });
-  if (f.fcfPerShare != null) dims.push({ key: 'Generación de caja', v: f.fcfPerShare > 0 ? clamp01(0.6 + f.fcfPerShare / 20) : 0.2 });
-  if (dims.length < 2) return null; // muy poco para un veredicto honesto
-  const score = Math.round(mean(dims.map(d => d.v)) * 100);
-  const grade = score >= 75 ? 'A' : score >= 60 ? 'B' : score >= 45 ? 'C' : 'D';
-  const flags = [];
-  if (f.roe != null && f.roe >= 18) flags.push({ bad: false, t: `Muy rentable (ROE ${f.roe.toFixed(0)}%)` });
-  if (f.debtEquity != null && f.debtEquity <= 0.8) flags.push({ bad: false, t: 'Deuda baja — balance sólido' });
-  if (f.revenueGrowth != null && f.revenueGrowth >= 12) flags.push({ bad: false, t: `Crece fuerte (${f.revenueGrowth.toFixed(0)}%/año)` });
-  if (f.fcfPerShare != null && f.fcfPerShare > 0) flags.push({ bad: false, t: 'Genera caja libre' });
-  if (f.debtEquity != null && f.debtEquity > 2.5) flags.push({ bad: true, t: `Deuda alta (${f.debtEquity.toFixed(1)}x su capital)` });
-  if (f.fcfPerShare != null && f.fcfPerShare < 0) flags.push({ bad: true, t: 'No genera caja (FCF negativo)' });
-  if (f.revenueGrowth != null && f.revenueGrowth < 0) flags.push({ bad: true, t: 'Ingresos en baja' });
-  if (f.netMargin != null && f.netMargin < 0) flags.push({ bad: true, t: 'Pierde plata (margen negativo)' });
-  const strongProfit = f.roe != null && f.roe >= 15;
-  const lowDebt = f.debtEquity != null && f.debtEquity <= 1;
-  const growing = f.revenueGrowth != null && f.revenueGrowth >= 8;
-  const cashPos = f.fcfPerShare != null && f.fcfPerShare > 0;
-  const falling = f.revenueGrowth != null && f.revenueGrowth < 0;
-  const highDebt = f.debtEquity != null && f.debtEquity > 2.5;
-  const cashNeg = f.fcfPerShare != null && f.fcfPerShare < 0;
-  let verdict;
-  if (strongProfit && lowDebt && (growing || cashPos)) verdict = { tag: 'Empresa de calidad', tone: 'good', text: 'Rentable, poco endeudada y con el negocio creciendo o generando caja — el perfil de una empresa sólida para el largo plazo.' };
-  else if ((falling && highDebt) || (cashNeg && highDebt)) verdict = { tag: 'Señales de alerta', tone: 'bad', text: 'Combina deuda alta con caída de ingresos o falta de caja. Cuidado con la "trampa de valor": puede estar barata por buenas razones.' };
-  else if (score >= 60) verdict = { tag: 'Fundamentales sanos', tone: 'good', text: 'Sin banderas rojas importantes en rentabilidad, deuda ni crecimiento.' };
-  else verdict = { tag: 'Fundamentales flojos', tone: 'warn', text: 'Señales mezcladas: revisá deuda, márgenes y crecimiento antes de entrar por lo fundamental.' };
-  return { score, grade, dims, flags, verdict };
-}
-function financialHealthHTML(f) {
-  const h = financialHealthScore(f);
-  if (!h) return '';
-  const gradeColor = h.grade === 'A' ? GREEN : h.grade === 'B' ? 'oklch(0.80 0.14 130)' : h.grade === 'C' ? AMBER : RED;
-  const barColor = (v) => v >= 0.6 ? 'var(--up)' : v >= 0.4 ? 'var(--amber)' : 'var(--down)';
-  return `<div class="fhealth ${h.verdict.tone}">
-    <div class="fhealth-top">
-      <div class="fhealth-grade" style="border-color:${gradeColor}; color:${gradeColor};"><b>${h.grade}</b><span>${h.score}/100</span></div>
-      <div class="fhealth-head">
-        <div class="fhealth-eyebrow">🩺 Salud financiera</div>
-        <div class="fhealth-verdict">${esc(h.verdict.tag)}</div>
-        <div class="fhealth-text">${esc(h.verdict.text)}</div>
-      </div>
-    </div>
-    <div class="fhealth-dims">
-      ${h.dims.map(d => `<div class="fhealth-dim"><div class="fhealth-dim-top"><span>${esc(d.key)}</span><b>${Math.round(d.v * 100)}</b></div><div class="fhealth-bar"><i style="width:${Math.round(d.v * 100)}%; background:${barColor(d.v)};"></i></div></div>`).join('')}
-    </div>
-    ${h.flags.length ? `<div class="fhealth-flags">${h.flags.slice(0, 6).map(fl => `<span class="fhealth-flag ${fl.bad ? 'bad' : 'good'}">${fl.bad ? '⚠' : '✓'} ${esc(fl.t)}</span>`).join('')}</div>` : ''}
-    <div class="fhealth-foot">Compuesto propio (rentabilidad · solvencia · crecimiento · caja) con los datos del proveedor. No es un Piotroski/Altman formal —requieren detalle de balance y flujo de caja que la fuente gratuita no expone—. No es asesoramiento financiero.</div>
-  </div>`;
-}
-
 function didacticFundamentalCards(f, earnings, daysToEarnings, dividends, asset) {
   if (!f?.hasData) return null;
   const rows = [];
@@ -3184,27 +2261,6 @@ function macroChips(macro) {
   return chips;
 }
 
-/* Proyección del score: hasta qué nivel estructural podría ir el precio si el
- * sesgo del score se sostiene — próxima resistencia si es alcista, próximo
- * soporte si es bajista. Da el "hasta dónde" de un vistazo, junto al número. */
-function scoreProjectionHTML(t, price, scoreLabel) {
-  if (!t || !(price > 0)) return '';
-  const lbl = (scoreLabel || '').toLowerCase();
-  let bull = null;
-  if (lbl.includes('compra')) bull = true;
-  else if (lbl.includes('venta') || lbl.includes('reducir')) bull = false;
-  else if (t.ema50 != null) bull = price >= t.ema50; // "Mantener": sesgo por la EMA50
-  if (bull === true && t.resistance != null && t.resistance > price) {
-    const pct = ((t.resistance - price) / price) * 100;
-    return `<div class="gauge-proj up" title="Próxima resistencia estructural — objetivo si el sesgo alcista se sostiene (no es una promesa)">🎯 Próximo techo <b>${fmtUsd(t.resistance)}</b> <b class="up">+${pct.toFixed(1)}%</b></div>`;
-  }
-  if (bull === false && t.support != null && t.support < price) {
-    const pct = ((price - t.support) / price) * 100;
-    return `<div class="gauge-proj down" title="Próximo soporte estructural — riesgo si el sesgo bajista se sostiene">🎯 Próximo piso <b>${fmtUsd(t.support)}</b> <b class="down">−${pct.toFixed(1)}%</b></div>`;
-  }
-  return '';
-}
-
 /* ───────────────────────── seguimiento (watchlist) ───────────────────────── */
 function scoreLabelColor(label) {
   if (label === 'Compra Fuerte') return { bg: 'oklch(0.32 0.11 152)', color: 'oklch(0.90 0.16 152)' };
@@ -3235,43 +2291,23 @@ function sortAndFilterTickers(tickers) {
 }
 
 /* ───────────────────────── sidebar de navegación ───────────────────────── */
-// Navegación agrupada por área (antes eran 16 ítems planos). No cambia ninguna
-// ruta/vista: solo organiza y ordena para que se lea como una plataforma
-// institucional y para que los apartados relacionados queden juntos
-// (Backtesting junto a Track Record, Watchlist junto a Alertas, etc.).
-const SIDEBAR_NAV_GROUPS = [
-  { label: 'Mercado', items: [
-    { view: 'dashboard', label: 'Dashboard', icon: 'grid' },
-    { view: 'panorama', label: 'Panorama de Mercado', icon: 'flag' },
-    { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
-    { view: 'calendar', label: 'Calendario Económico', icon: 'calendar' },
-  ] },
-  { label: 'Oportunidades', items: [
-    { view: 'screener', label: 'Screener', icon: 'filter' },
-    { view: 'shorttrades', label: 'Trades Cortos', icon: 'zap' },
-    { view: 'gaps', label: 'Radar de Gaps', icon: 'gap' },
-    { view: 'dividends', label: 'Dividendos', icon: 'coins' },
-    { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
-  ] },
-  { label: 'Mi Cartera', items: [
-    { view: 'advisor', label: 'Asesor de Inversión', icon: 'target' },
-    { view: 'portfolio', label: 'Portfolio Advisor', icon: 'briefcase' },
-    { view: 'simulator', label: 'Simulador "¿Y si...?"', icon: 'shuffle' },
-    { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
-    { view: 'alerts', label: 'Alertas', icon: 'warning' },
-  ] },
-  { label: 'Motor de Análisis', items: [
-    { view: 'compare', label: 'Comparador', icon: 'compare' },
-    { view: 'basket', label: 'Modo Cesta', icon: 'radar' },
-    { view: 'backtest', label: 'Backtesting', icon: 'trend' },
-    { view: 'trackrecord', label: 'Track Record del Motor', icon: 'award' },
-  ] },
-  { label: 'Aprender', items: [
-    { view: 'academy', label: 'Aprendé', icon: 'bulb' },
-  ] },
-  { label: 'Ajustes', items: [
-    { view: 'settings', label: 'Configuración', icon: 'gear' },
-  ] },
+const SIDEBAR_NAV = [
+  { view: 'dashboard', label: 'Dashboard', icon: 'grid' },
+  { view: 'portfolio', label: 'Portfolio Advisor', icon: 'briefcase' },
+  { view: 'simulator', label: 'Simulador "¿Y si...?"', icon: 'shuffle' },
+  { view: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
+  { view: 'bonds', label: 'Bonos Argentinos', icon: 'building' },
+  { view: 'screener', label: 'Screener', icon: 'filter' },
+  { view: 'shorttrades', label: 'Trades Cortos', icon: 'zap' },
+  { view: 'gaps', label: 'Radar de Gaps', icon: 'gap' },
+  { view: 'dividends', label: 'Dividendos', icon: 'coins' },
+  { view: 'compare', label: 'Comparador', icon: 'compare' },
+  { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
+  { view: 'alerts', label: 'Alertas', icon: 'warning' },
+  { view: 'calendar', label: 'Calendario Económico', icon: 'calendar' },
+  { view: 'backtest', label: 'Backtesting', icon: 'trend' },
+  { view: 'trackrecord', label: 'Track Record del Motor', icon: 'award' },
+  { view: 'settings', label: 'Configuración', icon: 'gear' },
 ];
 // Ninguna funcionalidad queda deshabilitada por ahora: cada ítem del sidebar
 // corresponde a una vista real con datos en vivo. Si se agrega una nueva
@@ -3283,14 +2319,12 @@ function renderSidebar() {
   if (!els.sidebarNav) return;
   const activeView = !state.asset ? state.view : null;
   els.sidebarNav.innerHTML = `
-    ${SIDEBAR_NAV_GROUPS.map(group => `
     <div class="sidebar-nav-group">
-      <div class="sidebar-nav-label">${esc(group.label)}</div>
-      ${group.items.map(item => `
+      ${SIDEBAR_NAV.map(item => `
         <button class="sidebar-nav-btn ${activeView === item.view ? 'active' : ''}" data-view="${item.view}" ${activeView === item.view ? 'aria-current="page"' : ''}>
           ${ICONS[item.icon]}<span>${esc(item.label)}</span>
         </button>`).join('')}
-    </div>`).join('')}
+    </div>
     ${SIDEBAR_NAV_DISABLED.length ? `
     <div class="sidebar-nav-group">
       <div class="sidebar-nav-label">Próximamente</div>
@@ -3348,74 +2382,20 @@ function sparklineSVG(closes, up) {
   const linePath = `M${pts.join(' L')}`;
   const areaPath = `${linePath} L${(w - pad).toFixed(1)},${(h - pad).toFixed(1)} L${pad.toFixed(1)},${(h - pad).toFixed(1)} Z`;
   const gradId = `sparkGrad${sparklineIdSeq++}`; // id único por instancia — varias tarjetas comparten la página
-  const sparkData = closes.map(c => +Number(c).toFixed(2)).join(','); // cierres para el tooltip al hover
-  return `<svg class="watch-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" data-spark="${sparkData}">
+  return `<svg class="watch-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
     <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${color}" stop-opacity="0.42"/>
+      <stop offset="0%" stop-color="${color}" stop-opacity="0.38"/>
       <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
     </linearGradient></defs>
     <path d="${areaPath}" fill="url(#${gradId})" stroke="none"/>
-    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.6"/>
   </svg>`;
-}
-
-/* ── Sparklines interactivas: tooltip con el valor al pasar el mouse ──────────
- * Los mini-gráficos llevan sus cierres en data-spark; un único handler delegado
- * (sobrevive a los re-render) muestra el valor y la variación vs. el inicio en
- * el punto donde está el cursor. Igual que el crosshair del gráfico grande, pero
- * liviano. */
-let _sparkTip = null;
-function sparkTipEl() {
-  if (_sparkTip) return _sparkTip;
-  _sparkTip = document.createElement('div');
-  _sparkTip.className = 'spark-tip';
-  _sparkTip.style.display = 'none';
-  document.body.appendChild(_sparkTip);
-  return _sparkTip;
-}
-function hideSparkTip() { if (_sparkTip) _sparkTip.style.display = 'none'; }
-document.addEventListener('mousemove', (e) => {
-  const svg = e.target.closest && e.target.closest('.watch-sparkline');
-  if (!svg || !svg.dataset.spark) { hideSparkTip(); return; }
-  const closes = svg.dataset.spark.split(',').map(Number);
-  if (closes.length < 2) return;
-  const rect = svg.getBoundingClientRect();
-  if (rect.width <= 0) return;
-  const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  const idx = Math.round(frac * (closes.length - 1));
-  const val = closes[idx], first = closes[0];
-  const pct = first ? ((val - first) / first) * 100 : 0;
-  const vTxt = Math.abs(val) >= 1000 ? val.toLocaleString('en-US', { maximumFractionDigits: 0 }) : val.toFixed(2);
-  const tip = sparkTipEl();
-  tip.innerHTML = `<b>$${vTxt}</b> <span class="${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</span>`;
-  tip.style.display = 'block';
-  tip.style.left = e.clientX + 'px';
-  tip.style.top = (rect.top - 6) + 'px';
-}, { passive: true });
-document.addEventListener('scroll', hideSparkTip, { passive: true, capture: true });
-
-// Etiqueta de origen de la tarjeta de oportunidad: distingue de un vistazo las
-// oportunidades locales (empresas argentinas) de los CEDEARs de empresas
-// extranjeras, ETFs y cripto. El público es argentino y opera ambos mundos, así
-// que saber si un papel es local o un CEDEAR importa para el timing y la moneda.
-function dashCardOrigin(ticker, d) {
-  if (d.category === 'Cripto') return { label: 'Cripto', cls: 'crypto' };
-  if (d.category === 'ETF') return { label: 'ETF', cls: 'etf' };
-  if (AR_TICKERS.has(ticker)) return { label: '🇦🇷 Argentina', cls: 'arg' };
-  return { label: 'CEDEAR', cls: 'cedear' };
 }
 
 function dashCardHTML(ticker, d) {
   const up = d.changePct >= 0;
   const sig = scoreLabelColor(d.scoreLabel);
   const am = d.alert ? ALERT_META[d.alert.type] : null;
-  const origin = dashCardOrigin(ticker, d);
-  // Precio en pesos: para CEDEARs de empresas extranjeras es el precio del
-  // CEDEAR; para empresas argentinas, la referencia local. 'live' = precio real
-  // BYMA, 'estimated' = derivado del dólar CCL. Cripto no tiene y queda oculto.
-  const arsLine = d.cedearArs != null
-    ? `<div class="dcv-ars" title="Precio en pesos ${d.cedearSource === 'live' ? '(precio real de BYMA)' : '(estimado vía dólar CCL)'}"><span class="dcv-ars-val">${fmtArs(d.cedearArs)}</span><span class="dcv-ars-src ${d.cedearSource === 'live' ? 'live' : 'est'}">${d.cedearSource === 'live' ? '● en vivo' : '≈ estimado'}</span></div>`
-    : '';
   // Badge de convicción: solo cuando es alta o media (una señal débil no aporta).
   const conv = positionConviction({ d });
   const convBadge = conv && conv.verdict !== 'baja'
@@ -3425,7 +2405,7 @@ function dashCardHTML(ticker, d) {
   return `<div class="dash-card ${am ? 'has-alert' : ''} ${d.alert?.pending ? 'is-pending' : ''}" data-dash-ticker="${esc(ticker)}" style="${am ? `--card-accent:${am.color};` : `--card-accent:${sig.color};`}">
     <div class="dcv-head">
       <div class="dcv-id">
-        <div class="dcv-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''} <span class="dcv-cat dcv-cat-${origin.cls}">${origin.label}</span></div>
+        <div class="dcv-ticker">${esc(ticker)}${d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}</div>
         <div class="dcv-name">${esc(d.name ?? '')}</div>
       </div>
       <div class="dcv-ring" style="background:conic-gradient(${sig.color} ${ringDeg}deg, var(--surface-2, rgba(255,255,255,0.08)) 0deg);" title="${esc(d.scoreLabel)} · score ${d.score}/100">
@@ -3436,7 +2416,6 @@ function dashCardHTML(ticker, d) {
       <span class="dcv-price">${fmtUsd(d.price)}</span>
       <span class="dcv-change ${up ? 'up' : 'down'}">${up ? '▲' : '▼'} ${fmtPct(d.changePct)}</span>
     </div>
-    ${arsLine}
     <div class="dcv-spark">${sparklineSVG(d.sparkline, up)}</div>
     <div class="dcv-sigrow">
       <span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)}</span>
@@ -3444,23 +2423,7 @@ function dashCardHTML(ticker, d) {
     </div>
     ${d.highlight ? `<div class="dcv-highlight">${esc(d.highlight)}</div>` : ''}
     ${am ? `<div class="dcv-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
-    ${(() => { const n = dcvNarrative(d); return n ? `<span class="card-reveal-hint" aria-hidden="true">🔍</span><div class="card-reveal">${n}</div>` : ''; })()}
   </div>`;
-}
-
-/* Narrativa compacta de la tarjeta de Oportunidades: prioriza la del setup de
- * Trades Cortos (qué acaba de pasar + proyección); si no hay setup que califique,
- * usa la de la alerta de precio. Solo en tarjetas accionables — el resto queda
- * limpio. */
-function dcvNarrative(d) {
-  if (d.setup?.qualifies && d.setup.narrative) {
-    return `<div class="dcv-narr ${d.setup.direction === 'short' ? 'down' : 'up'}">${d.setup.narrative}</div>`;
-  }
-  if (d.alert && alertNarrative(d.alert)) {
-    const cls = d.alert.type === 'buy' ? 'up' : d.alert.type === 'sell' ? 'down' : 'stop';
-    return `<div class="dcv-narr ${cls}">${alertNarrative(d.alert)}</div>`;
-  }
-  return '';
 }
 
 /* ═══════════════════ DASHBOARD: capa de contexto de mercado ═══════════════
@@ -3550,7 +2513,7 @@ function marketAgenda(loaded) {
       else if (d.alert.type === 'sell') items.push({ pri: 1, icon: '🔴', ticker: t, text: 'Entró en zona de venta' });
     }
     if (d.gap?.significant) items.push({ pri: 2, icon: '⚡', ticker: t, text: `Gap de apertura ${d.gap.pct >= 0 ? '+' : ''}${d.gap.pct.toFixed(1)}% ${d.gap.direction === 'up' ? 'al alza' : 'a la baja'} — ${d.gap.filled ? 'ya se rellenó' : 'sostiene'}` });
-    if (d.setup?.qualifies) items.push({ pri: 3, icon: d.setup.direction === 'short' ? '🔻' : '🚀', ticker: t, text: `Setup de trade corto ${d.setup.direction === 'short' ? 'bajista' : 'alcista'} (confianza ${d.setup.confidence})` });
+    if (d.setup?.qualifies) items.push({ pri: 3, icon: '🚀', ticker: t, text: `Setup de trade corto (confianza ${d.setup.confidence})` });
   }
   items.sort((a, b) => a.pri - b.pri);
   return items.slice(0, 12);
@@ -3571,45 +2534,6 @@ function ideaOfTheDay(loaded) {
 
 function infoTip(text) {
   return `<span class="info-tip" tabindex="0" role="button" aria-label="${esc(text)}" title="${esc(text)}">ⓘ</span>`;
-}
-
-/* ── Glosario: jerga técnica explicada en criollo al pasar el mouse ──────────
- * `glossify(texto)` envuelve el PRIMER término del glosario que aparezca con un
- * popover que lo explica en lenguaje simple. Se auto-aplica a las filas de
- * indicadores sin tener que anotarlas una por una. El resto del texto se escapa
- * normal. */
-const GLOSSARY = {
-  'Fuerza Relativa': 'Compara al activo contra el mercado (S&P 500). Si sube más que el índice, está "liderando"; si sube menos, "rezagando".',
-  'Bollinger': 'Bandas de volatilidad alrededor del precio. Cuando se estrechan (squeeze), suele venir un movimiento fuerte; cuando el precio toca una banda, puede rebotar.',
-  'Divergencia': 'El precio hace un nuevo máximo (o mínimo) pero el indicador no lo acompaña. Suele anticipar un giro de tendencia.',
-  'Resistencia': 'Precio donde la suba suele frenar porque aparecen vendedores. Un "techo" técnico.',
-  'Soporte': 'Precio donde la caída suele frenar porque aparecen compradores. Un "piso" técnico.',
-  'Fibonacci': 'Niveles (38,2% · 50% · 61,8%) donde el precio suele frenar o rebotar tras un movimiento fuerte.',
-  'Squeeze': 'Compresión de volatilidad: las bandas se estrechan. Suele preceder a un movimiento brusco en cualquier dirección.',
-  'VWAP': 'Precio promedio ponderado por volumen. Muchos operadores lo usan como referencia de "precio justo" del día.',
-  'MACD': 'Cruce de dos medias móviles que mide el impulso. Cuando la línea cruza hacia arriba su señal, es momentum alcista; hacia abajo, bajista.',
-  'EMA': 'Media móvil exponencial: el precio promedio de las últimas N ruedas (dando más peso a lo reciente). La de 200 marca la tendencia de fondo.',
-  'RSI': 'Índice de Fuerza Relativa (0–100). Arriba de 70 el activo está "sobrecomprado" (puede corregir); abajo de 30, "sobrevendido" (puede rebotar).',
-  'ADX': 'Mide la FUERZA de la tendencia, no su dirección. Arriba de 25 la tendencia es fuerte; abajo de 20, el precio va de lado.',
-  'ATR': 'Rango Verdadero Promedio: cuánto se mueve el activo por día en promedio. Sirve para dimensionar el stop y el objetivo.',
-  'OBV': 'On-Balance Volume: suma el volumen en días de suba y lo resta en días de baja. Confirma si el volumen acompaña al precio.',
-  'POC': 'Punto de Control: el precio donde se operó MÁS volumen. Actúa como imán y como soporte/resistencia fuerte.',
-  'Beta': 'Cuánto se mueve el activo respecto al mercado. Beta 1,5 = amplifica un 50% los movimientos del índice.',
-  'Correlación': 'Qué tan de la mano se mueve con el mercado (de -1 a 1). Cerca de 1, van juntos; cerca de 0, independientes.',
-};
-const GLOSSARY_ORDER = Object.keys(GLOSSARY).sort((a, b) => b.length - a.length); // multi-palabra primero
-function glossify(text) {
-  if (!text) return esc(text ?? '');
-  const lower = text.toLowerCase();
-  for (const term of GLOSSARY_ORDER) {
-    const idx = lower.indexOf(term.toLowerCase());
-    if (idx < 0) continue;
-    const before = text.slice(0, idx), match = text.slice(idx, idx + term.length), after = text.slice(idx + term.length);
-    return esc(before)
-      + `<span class="gloss" tabindex="0">${esc(match)}<span class="gloss-pop" role="tooltip"><b>${esc(term)}</b> — ${esc(GLOSSARY[term])}</span></span>`
-      + esc(after);
-  }
-  return esc(text);
 }
 
 /* ── tarjetas del contexto de mercado ── */
@@ -3715,142 +2639,6 @@ function moversWidgetBody(loaded) {
         ${losers.map(e => moverRow(e, false)).join('')}
       </div>
     </div>`}`;
-}
-
-/* ── Radar de rupturas (#15): activos del universo rompiendo su máximo de 52
- * semanas o su resistencia HOY, con confirmación de volumen. ── */
-function breakoutsWidgetBody(loaded) {
-  const rows = [];
-  for (const e of loaded) {
-    const d = e.d, c = d.closes, price = d.price;
-    if (!c?.length || price == null || d.changePct == null || d.changePct <= 0) continue;
-    const hi52 = Math.max(...c.slice(-252));
-    const newHigh = hi52 > 0 && price >= hi52 * 0.997;
-    const resRef = d.planRaw?.resistanceRef ?? null;
-    const brokeRes = resRef != null && price >= resRef && !newHigh;
-    if (!newHigh && !brokeRes) continue;
-    rows.push({ ticker: e.ticker, d, price, changePct: d.changePct, relVol: d.relVolume, newHigh, resRef, hi52 });
-  }
-  rows.sort((a, b) => (b.newHigh - a.newHigh) || ((b.relVol ?? 0) - (a.relVol ?? 0)) || (b.changePct - a.changePct));
-  const top = rows.slice(0, 9);
-  const row = (r) => `<div class="brk-row" data-dash-ticker="${esc(r.ticker)}" title="Ver análisis de ${esc(r.ticker)}">
-    <span class="brk-tk">${esc(r.ticker)}</span>
-    <span class="brk-tag ${r.newHigh ? 'high' : 'res'}">${r.newHigh ? '🚀 Nuevo máximo 52s' : `📈 Rompió resistencia ${fmtUsd(r.resRef)}`}</span>
-    <span class="brk-price">${fmtUsd(r.price)}</span>
-    <span class="brk-chg up">▲ ${fmtPct(r.changePct)}</span>
-    <span class="brk-vol ${r.relVol != null && r.relVol >= 1.5 ? 'hot' : ''}">${r.relVol != null ? `${r.relVol.toFixed(1)}× vol` : ''}</span>
-  </div>`;
-  return `
-    <div class="dash-intro" style="margin-bottom:12px;">Activos del universo que <b>hoy</b> superan su máximo de 52 semanas o rompen una resistencia, con el volumen relativo como confirmación. ${infoTip('Una ruptura con volumen alto (≥1,5×) tiene más chances de sostenerse; sin volumen, cuidado con el amague.')}</div>
-    ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>`
-      : !top.length ? `<div class="card watch-empty">Ningún activo del universo está rompiendo máximos o resistencias al alza en este momento.</div>`
-      : `<div class="card brk-card">${top.map(row).join('')}</div>`}`;
-}
-
-/* ── Detector de volumen inusual (#16): actividad muy por encima del promedio,
- * posible catalizador antes (o después) de la noticia. ── */
-function volumeAnomalyWidgetBody(loaded) {
-  const rows = loaded
-    .filter(e => e.d?.relVolume != null && e.d.relVolume >= 1.8 && e.d.changePct != null)
-    .map(e => ({ ticker: e.ticker, d: e.d, relVol: e.d.relVolume, changePct: e.d.changePct }))
-    .sort((a, b) => b.relVol - a.relVol)
-    .slice(0, 9);
-  const row = (r) => {
-    const up = r.changePct >= 0;
-    const bias = Math.abs(r.changePct) < 0.4 ? { t: '→ sin dirección clara', cls: 'flat' } : up ? { t: '▲ acumulación (sube)', cls: 'up' } : { t: '▼ distribución (baja)', cls: 'down' };
-    return `<div class="vol-row" data-dash-ticker="${esc(r.ticker)}" title="Ver análisis de ${esc(r.ticker)}">
-      <span class="vol-tk">${esc(r.ticker)}</span>
-      <span class="vol-x">${r.relVol.toFixed(1)}× <i>el volumen promedio</i></span>
-      <span class="vol-bias ${bias.cls}">${bias.t}</span>
-      <span class="vol-chg ${up ? 'up' : 'down'}">${fmtPct(r.changePct)}</span>
-    </div>`;
-  };
-  return `
-    <div class="dash-intro" style="margin-bottom:12px;">Activos operando con <b>volumen muy por encima de lo normal</b> hoy — suele anticipar (o acompañar) un catalizador. El volumen mueve al precio: sube con compras (acumulación) o baja con ventas (distribución). ${infoTip('Volumen relativo = volumen de hoy ÷ promedio reciente. ≥1,8× ya es inusual.')}</div>
-    ${!loaded.length ? `<div class="card watch-empty">Cargando universo curado…</div>`
-      : !rows.length ? `<div class="card watch-empty">Sin volumen inusual en el universo ahora mismo — actividad dentro de lo normal.</div>`
-      : `<div class="card vol-card">${rows.map(row).join('')}</div>`}`;
-}
-
-/* ── Resumen del día (#13): digest generado del mercado en pocas frases, sobre
- * el universo ya cargado (amplitud, líder/rezagado, señales, rupturas, volumen). ── */
-function countBreakouts(loaded) {
-  let n = 0;
-  for (const e of loaded) {
-    const c = e.d?.closes;
-    if (!c?.length || e.d.changePct == null || e.d.changePct <= 0) continue;
-    const hi = Math.max(...c.slice(-252));
-    if (hi > 0 && e.d.price >= hi * 0.997) n++;
-  }
-  return n;
-}
-function dailyDigestWidgetBody(ctx) {
-  const { loaded } = ctx;
-  if (!loaded.length) return `<div class="card watch-empty">Cargando universo curado…</div>`;
-  const withChg = loaded.filter(e => e.d?.changePct != null);
-  const total = withChg.length || 1;
-  const upN = withChg.filter(e => e.d.changePct > 0).length;
-  const upPct = Math.round(upN / total * 100);
-  const tone = upPct >= 60 ? { t: 'con sesgo comprador', icon: '🟢' } : upPct <= 40 ? { t: 'con sesgo vendedor', icon: '🔴' } : { t: 'mixto', icon: '🟡' };
-  const sorted = [...withChg].sort((a, b) => b.d.changePct - a.d.changePct);
-  const g = sorted[0], l = sorted[sorted.length - 1];
-  const strongBuy = loaded.filter(e => e.d?.scoreLabel === 'Compra Fuerte' || e.d?.scoreLabel === 'Compra Moderada').length;
-  const brk = countBreakouts(loaded);
-  const volN = loaded.filter(e => e.d?.relVolume != null && e.d.relVolume >= 1.8).length;
-  const bullets = [];
-  bullets.push({ icon: tone.icon, t: `El mercado abre <b>${tone.t}</b>: ${upPct}% del universo (${upN}/${total}) sube hoy.` });
-  if (g) bullets.push({ icon: '▲', t: `Lidera <b>${esc(g.ticker)}</b> (${fmtPct(g.d.changePct)})${l && l !== g ? `; el más flojo es <b>${esc(l.ticker)}</b> (${fmtPct(l.d.changePct)})` : ''}.` });
-  if (strongBuy) bullets.push({ icon: '🎯', t: `<b>${strongBuy}</b> activo(s) del universo están en zona de compra según el score compuesto.` });
-  if (brk) bullets.push({ icon: '🚀', t: `<b>${brk}</b> activo(s) rompen máximos de 52 semanas hoy — mirá <b>Rupturas de Hoy</b>.` });
-  if (volN) bullets.push({ icon: '🔊', t: `<b>${volN}</b> activo(s) con volumen inusual — posible catalizador (ver <b>Volumen Inusual</b>).` });
-  const dateTxt = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-  return `
-    <div class="digest-head">📋 <span>Resumen del día</span> · <i>${esc(dateTxt)}</i></div>
-    <div class="digest-list">${bullets.map(b => `<div class="digest-item"><span class="digest-ic">${b.icon}</span><span>${b.t}</span></div>`).join('')}</div>
-    <div class="digest-foot">Síntesis automática del universo curado de hoy — un vistazo rápido antes de entrar en detalle. No es asesoramiento.</div>`;
-}
-
-/* ── Calendario económico global (#14): eventos macro que mueven al mercado, con
- * cuenta regresiva. FOMC y empleo con fecha exacta publicada; el IPC va estimado
- * (~mediados de mes) hasta que se confirma. ── */
-const FOMC_DATES = ['2025-01-29', '2025-03-19', '2025-05-07', '2025-06-18', '2025-07-30', '2025-09-17', '2025-10-29', '2025-12-10', '2026-01-28', '2026-03-18', '2026-04-29', '2026-06-17', '2026-07-29', '2026-09-16', '2026-11-04', '2026-12-16'];
-function firstFridayOf(year, month) { // month 0-based
-  const d = new Date(Date.UTC(year, month, 1));
-  const offset = (5 - d.getUTCDay() + 7) % 7; // hacia el viernes (5)
-  return new Date(Date.UTC(year, month, 1 + offset));
-}
-function economicCalendarEvents() {
-  const out = [];
-  const iso = (d) => d.toISOString().slice(0, 10);
-  for (const ds of FOMC_DATES) {
-    const dd = daysUntil(ds);
-    if (dd != null && dd >= 0 && dd <= 75) out.push({ date: ds, days: dd, type: 'fomc', label: 'Decisión de tasas de la Fed (FOMC)', impact: 'Mueve todo el mercado: acciones, bonos y el dólar.', exact: true });
-  }
-  const now = new Date();
-  const y = now.getUTCFullYear(), m = now.getUTCMonth();
-  for (let k = 0; k <= 2; k++) {
-    const idx = m + k, yy = y + Math.floor(idx / 12), mo = ((idx % 12) + 12) % 12;
-    const nfp = firstFridayOf(yy, mo), nfpDays = daysUntil(iso(nfp));
-    if (nfpDays != null && nfpDays >= 0 && nfpDays <= 75) out.push({ date: iso(nfp), days: nfpDays, type: 'nfp', label: 'Empleo USA (nóminas no agrícolas)', impact: 'Termómetro de la economía; influye en las tasas.', exact: true });
-    const cpi = new Date(Date.UTC(yy, mo, 13)), cpiDays = daysUntil(iso(cpi));
-    if (cpiDays != null && cpiDays >= 0 && cpiDays <= 75) out.push({ date: iso(cpi), days: cpiDays, type: 'cpi', label: 'Inflación USA (IPC)', impact: 'Define el tono de la Fed sobre las tasas.', exact: false });
-  }
-  return out.sort((a, b) => a.days - b.days).slice(0, 7);
-}
-function economicCalendarWidgetBody() {
-  const evs = economicCalendarEvents();
-  const icon = { fomc: '🏛️', nfp: '👷', cpi: '📈' };
-  const row = (e) => {
-    const when = e.days === 0 ? 'hoy' : e.days === 1 ? 'mañana' : `en ${e.days} días`;
-    return `<div class="econ-row">
-      <span class="econ-icon">${icon[e.type] ?? '📅'}</span>
-      <span class="econ-body"><span class="econ-label">${esc(e.label)}${!e.exact ? ' <i>(fecha estimada)</i>' : ''}</span><span class="econ-impact">${esc(e.impact)}</span></span>
-      <span class="econ-when ${e.days <= 3 ? 'soon' : ''}">${when}</span>
-    </div>`;
-  };
-  return `
-    <div class="dash-intro" style="margin-bottom:12px;">Los eventos macro que mueven al mercado global, con cuenta regresiva. ${infoTip('FOMC y empleo (nóminas) con fecha exacta publicada; el IPC va con fecha estimada (~mediados de mes) hasta que se confirma.')}</div>
-    ${!evs.length ? `<div class="card watch-empty">Sin eventos macro grandes en las próximas semanas.</div>` : `<div class="card econ-card">${evs.map(row).join('')}</div>`}`;
 }
 
 function dashboardHTML() {
@@ -3994,13 +2782,9 @@ function dashWidgetBody(key, ctx) {
   const { loaded, opportunities, buyZone, loadingCount, heatmapRows, sectorRows, bySignal, gainers, losers } = ctx;
   switch (key) {
     case 'idea': return ideaWidgetBody(loaded);
-    case 'digest': return dailyDigestWidgetBody(ctx);
-    case 'calendar': return economicCalendarWidgetBody();
     case 'agenda': return agendaWidgetBody(loaded);
     case 'breadth': return marketBreadthWidgetBody(loaded);
     case 'movers': return moversWidgetBody(loaded);
-    case 'breakouts': return breakoutsWidgetBody(loaded);
-    case 'volume': return volumeAnomalyWidgetBody(loaded);
     case 'opportunities': return `
       ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
       ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}`;
@@ -4291,51 +3075,10 @@ function wireDashboardEvents() {
 const SCREENER_SORT_OPTIONS = [
   { key: 'score', label: 'Score (mayor a menor)' },
   { key: 'change', label: 'Variación % (mayor a menor)' },
-  { key: 'volume', label: 'Volumen relativo (mayor a menor)' },
   { key: 'rsi', label: 'RSI (menor a mayor)' },
   { key: 'ticker', label: 'Ticker (A-Z)' },
 ];
-// Barrido del universo completo (opt-in): computeLightSignal pide 2 requests
-// por activo, así que los ~400 que no están en el dashboard se cargan en lotes
-// con pausa entre cada uno para no saturar la API. Se cachean en dashState.data
-// (mismo store que el dashboard) → una vez cargados, sirven a toda la app.
-const SCREENER_BATCH_SIZE = 12;
-const SCREENER_BATCH_DELAY_MS = 900;
-const screenerState = { minScore: 0, category: 'all', sector: 'all', signal: 'all', rsiFilter: 'all', zone: 'all', volume: 'all', sortBy: 'score', quick: 'all', scope: 'curated', loadingFull: false };
-
-// Tickers base según el alcance elegido: universo curado (rápido, ya cargado
-// por el dashboard) o universo completo (opt-in, se carga progresivamente).
-function screenerBaseTickers() {
-  return screenerState.scope === 'full' ? universe.map(a => a.ticker) : DASHBOARD_UNIVERSE;
-}
-
-// Carga progresiva del universo completo para el Screener. Solo corre cuando el
-// usuario activa el alcance "completo"; se detiene sola si vuelve al curado.
-async function loadScreenerUniverse() {
-  if (screenerState.loadingFull) return;
-  screenerState.loadingFull = true;
-  if (!state.asset && state.view === 'screener') renderReport();
-  try {
-    const macro = dashState.macro ?? await getMacro();
-    dashState.macro = macro;
-    const pending = universe.map(a => a.ticker).filter(t => !dashState.data[t] && !dashState.loading.has(t));
-    for (let i = 0; i < pending.length; i += SCREENER_BATCH_SIZE) {
-      if (screenerState.scope !== 'full') break; // el usuario volvió al universo curado
-      const batch = pending.slice(i, i + SCREENER_BATCH_SIZE);
-      await Promise.all(batch.map(async (ticker) => {
-        dashState.loading.add(ticker);
-        try { dashState.data[ticker] = await computeLightSignal(ticker, macro); }
-        catch (_) { /* se saltea el activo que falle, sin romper el barrido */ }
-        finally { dashState.loading.delete(ticker); }
-      }));
-      if (!state.asset && state.view === 'screener') renderReport();
-      if (i + SCREENER_BATCH_SIZE < pending.length) await new Promise(res => setTimeout(res, SCREENER_BATCH_DELAY_MS));
-    }
-  } finally {
-    screenerState.loadingFull = false;
-    if (!state.asset && state.view === 'screener') renderReport();
-  }
-}
+const screenerState = { minScore: 0, category: 'all', sector: 'all', signal: 'all', rsiFilter: 'all', sortBy: 'score', quick: 'all' };
 const SCREENER_QUICK_FILTERS = [
   { key: 'all', label: 'Todo el universo' },
   { key: 'argentina', label: '🇦🇷 Argentina' },
@@ -4344,7 +3087,7 @@ const SCREENER_QUICK_FILTERS = [
 
 function screenerSectorOptions() {
   const set = new Set();
-  for (const ticker of screenerBaseTickers()) {
+  for (const ticker of DASHBOARD_UNIVERSE) {
     const a = universe.find(x => x.ticker === ticker);
     if (a?.sector) set.add(a.sector);
   }
@@ -4352,22 +3095,19 @@ function screenerSectorOptions() {
 }
 
 function screenerRows() {
-  let rows = screenerBaseTickers().map(ticker => ({ ticker, d: dashState.data[ticker] })).filter(e => e.d);
+  let rows = DASHBOARD_UNIVERSE.map(ticker => ({ ticker, d: dashState.data[ticker] })).filter(e => e.d);
   if (screenerState.quick === 'argentina') rows = rows.filter(e => AR_TICKERS.has(e.ticker));
   else if (screenerState.quick === 'cripto') rows = rows.filter(e => CRYPTO_RELATED.has(e.ticker));
   if (screenerState.category !== 'all') rows = rows.filter(e => e.d.category === screenerState.category);
   if (screenerState.sector !== 'all') rows = rows.filter(e => e.d.sector === screenerState.sector);
   if (screenerState.signal !== 'all') rows = rows.filter(e => e.d.scoreLabel === screenerState.signal);
   if (screenerState.minScore > 0) rows = rows.filter(e => e.d.score >= screenerState.minScore);
-  if (screenerState.zone === 'buy') rows = rows.filter(e => e.d.alert?.type === 'buy');
-  if (screenerState.volume === 'unusual') rows = rows.filter(e => e.d.relVolume != null && e.d.relVolume >= 1.5);
   if (screenerState.rsiFilter === 'oversold') rows = rows.filter(e => e.d.rsi != null && e.d.rsi < 30);
   else if (screenerState.rsiFilter === 'overbought') rows = rows.filter(e => e.d.rsi != null && e.d.rsi > 70);
   else if (screenerState.rsiFilter === 'neutral') rows = rows.filter(e => e.d.rsi != null && e.d.rsi >= 30 && e.d.rsi <= 70);
   const sorters = {
     score: (a, b) => b.d.score - a.d.score,
     change: (a, b) => b.d.changePct - a.d.changePct,
-    volume: (a, b) => (b.d.relVolume ?? 0) - (a.d.relVolume ?? 0),
     rsi: (a, b) => (a.d.rsi ?? 999) - (b.d.rsi ?? 999),
     ticker: (a, b) => a.ticker.localeCompare(b.ticker),
   };
@@ -4376,10 +3116,7 @@ function screenerRows() {
 
 function screenerPageHTML() {
   const rows = screenerRows();
-  const full = screenerState.scope === 'full';
-  const universeSize = full ? universe.length : DASHBOARD_UNIVERSE.length;
-  const analyzed = full ? universe.filter(a => dashState.data[a.ticker]).length : DASHBOARD_UNIVERSE.filter(t => dashState.data[t]).length;
-  const stillLoading = analyzed < universeSize;
+  const totalLoaded = DASHBOARD_UNIVERSE.filter(t => dashState.data[t]).length;
   const sectorOptions = screenerSectorOptions();
   const selectField = (id, label, options) => `
     <label class="screener-filter"><span>${esc(label)}</span>
@@ -4387,18 +3124,7 @@ function screenerPageHTML() {
     </label>`;
   return `
     ${sectionTitleHTML('Screener', 'filter')}
-    <div class="dash-intro">Filtrá ${full ? `el universo <strong>completo</strong> de ${universe.length} activos` : `el universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos`} por score, sector, categoría, señal, RSI, <strong>zona de compra</strong> y <strong>volumen inusual</strong> — mismo motor de análisis que el resto de la plataforma.${stillLoading ? ` ${full && screenerState.loadingFull ? 'Analizando' : 'Cargando'} ${universeSize - analyzed} activo(s) más…` : ''}</div>
-
-    <div class="screener-scope">
-      <div class="screener-scope-info">
-        <span class="screener-scope-badge">${full ? '🌐 Universo completo' : '⚡ Universo curado'}</span>
-        <span class="screener-scope-count">${analyzed}${stillLoading ? `/${universeSize}` : ''} analizados</span>
-      </div>
-      ${full
-        ? `<button class="screener-quick-chip" id="scr-scope-curated">← Volver al universo curado (rápido)</button>`
-        : `<button class="screener-quick-chip screener-scope-btn" id="scr-scope-full">🌐 Analizar universo completo (${universe.length} activos)</button>`}
-    </div>
-
+    <div class="dash-intro">Filtrá el universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos por score, sector, categoría, señal técnica y RSI — mismo motor de análisis que el resto de la plataforma, sin pedidos extra.${totalLoaded < DASHBOARD_UNIVERSE.length ? ` Cargando datos de ${DASHBOARD_UNIVERSE.length - totalLoaded} activo(s) más…` : ''}</div>
     <div class="screener-quick-filters">
       ${SCREENER_QUICK_FILTERS.map(q => `<button class="screener-quick-chip ${screenerState.quick === q.key ? 'active' : ''}" data-quick="${q.key}">${esc(q.label)}</button>`).join('')}
     </div>
@@ -4406,12 +3132,6 @@ function screenerPageHTML() {
       <div class="screener-filters">
         ${selectField('scr-minscore', 'Score mínimo', [0, 30, 45, 65, 80].map(v => `<option value="${v}" ${screenerState.minScore === v ? 'selected' : ''}>${v === 0 ? 'Cualquiera' : `${v}+`}</option>`).join(''))}
         ${selectField('scr-signal', 'Señal', SIGNAL_FILTERS.map(s => `<option value="${esc(s)}" ${screenerState.signal === s ? 'selected' : ''}>${s === 'all' ? 'Todas' : esc(s)}</option>`).join(''))}
-        ${selectField('scr-zone', 'Zona de compra', `
-          <option value="all" ${screenerState.zone === 'all' ? 'selected' : ''}>Cualquiera</option>
-          <option value="buy" ${screenerState.zone === 'buy' ? 'selected' : ''}>Solo en zona de compra</option>`)}
-        ${selectField('scr-volume', 'Volumen', `
-          <option value="all" ${screenerState.volume === 'all' ? 'selected' : ''}>Cualquiera</option>
-          <option value="unusual" ${screenerState.volume === 'unusual' ? 'selected' : ''}>Inusual (≥1,5x)</option>`)}
         ${selectField('scr-sector', 'Sector', `<option value="all" ${screenerState.sector === 'all' ? 'selected' : ''}>Todos</option>` + sectorOptions.map(s => `<option value="${esc(s)}" ${screenerState.sector === s ? 'selected' : ''}>${esc(s)}</option>`).join(''))}
         ${selectField('scr-category', 'Categoría', ['all', 'CEDEAR', 'ETF', 'Cripto'].map(c => `<option value="${c}" ${screenerState.category === c ? 'selected' : ''}>${c === 'all' ? 'Todas' : c}</option>`).join(''))}
         ${selectField('scr-rsi', 'RSI', `
@@ -4422,21 +3142,19 @@ function screenerPageHTML() {
         ${selectField('scr-sort', 'Ordenar por', SCREENER_SORT_OPTIONS.map(o => `<option value="${o.key}" ${screenerState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join(''))}
       </div>
     </div>
-    <div class="screener-results-count">${rows.length} activo(s) cumplen los filtros${stillLoading ? ` · ${analyzed} analizados hasta ahora` : ''}</div>
     <div class="card bt-table-card">
       <div class="bt-table-wrap">
         <table class="bt-table screener-table">
-          <thead><tr><th class="scr-left">Ticker</th><th class="scr-left">Nombre</th><th class="scr-left">Sector</th><th>Precio</th><th>Var %</th><th>RSI</th><th>Vol.</th><th class="scr-left">Señal</th><th>Score</th></tr></thead>
+          <thead><tr><th class="scr-left">Ticker</th><th class="scr-left">Nombre</th><th class="scr-left">Sector</th><th>Precio</th><th>Var %</th><th>RSI</th><th class="scr-left">Señal</th><th>Score</th></tr></thead>
           <tbody>
-            ${!rows.length ? `<tr><td colspan="9" class="bt-nd" style="text-align:center; padding:26px;">${stillLoading ? 'Analizando activos… los resultados aparecen a medida que se cargan.' : 'Ningún activo cumple estos filtros ahora mismo.'}</td></tr>` : rows.map(({ ticker, d }) => `
+            ${!rows.length ? `<tr><td colspan="8" class="bt-nd" style="text-align:center; padding:26px;">Ningún activo del universo curado cumple estos filtros ahora mismo.</td></tr>` : rows.map(({ ticker, d }) => `
               <tr class="screener-row" data-ticker="${esc(ticker)}">
-                <td class="scr-left" style="font-weight:700;">${esc(ticker)}${d.alert?.type === 'buy' ? ' <span class="scr-buy-dot" title="En zona de compra">🟢</span>' : ''}</td>
+                <td class="scr-left" style="font-weight:700;">${esc(ticker)}</td>
                 <td class="scr-left" style="color:var(--text-mute);">${esc(d.name)}</td>
                 <td class="scr-left" style="color:var(--text-mute);">${esc(d.sector ?? 'N/D')}</td>
                 <td>${fmtUsd(d.price)}</td>
                 <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
                 <td>${d.rsi != null ? d.rsi.toFixed(0) : 'N/D'}</td>
-                <td class="${d.relVolume != null && d.relVolume >= 1.5 ? 'bt-pos' : ''}" title="Volumen de hoy vs. promedio">${d.relVolume != null ? d.relVolume.toFixed(1) + 'x' : 'N/D'}</td>
                 <td class="scr-left"><span class="bt-label-dot" style="background:${scoreLabelColor(d.scoreLabel).color};"></span>${esc(d.scoreLabel)}</td>
                 <td style="font-weight:700;">${d.score}</td>
               </tr>`).join('')}
@@ -4453,27 +3171,12 @@ function wireScreenerEvents() {
   };
   bind('scr-minscore', 'minScore', Number);
   bind('scr-signal', 'signal');
-  bind('scr-zone', 'zone');
-  bind('scr-volume', 'volume');
   bind('scr-sector', 'sector');
   bind('scr-category', 'category');
   bind('scr-rsi', 'rsiFilter');
   bind('scr-sort', 'sortBy');
-  els.report.querySelectorAll('.screener-quick-chip[data-quick]').forEach(el => {
+  els.report.querySelectorAll('.screener-quick-chip').forEach(el => {
     el.addEventListener('click', () => { screenerState.quick = el.dataset.quick; renderReport(); });
-  });
-  const fullBtn = document.getElementById('scr-scope-full');
-  if (fullBtn) fullBtn.addEventListener('click', () => {
-    screenerState.scope = 'full';
-    renderReport();
-    loadScreenerUniverse(); // carga progresiva del resto del universo (opt-in)
-  });
-  const curatedBtn = document.getElementById('scr-scope-curated');
-  if (curatedBtn) curatedBtn.addEventListener('click', () => {
-    screenerState.scope = 'curated'; // detiene el barrido en curso (el loop chequea el scope)
-    // el sector seleccionado puede no existir en el universo curado → reset defensivo
-    if (screenerState.sector !== 'all' && !screenerSectorOptions().includes(screenerState.sector)) screenerState.sector = 'all';
-    renderReport();
   });
   els.report.querySelectorAll('.screener-row').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.ticker));
@@ -4490,14 +3193,8 @@ const DIVIDEND_UNIVERSE = [
   'XOM', 'CVX', 'COP', 'KMI', 'VZ', 'T', 'IBM', 'CSCO', 'TXN', 'AVGO', 'QCOM', 'AAPL', 'MSFT',
   'JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'AXP', 'BLK', 'PFE', 'MRK', 'ABBV', 'AMGN', 'JNJ',
   'CAT', 'DE', 'LMT', 'RTX', 'HON', 'UPS', 'NKE', 'SBUX', 'LOW', 'TGT', 'GGAL', 'BMA', 'SPY', 'DIA',
-  // Pagadores de calidad sumados con el lote ampliado de CEDEARs (aristócratas
-  // y dividend growers) — alimentan también las Alertas de Cashflow.
-  'LIN', 'APD', 'SHW', 'WM', 'RSG', 'AMT', 'PLD', 'PSA', 'CMI', 'PH',
-  'AFL', 'ALL', 'TRV', 'PRU', 'ICE', 'CME', 'MCO', 'AON', 'MMC', 'CLX',
-  'KDP', 'CI', 'CVS', 'MDT', 'DUK', 'SO', 'NEE', 'D', 'O',
 ];
-const divState = { data: {}, prices: {}, signal: {}, loading: new Set(), sigLoading: new Set(), started: false, sortBy: 'nextEx', detailTicker: '', detail: null, detailLoading: false };
-function getPayerSignal(ticker) { return dashState.data[ticker] ?? divState.signal[ticker] ?? null; }
+const divState = { data: {}, prices: {}, loading: new Set(), started: false, sortBy: 'nextEx', detailTicker: '', detail: null, detailLoading: false };
 
 function dividendPrice(ticker) {
   return dashState.data[ticker]?.price ?? watchState.data[ticker]?.price ?? portState.data[ticker]?.price ?? divState.prices[ticker] ?? null;
@@ -4647,28 +3344,6 @@ async function loadDividendsData() {
     }));
     if (i + 6 < pending.length) await new Promise(res => setTimeout(res, 250));
   }
-  // Señal técnica/fundamental (score + zona de compra) de los pagadores con renta
-  // relevante que el Dashboard no cubre — para las Alertas de Cashflow. Solo los
-  // que rinden ≥2,5% (acota los pedidos) y no tienen ya señal.
-  try {
-    const macro = await getMacro();
-    const needSig = wanted.filter(t => {
-      const d = divState.data[t];
-      if (!d?.items?.length || getPayerSignal(t) || divState.sigLoading.has(t)) return false;
-      const y = dividendYield(t, d.ttm);
-      return y != null && y >= 2.5;
-    });
-    for (let i = 0; i < needSig.length; i += 5) {
-      const batch = needSig.slice(i, i + 5);
-      await Promise.all(batch.map(async (ticker) => {
-        divState.sigLoading.add(ticker);
-        try { divState.signal[ticker] = await computeLightSignal(ticker, macro); }
-        catch (_) { divState.signal[ticker] = null; }
-        finally { divState.sigLoading.delete(ticker); if (!state.asset && state.view === 'dividends') renderReport(); }
-      }));
-      if (i + 5 < needSig.length) await new Promise(res => setTimeout(res, 300));
-    }
-  } catch (_) { /* las alertas de cashflow caen a lo que haya en dashState */ }
 }
 
 /** Backtest de "captura de dividendo": para cada ex-dividend histórico simula
@@ -4785,60 +3460,6 @@ function dividendConsistencyCardHTML(loaded) {
     </div>`;
 }
 
-/* ═══════════════════ ALERTAS DE CASHFLOW ════════════════════════════════════
- * Doble ganancia: pagadores de dividendo con renta relevante y sostenible QUE
- * ADEMÁS están en zona de compra técnica con score sólido — no solo cobrás el
- * dividendo, sino que el papel tiene potencial de apreciación desde un buen
- * punto de entrada. Combina yield + crecimiento/consistencia del dividendo +
- * score compuesto + señal de zona de compra. Todo sobre datos ya cargados. */
-function cashflowAlertsHTML() {
-  const cands = [];
-  for (const t of new Set(DIVIDEND_UNIVERSE)) {
-    const d = divState.data[t];
-    if (!d?.items?.length) continue;
-    const y = dividendYield(t, d.ttm);
-    if (y == null || y < 2.5) continue; // renta relevante
-    const sig = getPayerSignal(t);
-    if (!sig || sig.score == null) continue;
-    const buyZone = sig.alert?.type === 'buy';
-    const buyLabel = ['Compra Fuerte', 'Compra Moderada'].includes(sig.scoreLabel);
-    if (sig.score < 55 || !(buyZone || buyLabel)) continue; // exige buen score Y entrada
-    const cons = dividendConsistency(d.items);
-    if (cons?.cuts) continue; // descartamos los que recortaron el dividendo
-    const yScore = Math.min(1, y / 6);
-    const grScore = cons?.cagr != null ? Math.max(0, Math.min(1, (cons.cagr + 2) / 12)) : 0.3;
-    const entryScore = sig.score / 100;
-    const buyBonus = buyZone ? 1 : buyLabel ? 0.6 : 0;
-    const safety = cons && cons.cuts === 0 ? 1 : 0.6;
-    const cashflow = 0.26 * yScore + 0.30 * entryScore + 0.18 * grScore + 0.16 * buyBonus + 0.10 * safety;
-    cands.push({ ticker: t, name: universe.find(a => a.ticker === t)?.name ?? t, yield: y, sig, cons, buyZone, cashflow });
-  }
-  cands.sort((a, b) => b.cashflow - a.cashflow);
-  const top = cands.slice(0, 9);
-  if (!top.length) return '';
-  const card = (c) => {
-    const sc = scoreLabelColor(c.sig.scoreLabel);
-    const grow = c.cons?.cagr != null && c.cons.cagr >= 1 ? `dividendo +${c.cons.cagr.toFixed(0)}%/año` : c.cons?.cuts === 0 ? 'dividendo estable' : '';
-    return `<div class="card cfa-card" data-dash-ticker="${esc(c.ticker)}" title="Ver análisis de ${esc(c.ticker)}" style="--card-accent:${c.buyZone ? GREEN : sc.color};">
-      <div class="cfa-head">
-        <div><div class="cfa-tk">${esc(c.ticker)}</div><div class="cfa-name">${esc(c.name)}</div></div>
-        <div class="cfa-yield"><b>${c.yield.toFixed(1)}%</b><span>renta anual</span></div>
-      </div>
-      <div class="cfa-badges">
-        ${c.buyZone ? '<span class="cfa-badge buy">🟢 En zona de compra</span>' : ''}
-        <span class="cfa-badge" style="color:${sc.color};">${esc(c.sig.scoreLabel)} · ${c.sig.score}</span>
-        ${grow ? `<span class="cfa-badge grow">📈 ${grow}</span>` : ''}
-      </div>
-      <div class="cfa-thesis"><b>Doble ganancia:</b> cobrás ~${c.yield.toFixed(1)}%/año de renta ${c.buyZone ? 'y el papel está en <b>zona de compra</b>' : `y el score es <b>${esc(c.sig.scoreLabel.toLowerCase())}</b>`} (${c.sig.score}/100) — potencial de suba <em>más</em> el dividendo.</div>
-    </div>`;
-  };
-  return `
-    ${sectionTitleHTML('🏦 Alertas de Cashflow', 'coins')}
-    <div class="dash-intro">Pagadores de dividendo <strong>con renta relevante y sostenible</strong> que además están <strong>en zona de compra</strong> con score sólido: no solo cobrás el dividendo, el papel tiene potencial de apreciación desde un buen punto de entrada. Ordenados por atractivo combinado (renta + crecimiento del dividendo + calidad del score + zona de compra).</div>
-    <div class="cfa-grid">${top.map(card).join('')}</div>
-    <div class="bt-disclaimer" style="margin-bottom:24px;">Combina yield TTM, consistencia/crecimiento histórico del dividendo, el score compuesto y la señal de zona de compra — todo determinístico sobre datos reales. No es asesoramiento financiero; un dividendo alto también puede señalar riesgo, revisá cada caso.</div>`;
-}
-
 function dividendsPageHTML() {
   const loaded = DIVIDEND_UNIVERSE.filter((t, i) => DIVIDEND_UNIVERSE.indexOf(t) === i).map(t => ({ t, d: divState.data[t] })).filter(e => e.d && e.d.items?.length);
   const loadingCount = new Set(DIVIDEND_UNIVERSE).size - loaded.length;
@@ -4860,8 +3481,6 @@ function dividendsPageHTML() {
     <div class="cedear-note" style="margin-bottom:22px;">
       <strong>CEDEARs y dividendos:</strong> el tenedor de un CEDEAR también cobra los dividendos del activo subyacente, ajustados por el ratio de conversión, acreditados en dólares/pesos por el agente — habitualmente con una pequeña comisión de custodia y la retención impositiva que corresponda. El yield mostrado es el del activo subyacente en USD.
     </div>
-
-    ${cashflowAlertsHTML()}
 
     ${sectionTitleHTML('Próximos Ex-Dividends', 'calendar')}
     ${!upcoming.length ? `<div class="card watch-empty">${loadingCount > 0 ? 'Cargando calendario de dividendos…' : 'No hay ex-dividends próximos estimados en el universo cargado.'}</div>` : `
@@ -4991,150 +3610,11 @@ function wireDividendsEvents() {
 /* ───────────────────────── radar de trades cortos (página) ───────────────────────── */
 const SHORT_CONF_COLOR = { 'muy alta': GREEN, alta: 'oklch(0.72 0.16 152)', media: AMBER, baja: 'oklch(0.62 0.02 262)' };
 
-const SHORT_CONF_RANK = { baja: 0, media: 1, alta: 2, 'muy alta': 3 };
-const shortState = {
-  direction: 'all', // 'all' | 'long' | 'short'
-  minConf: 'all',   // 'all' | 'media' | 'alta' | 'muy alta'
-  minRR: 0,         // 0 | 1 | 1.5 | 2
-  category: 'all',  // 'all' | 'arg' | 'cedear'
-  sort: 'score',    // 'score' | 'rr' | 'move'
-  riskPct: 1,       // % de la cuenta a arriesgar por trade (position sizing)
-  earnings: {},     // ticker -> próximo balance (carga perezosa para el aviso de earnings cercano)
-  earningsLoading: false,
-  hideEarnings: false, // ocultar setups con balance ≤5 días
-};
-
-/* ── Seguimiento de trades cortos tomados (localStorage) ─────────────────────
- * Marcás un setup/rebote/pullback como "tomado" y se sigue en vivo: R actual,
- * progreso al objetivo, P&L y vigencia, usando el precio del momento. */
-const SHORT_TRADES_KEY = 'icp_short_trades';
-function getShortTrades() {
-  try { const a = JSON.parse(localStorage.getItem(SHORT_TRADES_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
-}
-function saveShortTrades(list) { try { localStorage.setItem(SHORT_TRADES_KEY, JSON.stringify(list.slice(0, 40))); } catch { /* no-op */ } }
-function addShortTrade(t) {
-  const list = getShortTrades();
-  if (list.some(x => x.ticker === t.ticker && x.kind === t.kind)) return list; // no duplicar el mismo tipo por ticker
-  list.unshift({ ...t, id: `${t.ticker}-${t.kind}-${Date.now()}`, date: new Date().toISOString().slice(0, 10) });
-  saveShortTrades(list); return list;
-}
-function removeShortTrade(id) { const list = getShortTrades().filter(x => x.id !== id); saveShortTrades(list); return list; }
-
-// Position sizing: cuántas unidades comprar/vender arriesgando `riskPct` del
-// total de cuenta (Configuración/Portfolio) hasta el stop. Para CEDEARs se
-// dimensiona en CEDEARs (en pesos, como opera un argentino); para el resto, en
-// unidades del subyacente convirtiendo la cuenta a USD por el CCL.
-function shortSizing(d, s, riskPct) {
-  const accountArs = portState.accountTotalArs;
-  const ccl = dashState.ccl?.value ?? dashState.macro?.dolares?.ccl ?? null;
-  if (!accountArs || accountArs <= 0) return { need: 'account' };
-  const perUnitRiskUsd = Math.abs(s.entry - s.stop);
-  if (!(perUnitRiskUsd > 0)) return null;
-  const riskBudgetArs = accountArs * (riskPct / 100);
-  if (d.cedearArs != null && d.ratio) {
-    if (!ccl) return { need: 'ccl' };
-    const perCedearRiskArs = (perUnitRiskUsd / d.ratio) * ccl;
-    const units = Math.floor(riskBudgetArs / perCedearRiskArs);
-    return { mode: 'cedear', units, costArs: units * d.cedearArs, riskBudgetArs, riskPct };
-  }
-  if (!ccl) return { need: 'ccl' };
-  const riskUsd = (accountArs / ccl) * (riskPct / 100);
-  const units = Math.floor(riskUsd / perUnitRiskUsd);
-  return { mode: 'usd', units, costUsd: units * s.entry, riskBudgetArs, riskPct };
-}
-
-function shortDirMeta(dir) {
-  return dir === 'short'
-    ? { label: 'Corto', arrow: '▼', color: 'var(--down-text)', bg: 'var(--down-soft)', word: 'bajista' }
-    : { label: 'Largo', arrow: '▲', color: 'var(--up-text)', bg: 'var(--up-soft)', word: 'alcista' };
-}
-
-// Aviso de balance (earnings) cercano: catalizador que puede romper cualquier setup técnico.
-function earningsSoonDays(ticker) {
-  const e = shortState.earnings[ticker];
-  if (!e?.nextDate) return null;
-  const d = daysUntil(e.nextDate);
-  return d != null && d >= 0 && d <= 5 ? d : null;
-}
-function earningsSoonBadge(ticker) {
-  const d = earningsSoonDays(ticker);
-  if (d == null) return '';
-  return `<span class="short-earn-badge" title="Reporta balance ${d === 0 ? 'hoy' : `en ${d} día(s)`} — un earnings cercano puede disparar movimientos que ningún indicador técnico anticipa. Cuidado.">⚠ Balance ${d === 0 ? 'hoy' : `en ${d}d`}</span>`;
-}
-// Botón "Tomar este trade" → guarda el trade en el seguimiento.
-function shortTakeBtn(ticker, kind, dir, entry, target, stop) {
-  if (entry == null || target == null || stop == null) return '';
-  return `<button class="short-take" data-short-take="${esc(ticker)}" data-take-kind="${kind}" data-take-dir="${esc(dir)}" data-take-entry="${entry}" data-take-target="${target}" data-take-stop="${stop}">📌 Tomar este trade (seguimiento)</button>`;
-}
-// Carga perezosa de earnings de los tickers visibles (para el aviso de balance cercano).
-async function loadShortEarnings() {
-  if (shortState.earningsLoading) return;
-  const tickers = [...new Set([...els.report.querySelectorAll('[data-short-ticker]')].map(el => el.dataset.shortTicker))]
-    .filter(t => t && !(t in shortState.earnings)).slice(0, 30);
-  if (!tickers.length) return;
-  shortState.earningsLoading = true;
-  try {
-    await Promise.all(tickers.map(async (t) => {
-      try { shortState.earnings[t] = await getEarnings(t); } catch { shortState.earnings[t] = { nextDate: null }; }
-    }));
-  } finally {
-    shortState.earningsLoading = false;
-    if (state.view === 'shorttrades' && !state.asset) renderReport();
-  }
-}
-
-/* Seguimiento de trades cortos tomados: R actual, P&L y progreso al objetivo en
- * vivo, usando el último precio del universo/watchlist. */
-function shortTakenTradesHTML() {
-  const trades = getShortTrades();
-  if (!trades.length) return '';
-  const kindLabel = { setup: 'Setup', rebound: 'Rebote', pullback: 'Pullback' };
-  const row = (t) => {
-    const d = dashState.data[t.ticker] || watchState.data[t.ticker];
-    const price = d?.price ?? null;
-    const long = t.direction !== 'short';
-    let rNow = null, progress = null, plPct = null, status = 'en curso', statusCls = 'flat';
-    if (price != null) {
-      plPct = (long ? price - t.entry : t.entry - price) / t.entry * 100;
-      const riskUnit = long ? t.entry - t.stop : t.stop - t.entry;
-      if (riskUnit > 0) rNow = (long ? price - t.entry : t.entry - price) / riskUnit;
-      const span = long ? t.target - t.entry : t.entry - t.target;
-      if (span > 0) progress = (long ? price - t.entry : t.entry - price) / span * 100;
-      if (long ? price <= t.stop : price >= t.stop) { status = 'stop tocado'; statusCls = 'down'; }
-      else if (long ? price >= t.target : price <= t.target) { status = 'objetivo alcanzado'; statusCls = 'up'; }
-    }
-    const days = Math.max(0, Math.round((Date.now() - new Date(t.date + 'T00:00:00').getTime()) / 86400000));
-    return `<div class="stk-row">
-      <div class="stk-head">
-        <span class="stk-tk" data-short-ticker="${esc(t.ticker)}">${esc(t.ticker)}</span>
-        <span class="stk-kind">${kindLabel[t.kind] ?? esc(t.kind)} ${long ? '▲' : '▼'}</span>
-        <span class="stk-status ${statusCls}">${status}</span>
-        <span class="stk-age">hace ${days}d</span>
-        <button class="stk-close" data-short-close="${esc(t.id)}" title="Cerrar seguimiento" aria-label="Cerrar seguimiento de ${esc(t.ticker)}">×</button>
-      </div>
-      <div class="stk-metrics">
-        <span>Entrada <b>${fmtUsd(t.entry)}</b></span>
-        <span>Ahora <b>${price != null ? fmtUsd(price) : 'N/D'}</b></span>
-        <span>P&amp;L <b class="${plPct == null ? '' : plPct >= 0 ? 'up' : 'down'}">${plPct == null ? 'N/D' : `${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%`}</b></span>
-        <span>R actual <b class="${rNow == null ? '' : rNow >= 0 ? 'up' : 'down'}">${rNow == null ? 'N/D' : `${rNow >= 0 ? '+' : ''}${rNow.toFixed(2)}R`}</b></span>
-        <span>Obj <b class="up">${fmtUsd(t.target)}</b> · Stop <b class="down">${fmtUsd(t.stop)}</b></span>
-      </div>
-      ${progress != null ? `<div class="stk-bar"><i style="width:${Math.max(0, Math.min(100, progress))}%; background:${progress >= 0 ? 'var(--up)' : 'var(--down)'};"></i></div>` : ''}
-    </div>`;
-  };
-  return `
-    ${sectionTitleHTML('📌 Tus trades cortos en curso', 'bookmark')}
-    <div class="card stk-card">
-      ${trades.map(row).join('')}
-      <div class="stk-foot">Seguimiento manual guardado en este navegador. El R actual y el P&amp;L usan el último precio real. Cerralo cuando salgas de la operación. No es asesoramiento.</div>
-    </div>`;
-}
-
 function shortTradesPageHTML() {
   // Combina universo curado + watchlist (sin duplicar), tomando el setup ya
   // calculado por computeLightSignal — sin pedidos extra.
   const seen = new Set();
-  let rows = [];
+  const rows = [];
   const pushFrom = (map) => {
     for (const [ticker, d] of Object.entries(map)) {
       if (!d || seen.has(ticker) || !d.setup?.qualifies) continue;
@@ -5144,304 +3624,45 @@ function shortTradesPageHTML() {
   };
   pushFrom(dashState.data);
   pushFrom(watchState.data);
-
-  const totalQualifying = rows.length;
-  const longN = rows.filter(r => r.d.setup.direction === 'long').length;
-  const shortN = totalQualifying - longN;
-  // ── Filtros ──
-  rows = rows.filter(({ ticker, d }) => {
-    const s = d.setup;
-    if (shortState.direction !== 'all' && s.direction !== shortState.direction) return false;
-    if (shortState.minConf !== 'all' && (SHORT_CONF_RANK[s.confidence] ?? 0) < (SHORT_CONF_RANK[shortState.minConf] ?? 0)) return false;
-    if (shortState.minRR > 0 && !(s.rr != null && s.rr >= shortState.minRR)) return false;
-    if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
-    if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
-    if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
-    return true;
-  });
-  // ── Orden ──
-  rows.sort((a, b) => {
-    if (shortState.sort === 'rr') return (b.d.setup.rr ?? 0) - (a.d.setup.rr ?? 0);
-    if (shortState.sort === 'move') return b.d.setup.expectedMovePct - a.d.setup.expectedMovePct;
-    return b.d.setup.score - a.d.setup.score;
-  });
-
-  // ── Rebotes de sobreventa (1-2 días): escaneo aparte, cualquier activo ──
-  const rebSeen = new Set();
-  let rebounds = [];
-  const pushReb = (map) => {
-    for (const [ticker, d] of Object.entries(map)) {
-      if (!d || rebSeen.has(ticker) || !d.rebound?.qualifies) continue;
-      rebSeen.add(ticker);
-      rebounds.push({ ticker, d });
-    }
-  };
-  pushReb(dashState.data); pushReb(watchState.data);
-  const totalRebounds = rebounds.length;
-  rebounds = rebounds.filter(({ ticker, d }) => {
-    if (shortState.minConf !== 'all' && (SHORT_CONF_RANK[d.rebound.confidence] ?? 0) < (SHORT_CONF_RANK[shortState.minConf] ?? 0)) return false;
-    if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
-    if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
-    if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
-    return true;
-  });
-  rebounds.sort((a, b) => b.d.rebound.score - a.d.rebound.score);
-
-  // ── Pullbacks en tendencia (continuación) ──
-  const catOk = (ticker, d) => {
-    if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
-    if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
-    if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
-    return true;
-  };
-  const confOk = (conf) => shortState.minConf === 'all' || (SHORT_CONF_RANK[conf] ?? 0) >= (SHORT_CONF_RANK[shortState.minConf] ?? 0);
-  const gatherFrom = (pred) => {
-    const seenX = new Set(); const acc = [];
-    for (const map of [dashState.data, watchState.data]) for (const [ticker, d] of Object.entries(map)) {
-      if (!d || seenX.has(ticker) || !pred(d)) continue; seenX.add(ticker); acc.push({ ticker, d });
-    }
-    return acc;
-  };
-  let pullbacks = gatherFrom(d => d.pullback?.qualifies);
-  const totalPullbacks = pullbacks.length;
-  pullbacks = pullbacks.filter(({ ticker, d }) => catOk(ticker, d) && confOk(d.pullback.confidence)).sort((a, b) => b.d.pullback.score - a.d.pullback.score);
-  let squeezes = gatherFrom(d => d.squeezeWatch?.qualifies);
-  const totalSqueezes = squeezes.length;
-  squeezes = squeezes.filter(({ ticker, d }) => catOk(ticker, d) && confOk(d.squeezeWatch.confidence)).sort((a, b) => b.d.squeezeWatch.score - a.d.squeezeWatch.score);
+  rows.sort((a, b) => b.d.setup.score - a.d.setup.score);
 
   const loadingCurated = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
-  const opt = (val, cur, txt) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${txt}</option>`;
-  const seg = (val, txt) => `<button class="short-seg-btn ${shortState.direction === val ? 'active' : ''}" data-short-dir="${val}">${txt}</button>`;
 
   return `
     ${sectionTitleHTML('Radar de Trades Cortos', 'zap')}
-    <div class="dash-intro">Activos del universo curado y tu Watchlist con un <strong>setup técnico de corto plazo (1-3 ruedas)</strong> de alta confianza AHORA — <strong>largos</strong> (squeeze liberado, ruptura de máximos con volumen, cruce de MACD, divergencia alcista…) y <strong>cortos</strong> (ruptura de mínimos, MACD bajista, rechazo en resistencia…). Cada uno con plan, gestión de la operación, <strong>tamaño de posición por riesgo</strong> y <strong>confiabilidad histórica</strong>. ${loadingCurated ? 'Cargando el universo…' : ''}</div>
-    <div class="cedear-note" style="margin-bottom:18px; border-color:oklch(0.55 0.15 23 / 0.4);">
-      <strong>⚠ Riesgo alto:</strong> el trading de corto plazo es especulativo. Esto es un <strong>tamiz técnico</strong>, no una recomendación ni una garantía — muchos setups fallan. Operá siempre con stop, arriesgá solo lo que puedas perder, y recordá que un balance (earnings) cercano puede disparar movimientos que ningún indicador anticipa.
+    <div class="dash-intro">Activos del universo curado y tu Watchlist con un <strong>setup técnico alcista de corto plazo (1-3 días)</strong> de alta confianza AHORA: squeeze de volatilidad recién liberado, ruptura de máximos con volumen, cruce de MACD, divergencia alcista, salida de sobreventa en tendencia, etc. Cada uno con entrada, stop ajustado y objetivos. ${loadingCurated ? 'Cargando el universo…' : ''}</div>
+    <div class="cedear-note" style="margin-bottom:22px; border-color:oklch(0.55 0.15 23 / 0.4);">
+      <strong>⚠ Riesgo alto:</strong> el trading de corto plazo es especulativo y de alto riesgo. Esto es un <strong>tamiz técnico</strong>, no una recomendación ni una garantía de suba — muchos setups fallan. Operá siempre con un stop, arriesgá solo lo que puedas perder, y recordá que un balance (earnings) cercano puede disparar movimientos que ningún indicador anticipa.
     </div>
-
-    ${shortTakenTradesHTML()}
-
-    ${(() => {
-      const bull = longN + totalRebounds + totalPullbacks, bear = shortN;
-      const bias = bull > bear * 1.3 ? { t: 'sesgo comprador', cls: 'up' } : bear > bull * 1.3 ? { t: 'sesgo vendedor', cls: 'down' } : { t: 'sesgo mixto', cls: 'flat' };
-      const chip = (n, label, cls) => `<div class="radar-therm-chip"><span class="radar-therm-n ${cls}">${n}</span><span class="radar-therm-l">${label}</span></div>`;
-      return `<div class="radar-therm">
-        <div class="radar-therm-chips">
-          ${chip(longN, '▲ Largos', 'up')}
-          ${chip(shortN, '▼ Cortos', 'down')}
-          ${chip(totalRebounds, '🔄 Rebotes', 'cyan')}
-          ${chip(totalPullbacks, '🏄 Pullbacks', 'up')}
-          ${chip(totalSqueezes, '💥 Por explotar', 'amber')}
-        </div>
-        <div class="radar-therm-bias ${bias.cls}">Corto plazo: <b>${bias.t}</b></div>
-      </div>`;
-    })()}
-
-    <div class="short-controls">
-      <div class="short-seg" role="group" aria-label="Dirección">
-        ${seg('all', 'Todos')}${seg('long', '▲ Largos')}${seg('short', '▼ Cortos')}
-      </div>
-      <label class="short-ctrl"><span>Confianza</span><select id="short-conf" class="watch-select">${opt('all', shortState.minConf, 'Todas')}${opt('media', shortState.minConf, 'Media+')}${opt('alta', shortState.minConf, 'Alta+')}${opt('muy alta', shortState.minConf, 'Muy alta')}</select></label>
-      <label class="short-ctrl"><span>R:R mínimo</span><select id="short-rr" class="watch-select">${opt('0', String(shortState.minRR), 'Cualquiera')}${opt('1', String(shortState.minRR), '≥ 1:1')}${opt('1.5', String(shortState.minRR), '≥ 1.5:1')}${opt('2', String(shortState.minRR), '≥ 2:1')}</select></label>
-      <label class="short-ctrl"><span>Categoría</span><select id="short-cat" class="watch-select">${opt('all', shortState.category, 'Todas')}${opt('arg', shortState.category, '🇦🇷 Argentina')}${opt('cedear', shortState.category, 'CEDEAR')}</select></label>
-      <label class="short-ctrl"><span>Ordenar</span><select id="short-sort" class="watch-select">${opt('score', shortState.sort, 'Score')}${opt('rr', shortState.sort, 'Riesgo/Beneficio')}${opt('move', shortState.sort, 'Rango esperado')}</select></label>
-      <label class="short-ctrl"><span>Riesgo/​trade</span><select id="short-risk" class="watch-select">${opt('0.5', String(shortState.riskPct), '0,5% cuenta')}${opt('1', String(shortState.riskPct), '1% cuenta')}${opt('2', String(shortState.riskPct), '2% cuenta')}</select></label>
-      <label class="short-ctrl short-ctrl-check"><input type="checkbox" id="short-hide-earn" ${shortState.hideEarnings ? 'checked' : ''} /> <span>Ocultar con balance ≤5d</span></label>
-    </div>
-    <div class="short-count">${rows.length} de ${totalQualifying} setup(s)${shortState.direction !== 'all' || shortState.minConf !== 'all' || shortState.minRR > 0 || shortState.category !== 'all' ? ' con los filtros actuales' : ''}</div>
-
-    ${!rows.length ? `<div class="card watch-empty">${loadingCurated ? 'Analizando setups de corto plazo…' : totalQualifying ? 'Ningún setup pasa los filtros actuales — probá aflojarlos.' : 'No hay setups de corto plazo de alta confianza en este momento. El mercado no siempre ofrece entradas claras — volvé más tarde.'}</div>` : `
+    ${!rows.length ? `<div class="card watch-empty">${loadingCurated ? 'Analizando setups de corto plazo…' : 'No hay setups de corto plazo de alta confianza en este momento. El mercado no siempre ofrece entradas claras — volvé más tarde.'}</div>` : `
     <div class="short-grid">
       ${rows.map(({ ticker, d }) => shortTradeCardHTML(ticker, d)).join('')}
     </div>`}
-
-    ${sectionTitleHTML('🔄 Rebotes de 1-2 días (sobreventa)', 'zap', 'margin-top:34px;')}
-    <div class="dash-intro">Activos <strong>sobrevendidos de corto plazo</strong> (acciones y CEDEARs) con chances de un <strong>rebote técnico de 1-2 ruedas</strong> hacia su media. Se detectan combinando varios indicadores: RSI en sobreventa, banda inferior de Bollinger, estiramiento debajo de la EMA20, vela de reversión, divergencia alcista, volumen de capitulación y rebote sobre soporte. Es un juego de <strong>mean-reversion</strong> (comprar la caída para el rebote), no una tendencia nueva — objetivo corto y stop ajustado.</div>
-    <div class="short-count">${rebounds.length}${totalRebounds !== rebounds.length ? ` de ${totalRebounds}` : ''} candidato(s) a rebote${shortState.category !== 'all' || shortState.minConf !== 'all' ? ' con los filtros actuales' : ''}</div>
-    ${!rebounds.length ? `<div class="card watch-empty">${loadingCurated ? 'Buscando activos sobrevendidos…' : totalRebounds ? 'Ningún rebote pasa los filtros actuales.' : 'No hay activos claramente sobrevendidos con señal de rebote ahora mismo.'}</div>` : `
-    <div class="short-grid">
-      ${rebounds.map(({ ticker, d }) => reboundCardHTML(ticker, d)).join('')}
-    </div>`}
-
-    ${sectionTitleHTML('🏄 Pullbacks en tendencia (continuación)', 'trend', 'margin-top:34px;')}
-    <div class="dash-intro">Lo contrario al rebote: en vez de comprar sobreventa contra la tendencia, buscamos el <strong>retroceso a favor de la corriente</strong>. Tendencias alcistas sanas (EMAs alineadas) que <strong>descansaron sobre la EMA20/50</strong> y ofrecen una recompra de continuación — mayor probabilidad que ir contra la tendencia. Acciones y CEDEARs.</div>
-    <div class="short-count">${pullbacks.length}${totalPullbacks !== pullbacks.length ? ` de ${totalPullbacks}` : ''} pullback(s)${shortState.category !== 'all' || shortState.minConf !== 'all' ? ' con los filtros actuales' : ''}</div>
-    ${!pullbacks.length ? `<div class="card watch-empty">${loadingCurated ? 'Buscando pullbacks en tendencia…' : totalPullbacks ? 'Ningún pullback pasa los filtros actuales.' : 'No hay retrocesos claros en tendencia alcista ahora mismo.'}</div>` : `
-    <div class="short-grid">
-      ${pullbacks.map(({ ticker, d }) => pullbackCardHTML(ticker, d)).join('')}
-    </div>`}
-
-    ${sectionTitleHTML('💥 Por explotar (squeeze de volatilidad)', 'zap', 'margin-top:34px;')}
-    <div class="dash-intro">Activos con las <strong>Bandas de Bollinger comprimidas</strong> dentro de las de Keltner: la volatilidad está en mínimos y suele preceder a un <strong>movimiento fuerte</strong>. La dirección todavía no está definida — se marcan los <strong>niveles de ruptura</strong> (bandas) y un sesgo tentativo. La idea es <strong>anticiparse</strong> y confirmar cuando rompa.</div>
-    <div class="short-count">${squeezes.length}${totalSqueezes !== squeezes.length ? ` de ${totalSqueezes}` : ''} activo(s) comprimido(s)${shortState.category !== 'all' || shortState.minConf !== 'all' ? ' con los filtros actuales' : ''}</div>
-    ${!squeezes.length ? `<div class="card watch-empty">${loadingCurated ? 'Buscando compresiones de volatilidad…' : totalSqueezes ? 'Ningún squeeze pasa los filtros actuales.' : 'No hay activos en compresión de volatilidad significativa ahora mismo.'}</div>` : `
-    <div class="short-grid">
-      ${squeezes.map(({ ticker, d }) => squeezeCardHTML(ticker, d)).join('')}
-    </div>`}
   `;
-}
-
-function pullbackCardHTML(ticker, d) {
-  const s = d.pullback;
-  const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
-  const cat = AR_TICKERS.has(ticker) ? 'dcv-cat-arg' : d.category === 'ETF' ? 'dcv-cat-etf' : d.category === 'Cripto' ? 'dcv-cat-crypto' : 'dcv-cat-cedear';
-  const catLabel = AR_TICKERS.has(ticker) ? '🇦🇷 Arg' : esc(d.category ?? '');
-  const primary = s.triggers.filter(t => t.primary), secondary = s.triggers.filter(t => !t.primary);
-  return `
-    <div class="card short-card pullback-card" data-short-ticker="${esc(ticker)}" style="--dir-color:oklch(0.76 0.18 152);">
-      <div class="short-head">
-        <div>
-          <div class="short-ticker">${esc(ticker)} <span class="dcv-cat ${cat}">${catLabel}</span></div>
-          <div class="short-name">${esc(d.name ?? '')}</div>
-        </div>
-        <div class="short-head-right">
-          <span class="short-dir-badge" style="color:oklch(0.87 0.14 152); background:oklch(0.32 0.11 152 / 0.5);">🏄 Pullback</span>${earningsSoonBadge(ticker)}
-          <div class="short-conf" style="color:${conf};">
-            <div class="short-conf-score">${s.score}</div>
-            <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
-          </div>
-        </div>
-      </div>
-      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
-      ${s.narrative ? `<div class="short-narrative up">${s.narrative}</div>` : ''}
-      <div class="short-plan">
-        <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
-        <div class="short-plan-cell"><span>Objetivo</span><b class="up">${fmtUsd(s.target)}</b></div>
-        <div class="short-plan-cell"><span>Stop</span><b class="down">${fmtUsd(s.stop)}</b></div>
-        <div class="short-plan-cell"><span>Movimiento esp.</span><b class="up">+${s.expectedMovePct.toFixed(1)}%</b></div>
-        <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
-        <div class="short-plan-cell"><span>Vigencia</span><b>~${s.timeStopDays} ruedas</b></div>
-      </div>
-      <button class="short-more-btn" data-short-more aria-expanded="false">Ver detalle <span class="short-more-caret">▾</span></button>
-      <div class="short-more" hidden>
-        <div class="short-triggers">
-          ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
-          ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
-        </div>
-        <div class="short-manage">
-          <span title="Confirmá la continuación si el precio supera el máximo de la última rueda">🎯 Gatillo: superar <b>${fmtUsd(s.entryTrigger)}</b></span>
-          <span title="Si cierra debajo del stop, el pullback se profundizó de más">✖ Invalida: cierre bajo <b>${fmtUsd(s.stop)}</b></span>
-          <span title="Continuaciones de corto plazo: si no retoma en ~3 ruedas, revisá">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
-        </div>
-        ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
-        ${shortTakeBtn(ticker, 'pullback', 'long', s.entry, s.target, s.stop)}
-      </div>
-    </div>`;
-}
-
-function squeezeCardHTML(ticker, d) {
-  const s = d.squeezeWatch;
-  const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
-  const cat = AR_TICKERS.has(ticker) ? 'dcv-cat-arg' : d.category === 'ETF' ? 'dcv-cat-etf' : d.category === 'Cripto' ? 'dcv-cat-crypto' : 'dcv-cat-cedear';
-  const catLabel = AR_TICKERS.has(ticker) ? '🇦🇷 Arg' : esc(d.category ?? '');
-  const biasTxt = s.bias === 'alcista' ? 'sesgo alcista (precio sobre la EMA20)' : s.bias === 'bajista' ? 'sesgo bajista (precio bajo la EMA20)' : 'sin sesgo claro';
-  const biasCls = s.bias === 'alcista' ? 'up' : s.bias === 'bajista' ? 'down' : '';
-  return `
-    <div class="card short-card squeeze-card" data-short-ticker="${esc(ticker)}" style="--dir-color:oklch(0.75 0.16 55);">
-      <div class="short-head">
-        <div>
-          <div class="short-ticker">${esc(ticker)} <span class="dcv-cat ${cat}">${catLabel}</span></div>
-          <div class="short-name">${esc(d.name ?? '')}</div>
-        </div>
-        <div class="short-head-right">
-          <span class="short-dir-badge" style="color:oklch(0.85 0.14 55); background:oklch(0.40 0.12 55 / 0.35);">💥 ${s.justFired ? 'Liberándose' : 'Comprimido'}</span>${earningsSoonBadge(ticker)}
-          <div class="short-conf" style="color:${conf};">
-            <div class="short-conf-score">${s.score}</div>
-            <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
-          </div>
-        </div>
-      </div>
-      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
-      <div class="short-narrative squeeze"><span class="squeeze-glyph">💥</span> <b>Volatilidad comprimida</b> hace <b>${s.bars} rueda(s)</b>${s.justFired ? ' — <b class="up">recién liberándose</b>' : ' — ruptura próxima'}. Movimiento esperado al romper: <b>±${s.expectedMovePct.toFixed(1)}%</b>. Hoy, ${biasCls ? `<b class="${biasCls}">${biasTxt}</b>` : biasTxt}.</div>
-      <div class="short-plan">
-        <div class="short-plan-cell"><span>Gatillo al alza</span><b class="up">${fmtUsd(s.upperTrigger)}</b></div>
-        <div class="short-plan-cell"><span>Gatillo a la baja</span><b class="down">${fmtUsd(s.lowerTrigger)}</b></div>
-        <div class="short-plan-cell"><span>Comprimido</span><b>${s.bars} ruedas</b></div>
-        <div class="short-plan-cell"><span>Movimiento esp.</span><b>±${s.expectedMovePct.toFixed(1)}%</b></div>
-      </div>
-      <div class="short-manage" style="margin-top:12px;">
-        <span title="Confirmá el largo si cierra por encima de la banda superior">▲ Largo si rompe <b>${fmtUsd(s.upperTrigger)}</b></span>
-        <span title="Confirmá el corto si cierra por debajo de la banda inferior">▼ Corto si pierde <b>${fmtUsd(s.lowerTrigger)}</b></span>
-      </div>
-    </div>`;
-}
-
-function reboundCardHTML(ticker, d) {
-  const s = d.rebound;
-  const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
-  const cat = AR_TICKERS.has(ticker) ? 'dcv-cat-arg' : d.category === 'ETF' ? 'dcv-cat-etf' : d.category === 'Cripto' ? 'dcv-cat-crypto' : 'dcv-cat-cedear';
-  const catLabel = AR_TICKERS.has(ticker) ? '🇦🇷 Arg' : esc(d.category ?? '');
-  const primary = s.triggers.filter(t => t.primary), secondary = s.triggers.filter(t => !t.primary);
-  return `
-    <div class="card short-card rebound-card" data-short-ticker="${esc(ticker)}" style="--dir-color:oklch(0.75 0.13 210);">
-      <div class="short-head">
-        <div>
-          <div class="short-ticker">${esc(ticker)} <span class="dcv-cat ${cat}">${catLabel}</span></div>
-          <div class="short-name">${esc(d.name ?? '')}</div>
-        </div>
-        <div class="short-head-right">
-          <span class="short-dir-badge" style="color:oklch(0.82 0.12 210); background:oklch(0.45 0.10 210 / 0.22);">🔄 Rebote</span>${earningsSoonBadge(ticker)}
-          <div class="short-conf" style="color:${conf};">
-            <div class="short-conf-score">${s.score}</div>
-            <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
-          </div>
-        </div>
-      </div>
-      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
-      ${s.narrative ? `<div class="short-narrative up">${s.narrative}</div>` : ''}
-      <div class="short-plan">
-        <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
-        <div class="short-plan-cell"><span>Objetivo (media)</span><b class="up">${fmtUsd(s.target)}</b></div>
-        <div class="short-plan-cell"><span>Stop</span><b class="down">${fmtUsd(s.stop)}</b></div>
-        <div class="short-plan-cell"><span>Rebote esperado</span><b class="up">+${s.expectedBouncePct.toFixed(1)}%</b></div>
-        <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
-        <div class="short-plan-cell"><span>Vigencia</span><b>~${s.timeStopDays} ruedas</b></div>
-      </div>
-      <button class="short-more-btn" data-short-more aria-expanded="false">Ver detalle <span class="short-more-caret">▾</span></button>
-      <div class="short-more" hidden>
-        <div class="short-triggers">
-          ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
-          ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
-        </div>
-        <div class="short-manage">
-          <span title="Confirmá el rebote si el precio recupera el máximo de la última rueda">🎯 Gatillo: superar <b>${fmtUsd(s.entryTrigger)}</b></span>
-          <span title="Si cierra por debajo del mínimo reciente, el rebote falló">✖ Invalida: cierre bajo <b>${fmtUsd(s.stop)}</b></span>
-          <span title="Los rebotes son de muy corto plazo: si no se activa en ~2 ruedas, conviene salir">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
-        </div>
-        ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
-        ${shortTakeBtn(ticker, 'rebound', 'long', s.entry, s.target, s.stop)}
-      </div>
-    </div>`;
 }
 
 function shortTradeCardHTML(ticker, d) {
   const s = d.setup;
   const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
-  const dm = shortDirMeta(s.direction);
   const primary = s.triggers.filter(t => t.primary);
   const secondary = s.triggers.filter(t => !t.primary);
-  const sizing = shortSizing(d, s, shortState.riskPct);
-  const cacheEntry = alertReliabilityCache[ticker];
-  const cached = cacheEntry?.result;
-  const cachedErr = cacheEntry?.error;
   return `
-    <div class="card short-card" data-short-ticker="${esc(ticker)}" style="--dir-color:${dm.color};">
+    <div class="card short-card" data-short-ticker="${esc(ticker)}">
       <div class="short-head">
         <div>
-          <div class="short-ticker">${esc(ticker)} <span class="dcv-cat ${AR_TICKERS.has(ticker) ? 'dcv-cat-arg' : d.category === 'ETF' ? 'dcv-cat-etf' : d.category === 'Cripto' ? 'dcv-cat-crypto' : 'dcv-cat-cedear'}">${AR_TICKERS.has(ticker) ? '🇦🇷 Arg' : esc(d.category ?? '')}</span></div>
+          <div class="short-ticker">${esc(ticker)} <span class="watch-stale">${esc(d.category ?? '')}</span></div>
           <div class="short-name">${esc(d.name ?? '')}</div>
         </div>
-        <div class="short-head-right">
-          <span class="short-dir-badge" style="color:${dm.color}; background:${dm.bg};">${dm.arrow} ${dm.label}</span>${earningsSoonBadge(ticker)}
-          <div class="short-conf" style="color:${conf};">
-            <div class="short-conf-score">${s.score}</div>
-            <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
-          </div>
+        <div class="short-conf" style="color:${conf};">
+          <div class="short-conf-score">${s.score}</div>
+          <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
         </div>
       </div>
       <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
-      ${s.narrative ? `<div class="short-narrative ${s.direction === 'short' ? 'down' : 'up'}">${s.narrative}</div>` : ''}
+      <div class="short-triggers">
+        ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
+        ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
+      </div>
       <div class="short-plan">
         <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
         <div class="short-plan-cell"><span>Stop</span><b class="down">${fmtUsd(s.stop)}</b></div>
@@ -5450,131 +3671,13 @@ function shortTradeCardHTML(ticker, d) {
         <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
         <div class="short-plan-cell"><span>Rango diario típ.</span><b>±${s.expectedMovePct.toFixed(1)}%</b></div>
       </div>
-      <button class="short-more-btn" data-short-more aria-expanded="false">Ver detalle <span class="short-more-caret">▾</span></button>
-      <div class="short-more" hidden>
-        <div class="short-triggers">
-          ${primary.map(t => `<span class="short-chip primary">⚡ ${esc(t.label)}</span>`).join('')}
-          ${secondary.map(t => `<span class="short-chip">${esc(t.label)}</span>`).join('')}
-        </div>
-        <div class="short-manage">
-          <span title="Confirmá la entrada solo si el precio ${s.direction === 'short' ? 'pierde' : 'supera'} el extremo de la última rueda">🎯 Gatillo: ${s.direction === 'short' ? 'perder' : 'superar'} <b>${fmtUsd(s.entryTrigger)}</b></span>
-          <span title="Si el precio cierra del otro lado del stop, el setup queda invalidado">✖ Invalida: cierre ${s.direction === 'short' ? 'sobre' : 'bajo'} <b>${fmtUsd(s.invalidation)}</b></span>
-          <span title="Los setups de corto plazo caducan: si no se activa el objetivo en ~${s.timeStopDays} ruedas, conviene salir">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
-        </div>
-        ${shortSizingHTML(sizing, s)}
-        ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
-        ${shortTakeBtn(ticker, 'setup', s.direction, s.entry, s.target1, s.stop)}
-        <div class="short-reliab" data-reliab-slot="${esc(ticker)}">
-          ${cached ? shortReliabBodyHTML(cached, s.direction, s.rr) : cachedErr ? `<div class="short-reliab-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>` : `<button class="short-reliab-btn" data-reliab-ticker="${esc(ticker)}">📊 Medir confiabilidad + edge del setup</button>`}
-        </div>
-      </div>
+      ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
     </div>`;
-}
-
-// Bloque de position sizing (o el aviso de qué falta para calcularlo).
-function shortSizingHTML(sizing, s) {
-  if (!sizing) return '';
-  if (sizing.need === 'account') return `<div class="short-sizing short-sizing-hint">💡 Cargá el <strong>total de tu cuenta</strong> en Portfolio Advisor para ver cuántas unidades comprar arriesgando un % fijo por trade.</div>`;
-  if (sizing.need === 'ccl') return '';
-  if (sizing.units < 1) return `<div class="short-sizing short-sizing-hint">Con ${sizing.riskPct}% de riesgo, el stop de este setup ya supera tu presupuesto por unidad — reducí el riesgo o esperá una entrada más ajustada.</div>`;
-  const detail = sizing.mode === 'cedear'
-    ? `<b>${sizing.units.toLocaleString('es-AR')} CEDEARs</b> · costo ~${fmtArs(sizing.costArs)}`
-    : `<b>${sizing.units.toLocaleString('es-AR')} unidades</b> · costo ~${fmtUsd(sizing.costUsd)}`;
-  return `<div class="short-sizing"><span class="short-sizing-lead">Position sizing (${sizing.riskPct}% = ${fmtArs(sizing.riskBudgetArs)})</span> ${detail}</div>`;
-}
-
-// Confiabilidad histórica del setup: reusa el backtester walk-forward cacheado.
-function shortReliabBodyHTML(res, direction, rr = null) {
-  if (res.insufficientData) return `<div class="short-reliab-note">Sin historial suficiente (${res.candleCount}/${res.needed} velas) para medir la confiabilidad en ${esc(res.ticker)}.</div>`;
-  const row = (res.setupRows ?? []).find(r => r.direction === direction);
-  if (!row) return `<div class="short-reliab-note">El motor no disparó suficientes setups ${direction === 'short' ? 'bajistas' : 'alcistas'} en el histórico de ${esc(res.ticker)} para medir su precisión.</div>`;
-  const pick = row.horizons.find(h => h.h === 3 && h.n) || row.horizons.slice().sort((a, b) => (b.n || 0) - (a.n || 0))[0];
-  if (!pick || !pick.n) return `<div class="short-reliab-note">Sin casos históricos suficientes para este setup.</div>`;
-  const favor = direction === 'long' ? pick.avgPct >= 0 : pick.avgPct <= 0;
-  const small = pick.n < 12;
-  const tiles = [
-    { k: 'Acierto', v: `${pick.winRate}%`, tone: pick.winRate >= 55 ? 'good' : pick.winRate >= 45 ? 'mut' : 'warn' },
-    { k: `Retorno medio a ${pick.h} ruedas`, v: fmtSignedPct(pick.avgPct), tone: favor ? 'good' : 'warn' },
-    { k: 'Casos', v: `${pick.n}`, tone: small ? 'warn' : 'mut' },
-  ];
-  // ── Edge / valor esperado (#3): win-rate histórico × R:R en múltiplos de R.
-  // Es la ventaja matemática: cuánto ganás en promedio por trade, midiendo el
-  // riesgo en unidades de R (lo que arriesgás hasta el stop). >0 = ventaja.
-  let edgeHTML = '';
-  if (rr != null && rr > 0) {
-    const wr = pick.winRate / 100;
-    const edgeR = wr * rr - (1 - wr); // asume perder 1R en las fallidas
-    const verdict = edgeR >= 0.25 ? 'ventaja clara' : edgeR >= 0.05 ? 'ligera ventaja' : edgeR >= -0.05 ? 'neutro' : 'sin ventaja';
-    const tone = edgeR >= 0.05 ? 'good' : edgeR <= -0.05 ? 'bad' : 'flat';
-    edgeHTML = `<div class="short-edge ${tone}">
-      <span class="short-edge-v">${edgeR >= 0 ? '+' : ''}${edgeR.toFixed(2)}R</span>
-      <span class="short-edge-txt"><b>Valor esperado por trade</b> · ${verdict}<br>win-rate ${pick.winRate}% × R:R ${rr.toFixed(1)} − las fallidas</span>
-    </div>`;
-  }
-  return `
-    <div class="short-reliab-head">Confiabilidad histórica + edge del setup ${direction === 'short' ? 'bajista' : 'alcista'} en ${esc(res.ticker)}</div>
-    <div class="short-reliab-tiles">${tiles.map(t => `<div class="short-reliab-tile reliab-tone-${t.tone}"><div class="short-reliab-v">${esc(t.v)}</div><div class="short-reliab-k">${esc(t.k)}</div></div>`).join('')}</div>
-    ${edgeHTML}
-    <div class="short-reliab-row">${row.horizons.filter(h => h.n).map(h => `<span>${h.h}r: <b class="${(direction === 'long' ? h.avgPct >= 0 : h.avgPct <= 0) ? 'up' : 'down'}">${h.winRate}%</b> · ${fmtSignedPct(h.avgPct)}</span>`).join('')}</div>
-    ${small ? `<div class="short-reliab-note">Muestra chica: estadística orientativa, no concluyente.</div>` : ''}`;
 }
 
 function wireShortTradesEvents() {
-  const rerender = () => renderReport();
-  document.getElementById('short-conf')?.addEventListener('change', e => { shortState.minConf = e.target.value; rerender(); });
-  document.getElementById('short-rr')?.addEventListener('change', e => { shortState.minRR = Number(e.target.value); rerender(); });
-  document.getElementById('short-cat')?.addEventListener('change', e => { shortState.category = e.target.value; rerender(); });
-  document.getElementById('short-sort')?.addEventListener('change', e => { shortState.sort = e.target.value; rerender(); });
-  document.getElementById('short-risk')?.addEventListener('change', e => { shortState.riskPct = Number(e.target.value); rerender(); });
-  document.getElementById('short-hide-earn')?.addEventListener('change', e => { shortState.hideEarnings = e.target.checked; rerender(); });
-  // Tomar un trade → seguimiento; cerrar seguimiento.
-  els.report.querySelectorAll('[data-short-take]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      addShortTrade({
-        ticker: btn.dataset.shortTake, kind: btn.dataset.takeKind, direction: btn.dataset.takeDir,
-        entry: parseFloat(btn.dataset.takeEntry), target: parseFloat(btn.dataset.takeTarget), stop: parseFloat(btn.dataset.takeStop),
-      });
-      showToast(`${btn.dataset.shortTake} agregado a tu seguimiento de trades cortos`, 'success');
-      rerender();
-    });
-  });
-  els.report.querySelectorAll('[data-short-close]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); removeShortTrade(btn.dataset.shortClose); rerender(); });
-  });
-  loadShortEarnings(); // carga perezosa de balances de los tickers visibles (para el aviso)
-  els.report.querySelectorAll('[data-short-dir]').forEach(el => {
-    el.addEventListener('click', () => { shortState.direction = el.dataset.shortDir; rerender(); });
-  });
-  els.report.querySelectorAll('.short-reliab-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const ticker = btn.dataset.reliabTicker;
-      btn.disabled = true; btn.textContent = 'Midiendo confiabilidad histórica…';
-      try { await ensureBacktestFor(ticker); } catch (err) { /* se refleja abajo */ }
-      if (state.view === 'shorttrades' && !state.asset) rerender();
-    });
-  });
-  // "Ver detalle": despliega el plan completo, sizing, gestión y confiabilidad
-  // sin agrandar la tarjeta por defecto.
-  els.report.querySelectorAll('[data-short-more]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const more = btn.parentElement.querySelector('.short-more');
-      if (!more) return;
-      const open = more.hidden;
-      more.hidden = !open;
-      btn.setAttribute('aria-expanded', String(open));
-      btn.classList.toggle('is-open', open);
-      btn.querySelector('.short-more-caret').textContent = open ? '▴' : '▾';
-      btn.childNodes[0].textContent = open ? 'Ocultar detalle ' : 'Ver detalle ';
-    });
-  });
   els.report.querySelectorAll('[data-short-ticker]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      if (e.target.closest('.short-controls') || e.target.closest('.short-reliab') || e.target.closest('.short-more-btn') || e.target.closest('.short-more')) return;
-      selectTicker(el.dataset.shortTicker);
-    });
+    el.addEventListener('click', () => selectTicker(el.dataset.shortTicker));
   });
 }
 
@@ -5652,7 +3755,7 @@ function gapCardHTML(ticker, d) {
         <div class="gap-metric"><span>Estado</span>${statusChip}</div>
       </div>
       ${g.significant ? `<div class="gap-tag ${up ? 'up' : 'down'}">⚡ Gap grande para este activo (${g.atr != null ? Math.abs(g.atr).toFixed(1) + '× ATR' : Math.abs(g.pct).toFixed(1) + '%'})</div>` : ''}
-      ${d.setup?.qualifies ? `<div class="gap-setup-note">También aparece en Trades Cortos con setup ${d.setup.direction === 'short' ? 'bajista' : 'alcista'} (confianza ${esc(d.setup.confidence)}).</div>` : ''}
+      ${d.setup?.qualifies ? `<div class="gap-setup-note">También aparece en Trades Cortos con setup alcista (confianza ${esc(d.setup.confidence)}).</div>` : ''}
     </div>`;
 }
 
@@ -5672,11 +3775,8 @@ const compareState = { tickers: [], loading: false, error: null, results: [] };
 async function computeCompareEntry(ticker, macro) {
   const asset = await getAsset(ticker);
   if (!asset) throw new Error(`"${ticker}" no está en el universo cargado.`);
-  const [quote, candles, fundamentals, dividends] = await Promise.all([getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker), getDividends(ticker).catch(() => null)]);
+  const [quote, candles, fundamentals] = await Promise.all([getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker)]);
   const technical = computeTechnical(candles);
-  // Yield TTM directo sobre el precio ya obtenido (no depende de los stores de
-  // otras vistas, como sí lo hace dividendYield()/dividendPrice()).
-  const divYield = dividends?.ttm > 0 && quote.usd > 0 ? (dividends.ttm / quote.usd) * 100 : null;
   const fundForScore = fundamentals?.hasData ? {
     hasData: true, revenueGrowth: fundamentals.revenueGrowth ?? null, epsGrowth: fundamentals.epsGrowth ?? null,
     roe: fundamentals.roe ?? null, netMargin: fundamentals.netMargin ?? null, peg: fundamentals.peg,
@@ -5688,20 +3788,8 @@ async function computeCompareEntry(ticker, macro) {
     price: quote.usd, changePct: quote.changePct, isReal: quote.isReal && candles.isReal,
     score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, scoreBreakdown: scoreResult.scoreBreakdown,
     fundamentals, rsi: isNaN(technical.rsi) ? null : technical.rsi, atr: technical.atr,
-    divYield,
     closes: candles.c, dates: candles.t,
   };
-}
-
-// Marca con la clase .cmp-best la celda del "ganador" de una fila del
-// comparador. dir='high' → gana el mayor; dir='low' → gana el menor. Ignora
-// nulos y no marca nada si hay empate en la cima o un solo valor válido.
-function compareBestIndex(values, dir) {
-  const valid = values.map((v, i) => ({ v, i })).filter(e => e.v != null && !isNaN(e.v));
-  if (valid.length < 2) return -1;
-  valid.sort((a, b) => dir === 'low' ? a.v - b.v : b.v - a.v);
-  if (valid[0].v === valid[1].v) return -1; // empate en la cima → no se resalta
-  return valid[0].i;
 }
 
 async function runCompare(tickers) {
@@ -5727,7 +3815,7 @@ function comparePageHTML() {
   const results = compareState.results;
   return `
     ${sectionTitleHTML('Comparador de Activos', 'compare')}
-    <div class="dash-intro">Compará hasta ${COMPARE_MAX} activos lado a lado: score y su desglose por categoría, fundamentales, valuación, <strong>dividend yield</strong> y retorno % superpuesto en el mismo gráfico — todo calculado en el momento con datos reales. La ★ marca al <strong>ganador de cada métrica</strong>.</div>
+    <div class="dash-intro">Compará hasta ${COMPARE_MAX} activos lado a lado: score y su desglose por categoría, fundamentales, valuación y retorno % superpuesto en el mismo gráfico — todo calculado en el momento con datos reales.</div>
     <div class="card port-form-card">
       <div class="port-form">
         ${slots.map((v, i) => `
@@ -5749,19 +3837,7 @@ function comparePageHTML() {
               ${results.map(r => `<th>${esc(r.ticker)}</th>`).join('')}
             </tr></thead>
             <tbody>
-              ${(() => {
-                // Índice ganador por métrica (mayor es mejor, salvo PE/PEG donde
-                // menor es mejor). Se resalta con ★ para leer de un vistazo cuál
-                // activo domina cada dimensión.
-                const bestScore = compareBestIndex(results.map(r => r.score), 'high');
-                const bestYield = compareBestIndex(results.map(r => r.divYield), 'high');
-                const bestPE = compareBestIndex(results.map(r => r.fundamentals?.peTTM ?? null), 'low');
-                const bestPEG = compareBestIndex(results.map(r => r.fundamentals?.peg ?? null), 'low');
-                const bestROE = compareBestIndex(results.map(r => r.fundamentals?.roe ?? null), 'high');
-                const bestRev = compareBestIndex(results.map(r => r.fundamentals?.revenueGrowth ?? null), 'high');
-                const anyYield = results.some(r => r.divYield != null);
-                return `
-              <tr><td class="scr-left" style="font-weight:600;">Score</td>${results.map((r, i) => `<td class="${i === bestScore ? 'cmp-win' : ''}" style="font-weight:700; color:${scoreLabelColor(r.scoreLabel).color};">${r.score} · ${esc(r.scoreLabel)}</td>`).join('')}</tr>
+              <tr><td class="scr-left" style="font-weight:600;">Score</td>${results.map(r => `<td style="font-weight:700; color:${scoreLabelColor(r.scoreLabel).color};">${r.score} · ${esc(r.scoreLabel)}</td>`).join('')}</tr>
               <tr><td class="scr-left">Precio</td>${results.map(r => `<td>${fmtUsd(r.price)}</td>`).join('')}</tr>
               <tr><td class="scr-left">Variación diaria</td>${results.map(r => `<td class="${r.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(r.changePct)}</td>`).join('')}</tr>
               <tr><td class="scr-left">Sector</td>${results.map(r => `<td>${esc(r.sector ?? 'N/D')}</td>`).join('')}</tr>
@@ -5773,12 +3849,10 @@ function comparePageHTML() {
                   return `<td class="${!sb?.available ? 'bt-nd' : ''}">${sb?.available ? `${sb.pct}%` : 'N/D'}</td>`;
                 }).join('')}</tr>`;
               }).join('')}
-              ${anyYield ? `<tr><td class="scr-left">Dividend yield (TTM)</td>${results.map((r, i) => `<td class="${i === bestYield ? 'cmp-best' : ''}">${r.divYield != null ? `${r.divYield.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>` : ''}
-              <tr><td class="scr-left">PE (TTM)</td>${results.map((r, i) => `<td class="${i === bestPE ? 'cmp-best' : ''}">${r.fundamentals?.peTTM != null ? `${r.fundamentals.peTTM.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
-              <tr><td class="scr-left">PEG</td>${results.map((r, i) => `<td class="${i === bestPEG ? 'cmp-best' : ''}">${r.fundamentals?.peg != null ? `${r.fundamentals.peg.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
-              <tr><td class="scr-left">ROE</td>${results.map((r, i) => `<td class="${i === bestROE ? 'cmp-best' : ''}">${r.fundamentals?.roe != null ? `${r.fundamentals.roe.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>
-              <tr><td class="scr-left">Crecimiento de ingresos</td>${results.map((r, i) => `<td class="${i === bestRev ? 'cmp-best' : ''}">${r.fundamentals?.revenueGrowth != null ? `${r.fundamentals.revenueGrowth.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>`;
-              })()}
+              <tr><td class="scr-left">PE (TTM)</td>${results.map(r => `<td>${r.fundamentals?.peTTM != null ? `${r.fundamentals.peTTM.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
+              <tr><td class="scr-left">PEG</td>${results.map(r => `<td>${r.fundamentals?.peg != null ? `${r.fundamentals.peg.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
+              <tr><td class="scr-left">ROE</td>${results.map(r => `<td>${r.fundamentals?.roe != null ? `${r.fundamentals.roe.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>
+              <tr><td class="scr-left">Crecimiento de ingresos</td>${results.map(r => `<td>${r.fundamentals?.revenueGrowth != null ? `${r.fundamentals.revenueGrowth.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>
             </tbody>
           </table>
         </div>
@@ -5800,311 +3874,6 @@ function wireCompareEvents() {
     const tickers = Array.from(new Set(compareState.tickers.map(t => (t || '').trim().toUpperCase()).filter(Boolean)));
     if (tickers.length < 2) { compareState.error = `Ingresá al menos 2 tickers para comparar.`; renderReport(); return; }
     runCompare(tickers.slice(0, COMPARE_MAX));
-  });
-}
-
-/* ───────────────────────── Modo Cesta ─────────────────────────
- * Analiza un CONJUNTO de activos como grupo ANTES de comprarlo: score
- * combinado ponderado, asignación por sector, y correlación promedio entre
- * los miembros (sobre los retornos diarios reales) para leer si la cesta está
- * bien diversificada o si sus papeles se mueven todos juntos. 100% client-side
- * reusando computeLightSignal (score + sector + cierres), sin API nueva. */
-const BASKET_MAX = 8;
-const basketState = { inputs: [''], weights: {}, loading: false, error: null, results: [] };
-
-// Serie de retornos diarios a partir de los cierres. La correlación entre pares
-// reusa pearsonCorr() (ya definido para la matriz de correlación de la cartera),
-// que exige arrays de igual largo → se alinean por las últimas N comunes.
-function returnsSeries(closes) {
-  const r = [];
-  for (let i = 1; i < closes.length; i++) if (closes[i - 1] > 0) r.push(closes[i] / closes[i - 1] - 1);
-  return r;
-}
-function alignedCorr(a, b) {
-  const n = Math.min(a.length, b.length);
-  if (n < 20) return null;
-  return pearsonCorr(a.slice(-n), b.slice(-n));
-}
-
-async function runBasket(tickers) {
-  basketState.loading = true;
-  basketState.error = null;
-  renderReport();
-  try {
-    const macro = await getMacro();
-    basketState.results = await Promise.all(tickers.map(t => computeLightSignal(t, macro).then(d => ({ ticker: t, d })).catch(() => ({ ticker: t, d: null }))));
-    const ok = basketState.results.filter(r => r.d);
-    if (!ok.length) throw new Error('No se pudo analizar ninguno de los activos ingresados.');
-    // Peso por defecto: equitativo entre los que cargaron bien.
-    for (const r of ok) if (basketState.weights[r.ticker] == null) basketState.weights[r.ticker] = Math.round((100 / ok.length) * 10) / 10;
-    showToast(`Cesta de ${ok.length} activo(s) analizada`, 'success');
-  } catch (e) {
-    basketState.error = e.message;
-    basketState.results = [];
-    showToast(e.message, 'error');
-  } finally {
-    basketState.loading = false;
-    if (!state.asset && state.view === 'basket') renderReport();
-  }
-}
-
-// Métricas de la cesta a partir de los resultados y los pesos actuales.
-function basketMetrics() {
-  const rows = basketState.results.filter(r => r.d);
-  if (!rows.length) return null;
-  const w = {};
-  let wsum = 0;
-  for (const r of rows) { const x = Math.max(0, Number(basketState.weights[r.ticker]) || 0); w[r.ticker] = x; wsum += x; }
-  if (wsum <= 0) { for (const r of rows) w[r.ticker] = 1; wsum = rows.length; } // fallback equitativo
-  // Score combinado ponderado.
-  const combinedScore = Math.round(rows.reduce((s, r) => s + r.d.score * w[r.ticker], 0) / wsum);
-  // Asignación por sector.
-  const bySector = {};
-  for (const r of rows) { const sec = r.d.sector ?? 'Otros'; bySector[sec] = (bySector[sec] ?? 0) + w[r.ticker] / wsum; }
-  const sectorRows = Object.entries(bySector).map(([sector, pct]) => ({ sector, pct })).sort((a, b) => b.pct - a.pct);
-  const topSectorPct = sectorRows[0]?.pct ?? 0;
-  // Correlación promedio entre pares (sobre retornos diarios reales).
-  const series = rows.map(r => ({ ticker: r.ticker, ret: returnsSeries(r.d.closes || []) }));
-  let sum = 0, cnt = 0;
-  for (let i = 0; i < series.length; i++) for (let j = i + 1; j < series.length; j++) {
-    const c = alignedCorr(series[i].ret, series[j].ret);
-    if (c != null) { sum += c; cnt++; }
-  }
-  const avgCorr = cnt ? sum / cnt : null;
-  const label = combinedScore >= 80 ? 'Compra Fuerte' : combinedScore >= 65 ? 'Compra Moderada' : combinedScore >= 45 ? 'Mantener' : combinedScore >= 30 ? 'Reducir' : 'Venta';
-  return { rows, w, wsum, combinedScore, combinedLabel: label, sectorRows, topSectorPct, avgCorr };
-}
-
-function basketPageHTML() {
-  const slots = basketState.inputs.length ? basketState.inputs : [''];
-  const m = basketState.results.length ? basketMetrics() : null;
-  const corrRead = m?.avgCorr == null ? null
-    : m.avgCorr < 0.4 ? { txt: 'Correlación baja: buena diversificación — los papeles no se mueven todos juntos.', cls: 'up' }
-    : m.avgCorr < 0.7 ? { txt: 'Correlación media: diversificación moderada.', cls: 'mid' }
-    : { txt: 'Correlación alta: poca diversificación real — la cesta se mueve casi como un solo activo.', cls: 'down' };
-  const concRead = m && m.topSectorPct > 0.5 ? `⚠ Concentración: ${Math.round(m.topSectorPct * 100)}% en ${esc(m.sectorRows[0].sector)}.` : null;
-  return `
-    ${sectionTitleHTML('Modo Cesta', 'radar')}
-    <div class="dash-intro">Armá un conjunto de hasta ${BASKET_MAX} activos y analizalo <strong>como grupo antes de comprarlo</strong>: score combinado ponderado, asignación por sector y correlación promedio entre sus miembros (sobre retornos diarios reales). Ajustá los pesos para ver cómo cambia el conjunto. Todo con datos reales, sin guardar nada.</div>
-
-    <div class="card port-form-card">
-      <div class="basket-inputs">
-        ${slots.map((v, i) => `<input list="basket-ticker-list" data-basket-slot="${i}" class="port-input basket-input" placeholder="Ticker ${i + 1}" aria-label="Ticker ${i + 1} de la cesta" autocomplete="off" style="text-transform:uppercase;" value="${esc(v)}" />`).join('')}
-        <datalist id="basket-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
-      </div>
-      <div class="basket-form-actions">
-        ${slots.length < BASKET_MAX ? '<button class="port-csv-btn" id="basket-add-slot">+ Agregar activo</button>' : ''}
-        <button class="port-add-btn" id="basket-run" ${basketState.loading ? 'disabled' : ''}>${basketState.loading ? 'Analizando…' : 'Analizar cesta'}</button>
-      </div>
-    </div>
-
-    ${basketState.error ? `<div class="card watch-empty">${esc(basketState.error)}</div>` : ''}
-    ${!m ? '' : `
-      <div class="basket-summary-grid">
-        <div class="card port-summary-card">
-          <div class="dash-radar-title">Score combinado</div>
-          <div class="port-summary-value" style="color:${scoreLabelColor(m.combinedLabel).color};">${m.combinedScore}</div>
-          <div class="port-summary-sub">${esc(m.combinedLabel)} · ponderado por peso</div>
-        </div>
-        <div class="card port-summary-card">
-          <div class="dash-radar-title">Correlación promedio</div>
-          <div class="port-summary-value">${m.avgCorr != null ? m.avgCorr.toFixed(2) : 'N/D'}</div>
-          <div class="port-summary-sub">${m.rows.length} activo(s) en la cesta</div>
-        </div>
-        <div class="card port-summary-card">
-          <div class="dash-radar-title">Sectores</div>
-          <div class="port-summary-value">${m.sectorRows.length}</div>
-          <div class="port-summary-sub">${concRead ? concRead : 'distribución balanceada'}</div>
-        </div>
-      </div>
-
-      ${corrRead ? `<div class="basket-read ${corrRead.cls}">${esc(corrRead.txt)}</div>` : ''}
-
-      <div class="card bt-table-card" style="margin-bottom:20px;">
-        <div class="bt-table-wrap">
-          <table class="bt-table">
-            <thead><tr><th class="scr-left">Activo</th><th class="scr-left">Sector</th><th>Var %</th><th>Score</th><th>Peso %</th></tr></thead>
-            <tbody>
-              ${m.rows.map(r => `
-                <tr class="port-row" data-dash-ticker="${esc(r.ticker)}">
-                  <td class="scr-left" style="font-weight:700;">${esc(r.ticker)} <span class="port-pnl-abs">${esc(r.d.name)}</span></td>
-                  <td class="scr-left" style="color:var(--text-mute);">${esc(r.d.sector ?? 'N/D')}</td>
-                  <td class="${r.d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(r.d.changePct)}</td>
-                  <td style="font-weight:700; color:${scoreLabelColor(r.d.scoreLabel).color};">${r.d.score}</td>
-                  <td><input type="number" class="basket-weight" data-basket-weight="${esc(r.ticker)}" min="0" step="1" value="${m.w[r.ticker]}" style="width:64px;" aria-label="Peso de ${esc(r.ticker)}" /></td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-        <div class="bt-disclaimer">Los pesos no tienen que sumar 100: se normalizan solos. Tocá una fila (fuera del campo de peso) para abrir la ficha del activo.</div>
-      </div>
-
-      <div class="card port-notes-card">
-        <div class="dash-radar-title">Asignación por sector</div>
-        ${m.sectorRows.map(s => `
-          <div class="score-row" style="grid-template-columns: 150px 1fr 50px;">
-            <span class="score-label">${esc(s.sector)}</span>
-            <div class="score-bar-bg"><div class="score-bar-fill" style="width:${Math.round(s.pct * 100)}%;"></div></div>
-            <span class="score-fraction">${Math.round(s.pct * 100)}%</span>
-          </div>`).join('')}
-      </div>
-      <div class="bt-disclaimer" style="margin-top:14px;">El score combinado es el promedio ponderado de los scores individuales; la correlación se calcula sobre los retornos diarios reales de la ventana de velas de cada activo. No es asesoramiento financiero.</div>
-    `}`;
-}
-
-function wireBasketEvents() {
-  els.report.querySelectorAll('.basket-input').forEach(input => {
-    input.addEventListener('input', () => { basketState.inputs[Number(input.dataset.basketSlot)] = input.value.toUpperCase(); });
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('basket-run')?.click(); });
-  });
-  const addBtn = document.getElementById('basket-add-slot');
-  if (addBtn) addBtn.addEventListener('click', () => {
-    // Persistir lo tipeado antes de re-renderizar (el input handler ya lo hace,
-    // pero garantizamos el estado por si no hubo evento input).
-    els.report.querySelectorAll('.basket-input').forEach(inp => { basketState.inputs[Number(inp.dataset.basketSlot)] = inp.value.toUpperCase(); });
-    if (basketState.inputs.length < BASKET_MAX) basketState.inputs.push('');
-    renderReport();
-  });
-  const runBtn = document.getElementById('basket-run');
-  if (runBtn) runBtn.addEventListener('click', () => {
-    const tickers = Array.from(new Set(basketState.inputs.map(t => (t || '').trim().toUpperCase()).filter(Boolean)));
-    if (tickers.length < 2) { basketState.error = 'Ingresá al menos 2 tickers para armar la cesta.'; renderReport(); return; }
-    runBasket(tickers.slice(0, BASKET_MAX));
-  });
-  els.report.querySelectorAll('.basket-weight').forEach(inp => {
-    inp.addEventListener('input', () => {
-      basketState.weights[inp.dataset.basketWeight] = inp.value === '' ? 0 : Number(inp.value);
-      // Re-render diferido para no perder el foco mientras se tipea: solo
-      // recalcula al soltar el campo (change), no en cada tecla.
-    });
-    inp.addEventListener('change', () => renderReport());
-  });
-  els.report.querySelectorAll('.port-row[data-dash-ticker]').forEach(el => {
-    el.addEventListener('click', (e) => { if (e.target.closest('.basket-weight')) return; selectTicker(el.dataset.dashTicker); });
-  });
-}
-
-/* ───────────────────────── Panorama de Mercado ─────────────────────────
- * El "primer vistazo" del día: índices (vía ETF-proxy que la app ya cotiza),
- * panel de acciones argentinas, contexto macro (CCL/brecha, riesgo país, VIX,
- * Fear & Greed), amplitud del mercado y movers del universo cargado. Todo
- * con datos reales ya disponibles — sin API nueva ni datos inventados. */
-const PANORAMA_INDICES = [
-  { proxy: 'SPY', label: 'S&P 500', via: 'SPY' },
-  { proxy: 'QQQ', label: 'Nasdaq 100', via: 'QQQ' },
-  { proxy: 'DIA', label: 'Dow Jones', via: 'DIA' },
-  { proxy: 'IWM', label: 'Russell 2000', via: 'IWM' },
-  { proxy: 'EWZ', label: 'Brasil', via: 'EWZ' },
-  { proxy: 'ACWI', label: 'Mundo', via: 'ACWI' },
-];
-const panoramaState = { indices: {}, loading: false, started: false };
-
-async function loadPanoramaData() {
-  // load() se invoca en CADA render (ver renderReportImpl), así que este guard
-  // es imprescindible: sin él, el renderReport() de abajo re-dispararía load()
-  // en bucle infinito. Se carga una sola vez por sesión.
-  if (panoramaState.started) return;
-  panoramaState.started = true;
-  panoramaState.loading = true;
-  if (!state.asset && state.view === 'panorama') renderReport();
-  try {
-    if (!dashState.macro) { try { dashState.macro = await getMacro(); } catch (_) {} }
-    await Promise.all(PANORAMA_INDICES.map(async ({ proxy }) => {
-      try { panoramaState.indices[proxy] = await getQuote(proxy); } catch (_) { /* proxy que falle queda sin dato */ }
-    }));
-  } finally {
-    panoramaState.loading = false;
-    if (!state.asset && state.view === 'panorama') renderReport();
-  }
-}
-
-function panoramaPageHTML() {
-  const loaded = Object.entries(dashState.data).map(([ticker, d]) => ({ ticker, d }));
-  const macro = dashState.macro;
-  // Panel de acciones argentinas: promedio real de variación de las AR que
-  // estén cargadas. NO es el índice Merval oficial — se etiqueta como panel.
-  const arRows = loaded.filter(e => AR_TICKERS.has(e.ticker) && e.d.changePct != null);
-  const arAvg = arRows.length ? arRows.reduce((s, e) => s + e.d.changePct, 0) / arRows.length : null;
-  // Amplitud del mercado sobre el universo cargado.
-  const withChg = loaded.filter(e => e.d.changePct != null);
-  const up = withChg.filter(e => e.d.changePct > 0).length;
-  const down = withChg.filter(e => e.d.changePct < 0).length;
-  const flat = withChg.length - up - down;
-  const inBuy = loaded.filter(e => e.d.alert?.type === 'buy').length;
-  const avgScore = loaded.length ? Math.round(loaded.reduce((s, e) => s + (e.d.score ?? 0), 0) / loaded.length) : null;
-  const upPct = withChg.length ? Math.round((up / withChg.length) * 100) : 0;
-  // Movers del día.
-  const sorted = withChg.slice().sort((a, b) => b.d.changePct - a.d.changePct);
-  const gainers = sorted.slice(0, 5);
-  const losers = sorted.slice(-5).reverse();
-  const brecha = macro?.dolares?.oficial && macro?.dolares?.ccl ? ((macro.dolares.ccl / macro.dolares.oficial) - 1) * 100 : null;
-
-  const idxCard = ({ proxy, label, via }) => {
-    const q = panoramaState.indices[proxy];
-    const chg = q?.changePct;
-    return `<div class="card pano-idx-card" data-dash-ticker="${esc(proxy)}" title="Ver ${esc(via)}">
-      <div class="pano-idx-label">${esc(label)}</div>
-      <div class="pano-idx-price">${q?.usd != null ? fmtUsd(q.usd) : '—'}</div>
-      <div class="pano-idx-chg ${chg == null ? '' : chg >= 0 ? 'up' : 'down'}">${chg != null ? fmtPct(chg) : 'N/D'}</div>
-      <div class="pano-idx-via">vía ${esc(via)}</div>
-    </div>`;
-  };
-  const macroTile = (label, value, sub, cls = '') => `
-    <div class="card pano-macro-tile">
-      <div class="pano-macro-label">${esc(label)}</div>
-      <div class="pano-macro-value ${cls}">${value}</div>
-      ${sub ? `<div class="pano-macro-sub">${sub}</div>` : ''}
-    </div>`;
-
-  return `
-    ${sectionTitleHTML('Panorama de Mercado', 'flag')}
-    <div class="dash-intro">El pulso del mercado en un vistazo: índices, el panel argentino, el contexto macro local y la amplitud del universo que seguís. ${panoramaState.loading ? 'Actualizando…' : ''}</div>
-
-    ${sectionTitleHTML('Índices', 'trend')}
-    <div class="pano-idx-grid">
-      ${PANORAMA_INDICES.map(idxCard).join('')}
-      <div class="card pano-idx-card ${arAvg == null ? 'is-empty' : ''}">
-        <div class="pano-idx-label">🇦🇷 Acciones AR</div>
-        <div class="pano-idx-price">${arRows.length ? `${arRows.length} papeles` : '—'}</div>
-        <div class="pano-idx-chg ${arAvg == null ? '' : arAvg >= 0 ? 'up' : 'down'}">${arAvg != null ? fmtPct(arAvg) : 'N/D'}</div>
-        <div class="pano-idx-via">panel (no Merval oficial)</div>
-      </div>
-    </div>
-    <div class="bt-disclaimer" style="margin-bottom:22px;">Los índices se muestran vía su ETF de referencia (SPY→S&amp;P 500, QQQ→Nasdaq 100, DIA→Dow, etc.), que la plataforma ya cotiza en tiempo real. El "Panel AR" es el promedio de variación de las acciones argentinas cargadas — no es el índice Merval oficial.</div>
-
-    ${sectionTitleHTML('Contexto Macro Argentino', 'globe')}
-    ${!macro ? `<div class="card watch-empty">Cargando contexto macro…</div>` : `
-    <div class="pano-macro-grid">
-      ${macroTile('Dólar CCL', macro.dolares?.ccl != null ? fmtArs(macro.dolares.ccl) : 'N/D', macro.dolares?.oficial != null ? `oficial ${fmtArs(macro.dolares.oficial)}` : '')}
-      ${macroTile('Brecha CCL/oficial', brecha != null ? `${brecha.toFixed(1)}%` : 'N/D', 'cuánto más caro el CCL')}
-      ${macroTile('Riesgo País', macro.riesgoPaisArg != null ? `${macro.riesgoPaisArg}` : 'N/D', macro.riesgoPaisVariacion != null ? `var. ${macro.riesgoPaisVariacion}` : 'puntos básicos', macro.riesgoPaisArg != null && macro.riesgoPaisArg > 1000 ? 'down' : '')}
-      ${macroTile('VIX', macro.vix != null ? macro.vix.toFixed(1) : 'N/D', 'miedo del mercado (EE.UU.)', macro.vix != null && macro.vix > 25 ? 'down' : macro.vix != null && macro.vix < 15 ? 'up' : '')}
-      ${macro.fearGreed ? macroTile('Fear & Greed (cripto)', `${macro.fearGreed.value}`, esc(macro.fearGreed.label), macro.fearGreed.value >= 55 ? 'up' : macro.fearGreed.value <= 45 ? 'down' : '') : ''}
-      ${macroTile('Dólar Blue', macro.dolares?.blue != null ? fmtArs(macro.dolares.blue) : 'N/D', macro.dolares?.mep != null ? `MEP ${fmtArs(macro.dolares.mep)}` : '')}
-    </div>`}
-
-    ${sectionTitleHTML('Amplitud del Mercado', 'radar')}
-    ${!loaded.length ? `<div class="card watch-empty">Cargando activos del universo…</div>` : `
-    <div class="pano-macro-grid">
-      ${macroTile('Suben vs. bajan', `<span class="up">${up}</span> / <span class="down">${down}</span>${flat ? ` · ${flat}=` : ''}`, `${upPct}% en verde de ${withChg.length} activos`)}
-      ${macroTile('En zona de compra', `${inBuy}`, 'activos con alerta de entrada')}
-      ${macroTile('Score promedio', avgScore != null ? `${avgScore}` : 'N/D', 'del universo cargado', avgScore != null && avgScore >= 60 ? 'up' : avgScore != null && avgScore < 45 ? 'down' : '')}
-    </div>
-    <div class="pano-movers-grid">
-      <div class="card">
-        <div class="dash-radar-title">📈 Mejores del día</div>
-        ${gainers.map(e => `<div class="pano-mover-row" data-dash-ticker="${esc(e.ticker)}"><span class="pano-mover-tk">${esc(e.ticker)}</span><span class="pano-mover-name">${esc(e.d.name)}</span><span class="pano-mover-chg up">${fmtPct(e.d.changePct)}</span></div>`).join('')}
-      </div>
-      <div class="card">
-        <div class="dash-radar-title">📉 Peores del día</div>
-        ${losers.map(e => `<div class="pano-mover-row" data-dash-ticker="${esc(e.ticker)}"><span class="pano-mover-tk">${esc(e.ticker)}</span><span class="pano-mover-name">${esc(e.d.name)}</span><span class="pano-mover-chg down">${fmtPct(e.d.changePct)}</span></div>`).join('')}
-      </div>
-    </div>`}`;
-}
-
-function wirePanoramaEvents() {
-  els.report.querySelectorAll('[data-dash-ticker]').forEach(el => {
-    el.addEventListener('click', () => selectTicker(el.dataset.dashTicker));
   });
 }
 
@@ -6162,132 +3931,6 @@ function wireSettingsEvents() {
       showToast(`Perfil de riesgo: ${RISK_PROFILES[input.value].label}`, 'success');
       renderReport();
     });
-  });
-}
-
-/* ───────────────────────── Academia / Aprendé ─────────────────────────
- * Centro de aprendizaje 100% client-side: glosario de los términos que usa
- * la plataforma + guías cortas para el inversor argentino de CEDEARs. Todo
- * el contenido es conceptual y honesto; nada de números impositivos que
- * cambian año a año (se remite a un contador). Usa <details> nativos para
- * expandir/colapsar — accesible y sin JS de estado. */
-const ACADEMY_GLOSSARY = [
-  ['CEDEAR', 'Certificado de Depósito Argentino: un instrumento que cotiza en BYMA (bolsa argentina) y representa una fracción de una acción extranjera (ej. Apple). Te da exposición al papel del exterior operando en pesos, sin necesidad de una cuenta afuera.'],
-  ['Ratio de conversión', 'Cuántos CEDEARs equivalen a una acción del subyacente. Un ratio 20:1 significa que necesitás 20 CEDEARs para representar 1 acción. BYMA re-ratea papeles cada tanto, por eso la plataforma corrige el ratio contra la cotización real en vivo.'],
-  ['CCL (Contado con Liqui)', 'El tipo de cambio implícito que surge de comparar el precio de un activo en pesos (acá) contra su precio en dólares (afuera). Es la referencia de dólar que usan los CEDEARs.'],
-  ['Ex-dividend (ex-date)', 'La fecha de corte para cobrar un dividendo: tenés que tener el activo ANTES de esa fecha. Si comprás en el ex-date o después, el dividendo lo cobra el vendedor. El tenedor de CEDEAR también cobra, ajustado por el ratio.'],
-  ['Dividend yield (TTM)', 'El dividendo pagado en los últimos 12 meses dividido el precio actual, en %. Es la "renta" anual aproximada. Un yield muy alto a veces es señal de riesgo (el precio cayó), no siempre de buena oportunidad.'],
-  ['Score compuesto', 'El puntaje 0-100 propio de la plataforma que resume tendencia, momentum, fundamentales, valuación, riesgo y liquidez en un solo número, con su etiqueta (Compra Fuerte → Venta). Es una lectura probabilística, no una orden.'],
-  ['RSI', 'Índice de Fuerza Relativa (0-100): mide si un activo está "sobrecomprado" (>70) o "sobrevendido" (<30) en el corto plazo. No es una señal de compra/venta por sí solo, es un termómetro de momentum.'],
-  ['ATR', 'Average True Range: cuánto se mueve en promedio un activo por día, en $. La plataforma lo usa para calcular stops y objetivos proporcionales a la volatilidad real de cada papel.'],
-  ['Zona de compra', 'Cuando la plataforma detecta que el precio está cerca de un soporte técnico relevante con condiciones favorables. No garantiza suba: marca un punto de entrada con mejor relación riesgo/beneficio.'],
-  ['Stop loss', 'El precio al que conviene salir para cortar una pérdida si la tesis falla. Definirlo ANTES de comprar es la base de la gestión de riesgo — evita que una pérdida chica se vuelva grande.'],
-  ['Drawdown', 'La caída desde el punto más alto hasta el más bajo de una inversión o cartera. Mide el "peor momento" que tuviste que aguantar — clave para saber si podés tolerar una estrategia.'],
-  ['Volatilidad', 'Cuánto oscila el precio. Más volatilidad = más riesgo y más oportunidad. La plataforma la usa en el riesgo de cartera y en el tamaño de posición sugerido.'],
-  ['PE / PEG', 'PE (Price/Earnings): cuántas veces la ganancia anual estás pagando por el papel. PEG lo ajusta por el crecimiento esperado. Menor suele ser "más barato", pero hay que compararlo dentro del mismo sector.'],
-  ['Beta', 'Cuánto se mueve un activo respecto del mercado. Beta 1 = se mueve igual; >1 = amplifica; <1 = amortigua. Útil para entender el riesgo sistemático de tu cartera.'],
-];
-const ACADEMY_GUIDES = [
-  {
-    icon: 'coins', title: '¿Qué es un CEDEAR y cómo funciona el ratio?',
-    body: `<p>Un <strong>CEDEAR</strong> te deja invertir en acciones del exterior (Apple, Coca-Cola, un ETF del S&amp;P 500) operando en pesos en la bolsa argentina. No comprás la acción directamente: comprás un certificado que la representa.</p>
-      <p>El <strong>ratio de conversión</strong> dice cuántos CEDEARs equivalen a 1 acción. Ejemplo con ratio 20:1: si Apple vale US$200, cada CEDEAR representa 1/20 de esa acción, es decir ~US$10 de valor subyacente (después ajustado por el CCL a pesos).</p>
-      <p>Como el CEDEAR está atado al dólar CCL, funciona además como una forma de <strong>dolarizar</strong> tus ahorros: si sube el CCL, el precio en pesos del CEDEAR sube aunque la acción afuera no se mueva.</p>
-      <p class="academy-tip">💡 En esta plataforma el ratio se <strong>autocorrige</strong> contra el precio real de BYMA, porque el ratio "de papel" a veces queda viejo cuando BYMA re-ratea.</p>`,
-    goto: { view: 'screener', label: 'Explorar CEDEARs en el Screener' },
-  },
-  {
-    icon: 'target', title: 'Cómo leer el score compuesto',
-    body: `<p>El <strong>score</strong> (0-100) combina seis dimensiones que la plataforma calcula con datos reales: <strong>tendencia, momentum, fundamentales, valuación, riesgo y liquidez</strong>. El resultado se resume en una etiqueta:</p>
-      <ul><li><strong>Compra Fuerte / Moderada</strong>: varias dimensiones alineadas a favor.</li><li><strong>Mantener</strong>: señales mixtas o neutras.</li><li><strong>Reducir / Venta</strong>: el balance se inclina en contra.</li></ul>
-      <p>Es una <strong>lectura probabilística</strong>, no una orden. Un score alto mejora las chances, pero nada garantiza el resultado. Mirá siempre el <em>desglose</em>: un score 70 por fundamentales sólidos es distinto de uno por un pico de momentum de corto plazo.</p>
-      <p class="academy-tip">💡 En la ficha de cada activo podés abrir el desglose y ver qué factor suma y cuál resta.</p>`,
-    goto: { view: 'compare', label: 'Comparar scores en el Comparador' },
-  },
-  {
-    icon: 'coins', title: 'Ex-dividend: cómo cobrar dividendos',
-    body: `<p>Para cobrar un dividendo tenés que tener el activo <strong>antes</strong> de la fecha <strong>ex-dividend</strong>. Si comprás justo en el ex-date o después, ese pago lo cobra quien te vendió.</p>
-      <p>El tenedor de un <strong>CEDEAR también cobra</strong> los dividendos del subyacente, ajustados por el ratio y acreditados por el agente (con la retención impositiva y comisión de custodia que corresponda).</p>
-      <p>La sección <strong>Dividendos</strong> te muestra el calendario de próximos ex-dividends (estimados según la cadencia histórica real de cada papel) y las <strong>Alertas de Cashflow</strong>: pagadores con buena renta que además están en zona de compra.</p>
-      <p class="academy-tip">💡 Un yield alto no es gratis: a veces refleja que el precio cayó. Fijate también en la consistencia y el crecimiento del dividendo.</p>`,
-    goto: { view: 'dividends', label: 'Ver Dividendos & Cashflow' },
-  },
-  {
-    icon: 'briefcase', title: 'Gestión de riesgo: stop, tamaño y diversificación',
-    body: `<p>Ganar a largo plazo depende menos de acertar cada trade y más de <strong>no perder de más</strong> cuando te equivocás. Tres pilares:</p>
-      <ul>
-        <li><strong>Stop loss</strong>: definí ANTES de entrar a qué precio salís si la tesis falla. La plataforma sugiere stops proporcionales al ATR (volatilidad real) de cada papel.</li>
-        <li><strong>Tamaño de posición</strong>: cuánto poner en cada activo según tu capital y tu perfil de riesgo (configurable en Ajustes). Ni tan chico que no mueva la aguja, ni tan grande que un solo error te lastime.</li>
-        <li><strong>Diversificación</strong>: no concentres todo en un sector o país. El Portfolio Advisor te marca concentración, correlación entre tenencias y contribución al riesgo.</li>
-      </ul>
-      <p class="academy-tip">💡 Regla clásica: arriesgar solo una fracción chica del capital por operación, para que ninguna pérdida sola te saque del juego.</p>`,
-    goto: { view: 'portfolio', label: 'Analizar mi cartera' },
-  },
-  {
-    icon: 'building', title: 'Impuestos del inversor argentino (panorama general)',
-    body: `<p>Un panorama <strong>conceptual</strong> — no asesoramiento, y sin números concretos porque cambian todos los años:</p>
-      <ul>
-        <li><strong>Impuesto a las Ganancias</strong>: la compra-venta de CEDEARs y la renta pueden estar alcanzadas según el instrumento y tu situación. Los tratamientos difieren entre acciones locales, CEDEARs y activos del exterior.</li>
-        <li><strong>Bienes Personales</strong>: las tenencias al 31/12 pueden entrar en la base, con diferencias según el tipo de activo y dónde está radicado.</li>
-        <li><strong>Dividendos</strong>: suelen llegar con retenciones ya aplicadas por el agente.</li>
-      </ul>
-      <p class="academy-warning">⚠️ Las alícuotas, mínimos y exenciones cambian año a año y dependen de tu caso particular. <strong>Consultá siempre a un contador</strong> antes de tomar decisiones por motivos impositivos. Esta guía es solo para que sepas qué conceptos existen.</p>`,
-  },
-  {
-    icon: 'grid', title: 'Recorrido rápido por la plataforma',
-    body: `<p>Dónde está cada cosa:</p>
-      <ul>
-        <li><strong>Dashboard</strong>: el pulso del día — oportunidades, zona de compra, movers, rupturas.</li>
-        <li><strong>Screener</strong>: filtrá todo el universo por score, señal, zona de compra, volumen y más.</li>
-        <li><strong>Trades Cortos / Gaps</strong>: setups de corto plazo (rebotes, pullbacks, squeezes, huecos) — alto riesgo.</li>
-        <li><strong>Dividendos</strong>: calendario, mejores pagadores y alertas de cashflow.</li>
-        <li><strong>Comparador</strong>: hasta 3 activos lado a lado, con el ganador de cada métrica.</li>
-        <li><strong>Portfolio Advisor</strong>: diversificación, riesgo, proyecciones y recomendación por posición.</li>
-        <li><strong>Backtesting / Track Record</strong>: qué tan confiables fueron históricamente las señales del motor.</li>
-      </ul>
-      <p class="academy-tip">💡 En cada activo tenés un asistente con IA que responde solo con los datos ya calculados por la plataforma — nunca inventa.</p>`,
-    goto: { view: 'dashboard', label: 'Ir al Dashboard' },
-  },
-];
-
-function academyPageHTML() {
-  return `
-    ${sectionTitleHTML('Aprendé', 'bulb')}
-    <div class="dash-intro">Todo lo que necesitás para entender la plataforma y para invertir en CEDEARs con criterio: un glosario de los términos que vas a ver por todos lados y guías cortas al grano. Contenido educativo — no es asesoramiento financiero.</div>
-
-    ${sectionTitleHTML('Guías', 'bulb')}
-    <div class="academy-guides">
-      ${ACADEMY_GUIDES.map(g => `
-        <details class="card academy-guide">
-          <summary class="academy-guide-head">
-            <span class="academy-guide-icon">${ICONS[g.icon] ?? ''}</span>
-            <span class="academy-guide-title">${esc(g.title)}</span>
-            <span class="academy-guide-chevron" aria-hidden="true">▾</span>
-          </summary>
-          <div class="academy-guide-body">
-            ${g.body}
-            ${g.goto ? `<div class="academy-guide-cta"><button class="port-add-btn academy-goto" data-goto-view="${esc(g.goto.view)}">${esc(g.goto.label)} ›</button></div>` : ''}
-          </div>
-        </details>`).join('')}
-    </div>
-
-    ${sectionTitleHTML('Glosario', 'news')}
-    <div class="academy-glossary">
-      ${ACADEMY_GLOSSARY.map(([term, def]) => `
-        <div class="card academy-term">
-          <div class="academy-term-name">${esc(term)}</div>
-          <div class="academy-term-def">${esc(def)}</div>
-        </div>`).join('')}
-    </div>
-
-    <div class="bt-disclaimer" style="margin-top:20px;">La Academia es material educativo general, no asesoramiento financiero ni impositivo. Cada inversión implica riesgo de pérdida; las decisiones son tuyas.</div>`;
-}
-
-function wireAcademyEvents() {
-  // Navegación a otras secciones desde las guías (el handler de data-goto-view
-  // del dashboard es local a esa vista, así que acá se cablea aparte).
-  els.report.querySelectorAll('[data-goto-view]').forEach(el => {
-    el.addEventListener('click', () => { state.view = el.dataset.gotoView; renderReport(); });
   });
 }
 
@@ -6778,51 +4421,23 @@ const RECO_TONE = {
   sell: { bg: 'oklch(0.30 0.12 23)', color: 'oklch(0.88 0.16 23)' },
 };
 
-/* Recomendación PROFESIONAL por posición: combina la acción (baseRecommendation)
- * con la convicción del motor, los factores que la sustentan (el "por qué"), los
- * niveles concretos del plan (distancia al stop y próximo objetivo) y una guía
- * de tamaño (cuánto operar) atada al tope del perfil de riesgo. Todo sale de
- * datos ya calculados por posición — no se inventa nada. */
 function portfolioRecommendation(r) {
   const reco = baseRecommendation(r);
-  if (!reco) return null;
-  const d = r.d;
-  const conv = positionConviction(r) || { score: null, verdict: null, factors: [] };
-  const profile = RISK_PROFILES[settingsState.riskProfile] ?? RISK_PROFILES.moderado;
-  const cap = profile.maxPositionPct;
-  const weightPct = r.weight != null ? r.weight * 100 : null;
-
-  // Factores ("por qué"): score + señales técnicas (estructura/momentum/RSI/
-  // stop/alerta, de la convicción) + P&L no realizado + peso vs. tope.
-  const factors = [];
-  if (d?.score != null) factors.push({ good: d.score >= 55, label: `Score ${d.score}` });
-  for (const f of conv.factors) factors.push({ good: f.good, label: f.t });
-  if (r.gainPct != null) factors.push({ good: r.gainPct >= 0, label: `${r.gainPct >= 0 ? '+' : ''}${(r.gainPct * 100).toFixed(1)}% s/costo` });
-  if (weightPct != null) factors.push({ good: weightPct < cap, label: `Peso ${weightPct.toFixed(1)}%${weightPct >= cap ? ` (≥ tope ${cap}%)` : ''}` });
-
-  // Niveles concretos del plan operativo, en % (moneda-agnóstico): qué tan lejos
-  // está el precio del stop y cuánto falta hasta el próximo objetivo.
-  const pr = d?.planRaw;
-  let levels = null;
-  if (pr && d?.price > 0) {
-    const distStop = pr.stopLoss != null ? ((d.price - pr.stopLoss) / d.price) * 100 : null;
-    const targets = [pr.tp1, pr.tp2, pr.tp3].filter(x => x != null && x > d.price);
-    const targetUp = targets.length ? ((Math.min(...targets) - d.price) / d.price) * 100 : null;
-    if (distStop != null || targetUp != null) levels = { distStop, targetUp };
+  // El perfil de riesgo (Configuración) fija un tope real de peso por
+  // posición — se compara contra r.weight, el peso REAL que ya tiene esa
+  // tenencia en la cartera cargada, no un número inventado. Solo aplica
+  // cuando el análisis técnico sugiere sumar (tone 'buy'): frena o confirma
+  // esa sugerencia según cuánto margen quede hasta el tope del perfil.
+  if (reco && reco.tone === 'buy' && r.weight != null) {
+    const profile = RISK_PROFILES[settingsState.riskProfile] ?? RISK_PROFILES.moderado;
+    const capPct = profile.maxPositionPct;
+    const weightPct = r.weight * 100;
+    if (weightPct >= capPct) {
+      return { ...reco, detail: `${reco.detail} Ojo: esta posición ya pesa ${weightPct.toFixed(1)}% de tu cartera, en o por encima del tope de ${capPct}% de tu perfil ${profile.label} — el análisis técnico sugiere sumar, pero tu perfil sugiere no concentrar más acá.` };
+    }
+    return { ...reco, detail: `${reco.detail} Tu perfil ${profile.label} sugiere un tope de ${capPct}% por posición — hoy pesa ${weightPct.toFixed(1)}%, con margen para sumar hasta ${(capPct - weightPct).toFixed(1)} puntos porcentuales más.` };
   }
-
-  // Sizing: cuánto operar, según el tono y el tope del perfil.
-  let sizing = null;
-  const unit = r.costCurrency === 'ARS' ? 'CEDEARs' : 'papeles';
-  if (reco.tone === 'sell' && r.shares) sizing = `Salida: cerrar la posición (${r.shares} ${unit}), o al menos la mitad para dar margen.`;
-  else if (reco.tone === 'reduce' && r.shares) sizing = `Reducción: tomar ~1/3 (${Math.max(1, Math.round(r.shares / 3))} ${unit}) y dejar correr el resto con stop ajustado.`;
-  else if (reco.tone === 'buy' && weightPct != null) {
-    sizing = weightPct >= cap
-      ? `Tu perfil ${profile.label} ya está en el tope de ${cap}% acá (pesa ${weightPct.toFixed(1)}%) — no concentrar más.`
-      : `Margen para sumar hasta ${(cap - weightPct).toFixed(1)} pp más antes del tope de ${cap}% (perfil ${profile.label}).`;
-  }
-
-  return { ...reco, conviction: { score: conv.score, verdict: conv.verdict }, factors: factors.slice(0, 6), levels, sizing };
+  return reco;
 }
 
 function baseRecommendation(r) {
@@ -6901,45 +4516,79 @@ function getPortOps() {
 }
 function logPortOp(op) {
   const list = getPortOps();
-  list.unshift({ ...op, ts: Date.now() });
+  list.unshift({ ...op, ts: Date.now(), id: op.id ?? (Date.now() + '-' + Math.random().toString(36).slice(2, 7)) });
   lsSetSafe(PORT_OPS_KEY, JSON.stringify(list.slice(0, PORT_OPS_MAX)));
 }
+function deletePortOp(id) {
+  const list = getPortOps().filter(o => String(o.id ?? o.ts) !== String(id));
+  lsSetSafe(PORT_OPS_KEY, JSON.stringify(list));
+}
 
-/** P&L realizado (ventas registradas) vs. no realizado (posiciones abiertas),
- *  separado por moneda — nunca se suman pesos con dólares. */
+/** Libro de Operaciones: guarda TODAS las compras y ventas registradas y
+ *  muestra el resultado TOTAL real (realizado por ventas + no realizado de las
+ *  posiciones abiertas) — "cuánto realmente vas ganando con el tiempo".
+ *  Separado por moneda: nunca se suman pesos con dólares. */
 function opsCardHTML(stats) {
   const ops = getPortOps();
+  const fmtCur = (cur, n) => cur === 'ARS' ? fmtArs(n) : fmtUsd(n);
   const realized = { USD: 0, ARS: 0 };
+  const invested = { USD: 0, ARS: 0 };   // capital comprado (compras registradas)
+  const recovered = { USD: 0, ARS: 0 };  // recuperado por ventas registradas
   let realizedCount = 0;
   for (const op of ops) {
-    if (op.type === 'sell' && op.realized != null) { realized[op.currency === 'ARS' ? 'ARS' : 'USD'] += op.realized; realizedCount++; }
+    const cur = op.currency === 'ARS' ? 'ARS' : 'USD';
+    const amount = op.price != null ? op.price * op.shares : 0;
+    if (op.type === 'sell') { if (op.realized != null) { realized[cur] += op.realized; realizedCount++; } recovered[cur] += amount; }
+    else invested[cur] += amount;
   }
-  const fmtCur = (cur, n) => cur === 'ARS' ? fmtArs(n) : fmtUsd(n);
-  const recent = ops.slice(0, 8);
+  const unreal = { USD: stats?.totalGainUsd ?? null, ARS: stats?.totalGainArs ?? null };
+  const openCost = { USD: stats?.totalCostUsd ?? null, ARS: stats?.totalCostArs ?? null };
+  // Resultado total real por moneda = realizado + no realizado.
+  const totalResult = {
+    USD: (realizedCount || unreal.USD != null) ? (realized.USD + (unreal.USD ?? 0)) : null,
+    ARS: (realized.ARS || unreal.ARS != null) ? (realized.ARS + (unreal.ARS ?? 0)) : null,
+  };
+  const chip = (cur, n, denom) => n == null ? '' : `<span class="ledger-total-chip ${n >= 0 ? 'up' : 'down'}">${n >= 0 ? '+' : ''}${pv(fmtCur(cur, n))}${denom ? ` <small>(${fmtPct((n / denom) * 100)})</small>` : ''}</span>`;
+
+  // Filtro por ticker + export
+  const tickers = [...new Set(ops.map(o => o.ticker))].sort();
+  const filter = portState.opsFilter && tickers.includes(portState.opsFilter) ? portState.opsFilter : 'all';
+  const shown = filter === 'all' ? ops : ops.filter(o => o.ticker === filter);
+
   return `
-    <div class="card port-notes-card">
-      <div class="dash-radar-title">Operaciones y P&amp;L realizado</div>
-      <div class="port-ops-summary">
-        <div class="risk-metric">
-          <div class="risk-metric-label">Realizado (ventas registradas)</div>
-          <div class="risk-metric-value">${realizedCount ? [realized.USD ? `<span class="${realized.USD >= 0 ? 'up' : 'down'}">${realized.USD >= 0 ? '+' : ''}${pv(fmtUsd(realized.USD))}</span>` : '', realized.ARS ? `<span class="${realized.ARS >= 0 ? 'up' : 'down'}">${realized.ARS >= 0 ? '+' : ''}${pv(fmtArs(realized.ARS))}</span>` : ''].filter(Boolean).join(' · ') : 'Sin ventas registradas'}</div>
+    <div class="card port-notes-card ledger-card">
+      <div class="dash-radar-title">Libro de Operaciones</div>
+      <div class="mc-intro">Todo lo que compraste y vendiste, guardado en este navegador. El <strong>resultado total</strong> combina lo que ya cerraste (ventas) con lo que llevás ganado en las posiciones abiertas — cuánto vas ganando de verdad con el tiempo.</div>
+      <div class="ledger-totals">
+        <div class="ledger-total main">
+          <div class="ledger-total-label">Resultado total real ${infoTip('Realizado (ganancia/pérdida de tus ventas) + no realizado (lo que llevás ganado en las posiciones abiertas). Entre paréntesis, el retorno % sobre el costo de las posiciones abiertas.')}</div>
+          <div class="ledger-total-value">${[chip('USD', totalResult.USD, openCost.USD && openCost.USD > 0 ? openCost.USD : null), chip('ARS', totalResult.ARS, openCost.ARS && openCost.ARS > 0 ? openCost.ARS : null)].filter(Boolean).join(' ') || '<span class="port-ops-detail">Cargá costo de compra o registrá ventas para ver tu resultado.</span>'}</div>
         </div>
-        <div class="risk-metric">
-          <div class="risk-metric-label">No realizado (posiciones abiertas)</div>
-          <div class="risk-metric-value">${[stats?.totalGainUsd != null ? `<span class="${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${pv(fmtUsd(stats.totalGainUsd))}</span>` : '', stats?.totalGainArs != null ? `<span class="${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${pv(fmtArs(stats.totalGainArs))}</span>` : ''].filter(Boolean).join(' · ') || 'N/D (cargá costo promedio)'}</div>
+        <div class="ledger-total-sub">
+          <div><span class="ledger-sub-label">Realizado (ventas)</span> ${[chip('USD', realizedCount ? realized.USD : null), chip('ARS', realized.ARS ? realized.ARS : null)].filter(Boolean).join(' ') || '<span class="port-ops-detail">—</span>'}</div>
+          <div><span class="ledger-sub-label">No realizado (abierto)</span> ${[chip('USD', unreal.USD), chip('ARS', unreal.ARS)].filter(Boolean).join(' ') || '<span class="port-ops-detail">—</span>'}</div>
         </div>
       </div>
-      ${recent.length ? `
-      <div class="port-ops-list">
-        ${recent.map(op => `
-          <div class="port-ops-row">
-            <span class="port-ops-type ${op.type === 'sell' ? 'sell' : 'buy'}">${op.type === 'sell' ? 'VENTA' : 'COMPRA'}</span>
-            <span class="port-reco-ticker">${esc(op.ticker)}</span>
-            <span class="port-ops-detail">${op.shares} × ${op.price != null ? pv(fmtCur(op.currency, op.price)) : 's/precio'}</span>
-            <span class="port-ops-realized ${op.realized != null ? (op.realized >= 0 ? 'up' : 'down') : ''}">${op.realized != null ? `${op.realized >= 0 ? '+' : ''}${pv(fmtCur(op.currency, op.realized))}` : ''}</span>
-            <span class="alert-history-time">${esc(relativeTime(op.ts))}</span>
-          </div>`).join('')}
-      </div>` : `<div class="port-note" style="padding-top:8px;">Registrá una venta con el botón ⤓ de cada fila (o agregá posiciones nuevas con costo) para construir tu historial de operaciones y separar ganancia realizada de no realizada. Solo se guarda en este navegador.</div>`}
+      ${!ops.length ? `<div class="port-note" style="padding-top:8px;">Todavía no registraste operaciones. Usá el botón ＋ (comprar más) o ⤓ (vender) en cada fila de la tabla de tenencias — o agregá una posición nueva con costo. Se guarda solo en este navegador.</div>` : `
+        <div class="ledger-controls">
+          <select class="watch-select" id="ledger-filter" aria-label="Filtrar operaciones por activo">
+            <option value="all" ${filter === 'all' ? 'selected' : ''}>Todos los activos (${ops.length})</option>
+            ${tickers.map(t => `<option value="${esc(t)}" ${filter === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+          </select>
+          <button class="port-csv-btn" id="ledger-export">Exportar CSV</button>
+        </div>
+        <div class="ledger-list">
+          ${shown.map(op => `
+            <div class="ledger-row">
+              <span class="port-ops-type ${op.type === 'sell' ? 'sell' : 'buy'}">${op.type === 'sell' ? 'VENTA' : 'COMPRA'}</span>
+              <span class="port-reco-ticker">${esc(op.ticker)}</span>
+              <span class="ledger-detail">${op.shares} × ${op.price != null ? pv(fmtCur(op.currency, op.price)) : 's/precio'}${op.price != null ? ` = ${pv(fmtCur(op.currency, op.price * op.shares))}` : ''}</span>
+              <span class="port-ops-realized ${op.realized != null ? (op.realized >= 0 ? 'up' : 'down') : ''}">${op.realized != null ? `${op.realized >= 0 ? '+' : ''}${pv(fmtCur(op.currency, op.realized))}` : ''}</span>
+              <span class="alert-history-time">${esc(relativeTime(op.ts))}</span>
+              <button class="ledger-del" data-ledger-del="${esc(String(op.id ?? op.ts))}" title="Borrar esta operación" aria-label="Borrar operación">×</button>
+            </div>`).join('')}
+        </div>
+      `}
     </div>`;
 }
 
@@ -7660,34 +5309,19 @@ function portfolioTreemapSVG(rows) {
     <div class="card treemap-card">
       <div class="dash-radar-title">Mapa de la cartera <span class="risk-days-note">— tamaño = peso, color = P&amp;L</span></div>
       <svg class="treemap-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Treemap de la cartera">
-        <defs>
-          <linearGradient id="tmGloss" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="oklch(1 0 0)" stop-opacity="0.16"/>
-            <stop offset="42%" stop-color="oklch(1 0 0)" stop-opacity="0.03"/>
-            <stop offset="100%" stop-color="oklch(0 0 0)" stop-opacity="0.14"/>
-          </linearGradient>
-        </defs>
         ${rects.map(({ r, x, y, w, h }) => {
           const big = w > 90 && h > 46;
           const mid = w > 56 && h > 30;
-          const rx = (x + GAP / 2).toFixed(1), ry = (y + GAP / 2).toFixed(1);
-          const rw = Math.max(1, w - GAP).toFixed(1), rh = Math.max(1, h - GAP).toFixed(1);
           return `
-          <g class="treemap-cell">
-            <rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" rx="7" fill="${fillFor(r.gainPct)}" stroke="oklch(0.22 0.02 262)" stroke-width="1">
+          <g>
+            <rect x="${(x + GAP / 2).toFixed(1)}" y="${(y + GAP / 2).toFixed(1)}" width="${Math.max(1, w - GAP).toFixed(1)}" height="${Math.max(1, h - GAP).toFixed(1)}" rx="6" fill="${fillFor(r.gainPct)}" stroke="oklch(0.22 0.02 262)" stroke-width="1">
               <title>${esc(r.ticker)} — ${Math.round((r.weight ?? 0) * 100)}% de la cartera${portState.privacy ? '' : ` · ${fmtUsd(r.value)}`}${r.gainPct != null ? ` · P&L ${fmtPct(r.gainPct * 100)}` : ''}</title>
             </rect>
-            <rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" rx="7" fill="url(#tmGloss)" stroke="oklch(1 0 0 / 0.08)" stroke-width="1" pointer-events="none"/>
-            ${mid ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + (big ? -8 : 4)).toFixed(1)}" text-anchor="middle" class="treemap-ticker" pointer-events="none">${esc(r.ticker)}</text>` : ''}
-            ${big ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + 12).toFixed(1)}" text-anchor="middle" class="treemap-sub" pointer-events="none">${Math.round((r.weight ?? 0) * 100)}%${r.gainPct != null ? ` · ${fmtPct(r.gainPct * 100)}` : ''}</text>` : ''}
+            ${mid ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + (big ? -8 : 4)).toFixed(1)}" text-anchor="middle" class="treemap-ticker">${esc(r.ticker)}</text>` : ''}
+            ${big ? `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + 12).toFixed(1)}" text-anchor="middle" class="treemap-sub">${Math.round((r.weight ?? 0) * 100)}%${r.gainPct != null ? ` · ${fmtPct(r.gainPct * 100)}` : ''}</text>` : ''}
           </g>`;
         }).join('')}
       </svg>
-      <div class="treemap-legend">
-        <span class="tml-label down">Pérdida</span>
-        <span class="tml-scale"></span>
-        <span class="tml-label up">Ganancia</span>
-      </div>
     </div>`;
 }
 
@@ -7701,7 +5335,6 @@ function portfolioTreemapSVG(rows) {
  * ─────────────────────────────────────────────────────────────────────────── */
 
 const PORT_TABS = [
-  { key: 'hoy', label: 'Mi Día', icon: 'target' },
   { key: 'resumen', label: 'Resumen', icon: 'grid' },
   { key: 'riesgo', label: 'Riesgo & Proyección', icon: 'trend' },
   { key: 'operar', label: 'Operar', icon: 'shuffle' },
@@ -8311,515 +5944,6 @@ function corrMatrixCardHTML(risk) {
     </div>`;
 }
 
-/* Resumen didáctico "en criollo": lo que pusiste, lo que tenés hoy, cuánto
- * ganás/perdés en total y en el día — todo en pesos, con lenguaje simple. */
-function portfolioDidacticSummary(stats) {
-  const ccl = portState.ccl?.value ?? portState.macro?.dolares?.ccl ?? null;
-  // Plata invertida = COSTO total de tus compras (lo que gastaste comprando).
-  // Así las tarjetas cierran: Pusiste = Plata invertida + Disponible. La
-  // ganancia/pérdida se mide aparte (valor actual − costo).
-  let costBasis = null;
-  if (stats.totalCostArs != null || stats.totalCostUsd != null) {
-    costBasis = (stats.totalCostArs || 0) + (stats.totalCostUsd != null && ccl ? stats.totalCostUsd * ccl : 0);
-    if (costBasis <= 0) costBasis = null;
-  }
-  const investedNow = costBasis; // "Plata invertida" = costo de las compras
-  const currentValue = stats.totalValueArs; // valor de mercado actual (Tenencias total)
-  const declared = portState.investedArs; // lo que el usuario depositó en la cuenta
-  const available = (declared != null && costBasis != null) ? declared - costBasis : null; // efectivo sin invertir
-  const gainArs = (currentValue != null && costBasis != null) ? currentValue - costBasis : null; // P&L sobre lo invertido
-  const gainPct = (gainArs != null && costBasis > 0) ? (gainArs / costBasis) * 100 : null;
-  let dayArs = null, prevArs = 0, hasDay = false;
-  for (const r of stats.rows) {
-    if (r.valueArs != null && r.d?.changePct != null) {
-      const prev = r.valueArs / (1 + r.d.changePct / 100);
-      prevArs += prev; dayArs = (dayArs || 0) + (r.valueArs - prev); hasDay = true;
-    }
-  }
-  const dayPct = hasDay && prevArs > 0 ? (dayArs / prevArs) * 100 : null;
-  return { ccl, investedNow, currentValue, declared, costBasis, available, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct };
-}
-
-/* Rendimiento del basket por período (Hoy/Semana/Mes/Año/Total), a partir de la
- * curva de valor histórica (asume las cantidades actuales sostenidas). */
-function portfolioPeriodReturns(stats, dayPct) {
-  const eq = portfolioEquityCurve(stats);
-  const s = eq?.series;
-  const ret = (n) => (s && s.length > n && s[s.length - 1 - n] > 0) ? (s[s.length - 1] / s[s.length - 1 - n] - 1) * 100 : null;
-  return [
-    { k: 'Hoy', v: dayPct },
-    { k: 'Semana', v: ret(5) },
-    { k: 'Mes', v: ret(21) },
-    { k: 'Año', v: ret(252) },
-    { k: 'Total', v: eq ? eq.changePct : null },
-  ];
-}
-
-/* Veredicto "en criollo": ¿tu cartera le ganó a la inflación, al dólar y al
- * plazo fijo? Reusa lo ya calculado (IPC real por posición, CCL histórico). */
-function portfolioBenchmarkVerdict(stats) {
-  const hist = portState.cclHistory?.items;
-  const cclNow = portState.ccl?.value ?? (hist?.length ? hist[hist.length - 1].venta : null);
-  let usdNum = 0, usdDen = 0, inflNum = 0, inflDen = 0;
-  for (const r of stats.rows) {
-    if (r.gainPct == null) continue;
-    if (hist && cclNow && r.purchaseDate) {
-      const cclThen = cclAtDate(hist, r.purchaseDate);
-      if (cclThen) {
-        const cclReturn = cclNow / cclThen - 1;
-        const usdRet = r.costCurrency === 'ARS' ? (1 + r.gainPct) / (1 + cclReturn) - 1 : r.gainPct;
-        const costArs = r.costCurrency === 'ARS' ? r.avgCost * r.shares : r.avgCost * r.shares * cclNow;
-        usdNum += usdRet * costArs; usdDen += costArs;
-      }
-    }
-    if (r.realGainPct != null) { const costArs = r.avgCost * r.shares; inflNum += r.realGainPct * costArs; inflDen += costArs; }
-  }
-  const usdPct = usdDen > 0 ? (usdNum / usdDen) * 100 : null;
-  const realPct = inflDen > 0 ? (inflNum / inflDen) * 100 : null;
-  if (usdPct == null && realPct == null) return null;
-  return { usdPct, realPct };
-}
-
-/* ═══════════════════ ROTACIÓN SECTORIAL INTELIGENTE ════════════════════════
- * Detecta si la cartera está sobre-cargada en un sector, mide si ese sector
- * viene "corrido" (RSI alto, cerca de máximos de 52 semanas, mucho run-up, muy
- * por encima de la EMA200) y busca en el universo curado un destino de rotación:
- * un papel de OTRO sector, con buen score, golpeado (lejos de su máximo o cerca
- * de soporte), con baja correlación de retornos contra tu sector cargado y —
- * cuando hay dato— barato por fundamentales (P/E vs. su sector). Todo con datos
- * ya calculados; nada se inventa. No es una orden: es una idea para analizar. */
-const ROTATION_CONC_THRESHOLD = 0.35; // ≥35% del valor en un sector = "cargado"
-
-function sectorStretchProfile(rows) {
-  if (!rows.length) return { stretchScore: 0, reasons: [], avgRsi: null };
-  let rsiSum = 0, rsiN = 0, nearHigh = 0, runupSum = 0, runupN = 0, aboveSum = 0, aboveN = 0;
-  for (const r of rows) {
-    const c = r.d.closes, n = c.length, price = c[n - 1];
-    if (r.d.rsi != null) { rsiSum += r.d.rsi; rsiN++; }
-    const hi = Math.max(...c.slice(-252));
-    if (hi > 0 && (price - hi) / hi > -0.05) nearHigh++;
-    if (n > 63) { runupSum += (price / c[n - 64] - 1) * 100; runupN++; }
-    const e = ema(c, 200); const e200 = e[e.length - 1];
-    if (e200 > 0) { aboveSum += (price / e200 - 1) * 100; aboveN++; }
-  }
-  const avgRsi = rsiN ? rsiSum / rsiN : null;
-  const nearHighShare = nearHigh / rows.length;
-  const avgRunup = runupN ? runupSum / runupN : null;
-  const avgAbove = aboveN ? aboveSum / aboveN : null;
-  const reasons = [];
-  if (avgRsi != null && avgRsi >= 65) reasons.push(`RSI promedio ${avgRsi.toFixed(0)} — sobrecomprado`);
-  if (nearHighShare >= 0.5) reasons.push(`${nearHigh} de ${rows.length} ${rows.length === 1 ? 'está' : 'están'} cerca de máximos de 52 semanas`);
-  if (avgRunup != null && avgRunup >= 15) reasons.push(`subió ~${avgRunup.toFixed(0)}% en 3 meses`);
-  if (avgAbove != null && avgAbove >= 12) reasons.push(`cotiza ~${avgAbove.toFixed(0)}% arriba de su promedio de 200 días`);
-  let stretch = 0;
-  if (avgRsi != null) stretch += Math.max(0, Math.min(35, (avgRsi - 50) * 1.75));
-  stretch += nearHighShare * 30;
-  if (avgRunup != null) stretch += Math.max(0, Math.min(20, avgRunup));
-  if (avgAbove != null) stretch += Math.max(0, Math.min(15, avgAbove));
-  return { stretchScore: Math.round(Math.min(100, stretch)), reasons, avgRsi, nearHighShare, avgRunup };
-}
-
-function aggregateSectorReturns(rows) {
-  const w = rows.filter(r => r.d?.closes?.length >= 60);
-  if (!w.length) return null;
-  const minLen = Math.min(...w.map(r => r.d.closes.length));
-  const agg = new Array(minLen).fill(0);
-  for (const r of w) {
-    const c = r.d.closes.slice(-minLen), base = c[0] || 1, val = r.value ?? 1;
-    for (let i = 0; i < minLen; i++) agg[i] += (c[i] / base) * val;
-  }
-  const rets = [];
-  for (let i = 1; i < agg.length; i++) rets.push(agg[i] / agg[i - 1] - 1);
-  return rets;
-}
-
-function candidateMetrics(d, owReturns) {
-  const c = d.closes, n = c.length, price = c[n - 1];
-  const hi = Math.max(...c.slice(-252));
-  const pctFromHigh = hi > 0 ? (price - hi) / hi * 100 : 0; // negativo = debajo del máximo
-  let correlation = null;
-  if (owReturns?.length) {
-    const rets = [];
-    for (let i = 1; i < n; i++) rets.push(c[i] / c[i - 1] - 1);
-    const k = Math.min(rets.length, owReturns.length);
-    if (k >= 30) correlation = pearsonCorr(rets.slice(-k), owReturns.slice(-k));
-  }
-  const supportRef = d.planRaw?.supportRef ?? d.alert?.support ?? null;
-  const nearSupport = supportRef && price > 0 ? (price - supportRef) / price < 0.06 : false;
-  return { score: d.score, sector: d.sector, name: d.name, rsi: d.rsi, price, pctFromHigh, correlation, nearSupport };
-}
-
-function candidateOpportunityScore(m) {
-  let s = (m.score - 50) * 0.8;                             // señal compuesta
-  s += Math.max(0, Math.min(25, -m.pctFromHigh - 8));        // golpeado: >8% debajo del máximo suma
-  if (m.rsi != null) s += Math.max(0, Math.min(15, (55 - m.rsi) * 0.8)); // no caro
-  if (m.rsi != null && m.rsi < 25) s -= 10;                  // demasiado roto: cautela
-  if (m.nearSupport) s += 12;                                // cerca de piso técnico
-  if (m.correlation != null) s += (1 - m.correlation) * 18;  // baja correlación con tu sector cargado
-  if (m.sectorWeight === 0) s += 8;                          // sector ausente en tu cartera
-  return s;
-}
-
-async function computeSectorRotation(stats) {
-  const top = stats.sectorRows?.[0];
-  if (!top || top.pct < ROTATION_CONC_THRESHOLD) return { concentrated: false, topSector: top?.sector ?? null, topPct: top?.pct ?? null };
-  const owSector = top.sector;
-  const owRows = stats.rows.filter(r => r.d?.sector === owSector && r.d?.closes?.length >= 120);
-  const prof = sectorStretchProfile(owRows);
-  const owReturns = aggregateSectorReturns(owRows);
-  const held = new Set(stats.rows.map(r => r.ticker));
-  const portSectorPct = {}; for (const s of stats.sectorRows) portSectorPct[s.sector] = s.pct;
-  const candidates = [];
-  for (const [ticker, d] of Object.entries(dashState.data || {})) {
-    if (!d || held.has(ticker) || !d.closes?.length || d.score == null || !d.sector) continue;
-    if (d.sector === owSector) continue;
-    const m = candidateMetrics(d, owReturns);
-    if (m.score < 50) continue;
-    m.sectorWeight = portSectorPct[d.sector] ?? 0;
-    m.opp = candidateOpportunityScore(m);
-    candidates.push({ ticker, d, ...m });
-  }
-  candidates.sort((a, b) => b.opp - a.opp);
-  const picks = candidates.slice(0, 3);
-  await Promise.all(picks.map(async (c) => {
-    try {
-      const f = await getFundamentals(c.ticker);
-      if (f?.peTTM != null && f.peTTM > 0) { c.peTTM = f.peTTM; const range = SECTOR_PE_RANGE[c.sector]; c.cheap = range ? f.peTTM < range[0] : f.peTTM < 15; }
-      if (f?.revenueGrowth != null) c.revenueGrowth = f.revenueGrowth;
-    } catch (_) { /* best-effort */ }
-  }));
-  return { concentrated: true, stretched: prof.stretchScore >= 45, overweight: { sector: owSector, pct: top.pct, ...prof }, targets: picks.slice(0, 2) };
-}
-
-async function maybeComputeRotation(holdings) {
-  if (!holdings.length) { portState.rotation = { concentrated: false }; portState.rotationKey = 'empty'; return; }
-  if (!holdings.every(h => portState.data[h.ticker])) return; // faltan señales
-  const universeN = Object.keys(dashState.data || {}).length;
-  const key = holdings.map(h => `${h.ticker}:${h.shares}`).join(',') + '|u' + (universeN >= 20 ? 'ok' : universeN);
-  if (portState.rotationKey === key && portState.rotation !== undefined) return;
-  try {
-    const rot = await computeSectorRotation(computePortfolioStats(holdings));
-    portState.rotation = rot; portState.rotationKey = key;
-    if (!state.asset && state.view === 'portfolio') renderReport();
-  } catch (e) { console.warn('[rotation] no se pudo computar', e.message); }
-}
-
-function sectorRotationCardHTML(stats) {
-  const rot = portState.rotation;
-  if (rot === undefined || !rot.concentrated) return '';
-  const ow = rot.overweight;
-  const why = ow.reasons.length
-    ? `Ese sector viene <b>corrido</b>: ${ow.reasons.join('; ')}.`
-    : `No está técnicamente sobre-extendido, pero tener tanto en un solo sector ya es un riesgo de concentración.`;
-  // ── Dimensionar la rotación en pesos (#6) ──
-  const targetPct = ow.pct > 0.40 ? 0.40 : 0.35; // objetivo de concentración del sector
-  const rotatePct = Math.max(0, ow.pct - targetPct);
-  const totalArs = stats?.totalValueArs ?? null;
-  const rotateArs = totalArs != null ? rotatePct * totalArs : null;
-  const topTk = rot.targets?.[0]?.ticker;
-  const sizing = (rotateArs != null && rotateArs > 0)
-    ? `<div class="rot-size">💸 Para bajar <b>${esc(ow.sector)}</b> de <b>${Math.round(ow.pct * 100)}%</b> a <b>${Math.round(targetPct * 100)}%</b>, rotá <b>~${pv(fmtArs(rotateArs))}</b>${topTk ? ` — por ejemplo, vendé esa parte y poné ~${pv(fmtArs(rotateArs))} en <b>${esc(topTk)}</b>` : ''}.</div>`
-    : '';
-  const targetCard = (t) => {
-    const bits = [];
-    if (t.pctFromHigh <= -8) bits.push(`golpeado (${t.pctFromHigh.toFixed(0)}% de su máximo de 52 semanas)`);
-    else bits.push('con recorrido por delante');
-    if (t.nearSupport) bits.push('cerca de un soporte técnico');
-    if (t.correlation != null) bits.push(`baja correlación (${t.correlation.toFixed(2)}) con tu ${esc(ow.sector)}`);
-    if (t.peTTM != null) bits.push(t.cheap ? `barata para su sector (P/E ${t.peTTM.toFixed(0)})` : `P/E ${t.peTTM.toFixed(0)}`);
-    if (t.revenueGrowth != null && t.revenueGrowth >= 8) bits.push(`ingresos creciendo ${t.revenueGrowth.toFixed(0)}%/año`);
-    return `<div class="rot-target" data-port-ticker="${esc(t.ticker)}" title="Ver análisis de ${esc(t.ticker)}">
-      <div class="rot-target-head">
-        <span class="rot-target-tk">${esc(t.ticker)}</span>
-        <span class="rot-target-sector">${esc(t.sector)}</span>
-        <span class="rot-target-score">score ${t.d.score}</span>
-      </div>
-      <div class="rot-target-why">${bits.map(b => `<span>${esc(b)}</span>`).join('')}</div>
-    </div>`;
-  };
-  return `
-    ${sectionTitleHTML('Idea de rotación sectorial', 'shuffle')}
-    <div class="card rot-card">
-      <div class="rot-diag"><span class="rot-pct">${Math.round(ow.pct * 100)}%</span> de tu cartera está en <b>${esc(ow.sector)}</b>. ${why}</div>
-      ${sizing}
-      ${rot.targets.length ? `
-        <div class="rot-sub">${rot.stretched ? '💡 Considerá <b>rotar una parte</b> hacia algo más barato y menos correlacionado:' : 'Si querés bajar la concentración, mirá:'}</div>
-        ${rot.targets.map(targetCard).join('')}
-      ` : `<div class="rot-empty">No encontré un buen destino de rotación en el universo curado ahora mismo.</div>`}
-      <div class="rot-foot">Regla determinística sobre datos reales: peso por sector, RSI, distancia a máximos y a soporte, correlación de retornos y P/E vs. su sector. Es una idea para analizar —abrí la ficha de cada candidato—, no una orden ni asesoramiento financiero.</div>
-    </div>`;
-}
-
-/* ═══════════════════ PLAN DE TOMA DE GANANCIAS (#12) ════════════════════════
- * Para cada tenencia que ya está en ganancia, propone objetivos escalonados
- * (por resistencia/ATR del Plan Operativo) y un stop de protección tipo
- * chandelier (trailing) — la idea de "asegurar una parte sin cortar la corrida".
- * Todo en USD del subyacente, sobre datos ya calculados por posición. */
-function profitTakingCardHTML(stats) {
-  const rows = [];
-  for (const r of stats.rows) {
-    if (r.gainPct == null || r.gainPct < 0.12) continue; // solo posiciones con ganancia relevante (≥12%)
-    const pr = r.d?.planRaw, price = r.d?.price;
-    if (!pr || !(price > 0) || pr.tp1 == null || pr.tp1 <= price) continue;
-    const up = (v) => ((v - price) / price) * 100;
-    const trail = pr.chandelierStop != null && pr.chandelierStop < price ? pr.chandelierStop : null;
-    rows.push({ ticker: r.ticker, gainPct: r.gainPct, price, tp1: pr.tp1, tp2: pr.tp2, tp3: pr.tp3, trail });
-  }
-  if (!rows.length) return '';
-  rows.sort((a, b) => b.gainPct - a.gainPct);
-  const up = (v, price) => ((v - price) / price) * 100;
-  const dn = (v, price) => ((price - v) / price) * 100;
-  const ptRow = (p) => `<div class="pt-row" data-port-ticker="${esc(p.ticker)}" title="Ver análisis de ${esc(p.ticker)}">
-    <div class="pt-row-head">
-      <span class="pt-tk">${esc(p.ticker)}</span>
-      <span class="pt-gain up">+${(p.gainPct * 100).toFixed(1)}%</span>
-      <span class="pt-price">${fmtUsd(p.price)}</span>
-    </div>
-    <div class="pt-levels">
-      <span class="pt-lv up">🎯 Obj 1 <b>${fmtUsd(p.tp1)}</b> <i>+${up(p.tp1, p.price).toFixed(1)}%</i></span>
-      ${p.tp2 != null ? `<span class="pt-lv up">🎯 Obj 2 <b>${fmtUsd(p.tp2)}</b> <i>+${up(p.tp2, p.price).toFixed(1)}%</i></span>` : ''}
-      ${p.trail != null ? `<span class="pt-lv down">🛡️ Stop protección <b>${fmtUsd(p.trail)}</b> <i>−${dn(p.trail, p.price).toFixed(1)}%</i></span>` : ''}
-    </div>
-    <div class="pt-advice">Tomá ~⅓ en el Objetivo 1, ⅓ en el Objetivo 2 y dejá correr el resto${p.trail != null ? ' subiendo el stop de protección' : ' con un stop ajustado'}.</div>
-  </div>`;
-  return `
-    ${sectionTitleHTML('Plan de toma de ganancias', 'target')}
-    <div class="card pt-card">
-      <div class="pt-intro">Tus posiciones <b>en ganancia</b> y cómo asegurar una parte sin cortar la corrida: objetivos escalonados y un stop de protección (trailing) por activo.</div>
-      ${rows.map(ptRow).join('')}
-      <div class="pt-foot">Objetivos por resistencia/ATR y stop tipo chandelier, en USD del subyacente. Regla determinística sobre el Plan Operativo de cada posición — no es una orden ni asesoramiento financiero.</div>
-    </div>`;
-}
-
-/* ═══════════════════ "MI DÍA" — cockpit personalizado de la cartera ═════════
- * Una sola pantalla que responde "¿qué pasó hoy con lo mío y qué tengo que
- * mirar?": P&L del día, tus mayores movimientos, alertas activas en tus activos,
- * el rendimiento de la cartera vs. el mercado (S&P/CCL) y los próximos
- * catalizadores (balances + ex-dividends). Todo sobre datos ya cargados. */
-function portfolioTodayHTML(stats) {
-  const s = portfolioDidacticSummary(stats);
-  const dc = s.dayArs == null ? '' : s.dayArs >= 0 ? 'up' : 'down';
-
-  // ── Tus movimientos de hoy (mayor variación absoluta primero) ──
-  const movers = stats.rows
-    .filter(r => r.d?.changePct != null && r.valueArs != null)
-    .map(r => { const prev = r.valueArs / (1 + r.d.changePct / 100); return { ticker: r.ticker, name: r.d.name, pct: r.d.changePct, dayArs: r.valueArs - prev }; })
-    .sort((a, b) => Math.abs(b.dayArs) - Math.abs(a.dayArs))
-    .slice(0, 6);
-  const moverRow = (m) => `<div class="today-mover" data-port-ticker="${esc(m.ticker)}">
-      <span class="today-mover-tk">${esc(m.ticker)}</span>
-      <span class="today-mover-pct ${m.pct >= 0 ? 'up' : 'down'}">${m.pct >= 0 ? '▲' : '▼'} ${Math.abs(m.pct).toFixed(1)}%</span>
-      <span class="today-mover-ars ${m.dayArs >= 0 ? 'up' : 'down'}">${m.dayArs >= 0 ? '+' : ''}${pv(fmtArs(m.dayArs))}</span>
-    </div>`;
-
-  // ── Alertas activas en tus activos ──
-  const alerted = stats.rows.filter(r => r.d?.alert).map(r => ({ ticker: r.ticker, a: r.d.alert }));
-  const alertRow = ({ ticker, a }) => {
-    const meta = ALERT_META[a.type];
-    return `<div class="today-alert" data-port-ticker="${esc(ticker)}">
-      <span class="today-alert-tk">${esc(ticker)}</span>
-      <span class="today-alert-badge" style="color:${meta?.color};">⚡ ${esc(meta?.label ?? a.type)}${a.pending ? ' <i>(tentativa)</i>' : ''}${a.grade ? ` · ${a.grade}` : ''}</span>
-    </div>`;
-  };
-
-  // ── Rendimiento vs. mercado (curva normalizada) ──
-  const eq = portfolioEquityCurve(stats);
-  const chartSeries = [];
-  if (eq?.series?.length >= 2) {
-    chartSeries.push({ ticker: 'Tu cartera', closes: eq.series });
-    if (portState.spy?.length >= 2) chartSeries.push({ ticker: 'S&P 500', closes: portState.spy });
-    const ccl = portState.cclHistory?.items?.map(x => x.venta ?? x.value).filter(v => v != null);
-    if (ccl?.length >= 2) chartSeries.push({ ticker: 'Dólar CCL', closes: ccl });
-  }
-  const verdict = portfolioBenchmarkVerdict(stats);
-  const vLine = (ok, label) => `<span class="today-vd ${ok ? 'good' : 'bad'}">${ok ? '✓' : '✗'} ${label}</span>`;
-  const verdictChips = verdict ? [
-    verdict.usdPct != null ? vLine(verdict.usdPct >= 0, `${verdict.usdPct >= 0 ? 'Le ganás' : 'Perdés'} al dólar (${verdict.usdPct >= 0 ? '+' : ''}${verdict.usdPct.toFixed(1)}% en USD)`) : '',
-    verdict.realPct != null ? vLine(verdict.realPct >= 0, `${verdict.realPct >= 0 ? 'Le ganás' : 'Perdés'} a la inflación (${verdict.realPct >= 0 ? '+' : ''}${verdict.realPct.toFixed(1)}% real)`) : '',
-    verdict.realPct != null ? vLine(verdict.realPct >= 0, `${verdict.realPct >= 0 ? 'Superás' : 'No superás'} al plazo fijo`) : '',
-  ].filter(Boolean).join('') : '';
-
-  // ── Próximos catalizadores (balances + ex-dividends, ≤90 días) ──
-  const cats = [];
-  for (const r of stats.rows) {
-    const earn = portState.earnings?.[r.ticker];
-    if (earn?.nextDate) { const d = daysUntil(earn.nextDate); if (d != null && d >= 0 && d <= 90) cats.push({ ticker: r.ticker, type: 'earnings', date: earn.nextDate, days: d }); }
-    const div = portState.dividends?.[r.ticker];
-    if (div?.nextExDate) { const d = daysUntil(div.nextExDate); if (d != null && d >= 0 && d <= 90) cats.push({ ticker: r.ticker, type: 'exdiv', date: div.nextExDate, days: d, amount: div.lastAmount }); }
-  }
-  cats.sort((a, b) => a.days - b.days);
-  const catRow = (c) => {
-    const when = c.days === 0 ? 'hoy' : c.days === 1 ? 'mañana' : `en ${c.days} días`;
-    const isEarn = c.type === 'earnings';
-    return `<div class="today-cat" data-port-ticker="${esc(c.ticker)}">
-      <span class="today-cat-icon">${isEarn ? '📊' : '💰'}</span>
-      <span class="today-cat-tk">${esc(c.ticker)}</span>
-      <span class="today-cat-what">${isEarn ? 'Balance trimestral' : `Ex-dividend${c.amount != null ? ` · ${fmtUsd(c.amount)}` : ''}`}</span>
-      <span class="today-cat-when ${c.days <= 3 ? 'soon' : ''}">${when}</span>
-    </div>`;
-  };
-
-  const dayPctTxt = s.dayPct != null ? `${s.dayPct >= 0 ? '+' : ''}${s.dayPct.toFixed(2)}%` : '—';
-  return `
-    <div class="card today-hero ${dc}">
-      <div class="today-hero-main">
-        <div class="today-hero-k">Tu cartera hoy</div>
-        <div class="today-hero-v ${dc}">${s.dayArs != null ? `${s.dayArs >= 0 ? '+' : ''}${pv(fmtArs(s.dayArs))}` : '—'}</div>
-        <div class="today-hero-sub ${dc}">${dayPctTxt} en el día · valor total ${pv(fmtUsd(stats.totalValue))}${stats.totalValueArs != null ? ` · ${pv(fmtArs(stats.totalValueArs))}` : ''}</div>
-      </div>
-      <div class="today-hero-side">
-        <div class="today-hero-tot ${s.gainArs == null ? '' : s.gainArs >= 0 ? 'up' : 'down'}">
-          <span>Ganancia total</span>
-          <b>${s.gainArs != null ? `${s.gainArs >= 0 ? '+' : ''}${pv(fmtArs(s.gainArs))}` : '—'}${s.gainPct != null ? ` (${s.gainPct >= 0 ? '+' : ''}${s.gainPct.toFixed(1)}%)` : ''}</b>
-        </div>
-      </div>
-    </div>
-
-    <div class="today-grid">
-      <div class="card today-panel">
-        <div class="today-panel-title">📈 Tus movimientos de hoy</div>
-        ${movers.length ? movers.map(moverRow).join('') : '<div class="today-empty">Todavía sin cotizaciones del día.</div>'}
-      </div>
-      <div class="card today-panel">
-        <div class="today-panel-title">⚡ Alertas en tus activos</div>
-        ${alerted.length ? alerted.map(alertRow).join('') : '<div class="today-empty">Ningún activo tuyo tiene una alerta activa ahora — todo tranquilo.</div>'}
-      </div>
-    </div>
-
-    ${chartSeries.length >= 2 ? `
-    <div class="card today-chart-card">
-      <div class="today-panel-title">🏁 Tu cartera vs. el mercado</div>
-      <div class="today-chart-note">Valor de tu cartera comparado con el S&amp;P 500 y el dólar CCL, todo desde el inicio de la ventana (base 0%).</div>
-      <div class="today-chart">${renderCompareOverlaySVG(chartSeries, 180)}</div>
-      ${verdictChips ? `<div class="today-verdict">${verdictChips}</div>` : ''}
-    </div>` : verdictChips ? `<div class="card today-chart-card"><div class="today-panel-title">🏁 ¿Le ganás al mercado?</div><div class="today-verdict">${verdictChips}</div></div>` : ''}
-
-    <div class="card today-panel">
-      <div class="today-panel-title">🗓️ Próximos catalizadores de tu cartera</div>
-      <div class="today-chart-note">Balances y fechas de ex-dividend de tus tenencias en los próximos 90 días — para no comerte una fecha por sorpresa.</div>
-      ${cats.length ? cats.map(catRow).join('') : '<div class="today-empty">Sin balances ni ex-dividends próximos en tus activos (o todavía sin datos de fechas).</div>'}
-    </div>
-    <div class="pdx-foot">Todo calculado sobre tus tenencias reales y las últimas cotizaciones. El P&amp;L del día asume las cantidades actuales. No es asesoramiento financiero.</div>`;
-}
-
-function portfolioDidacticHTML(stats) {
-  const s = portfolioDidacticSummary(stats);
-  const gc = s.gainArs == null ? '' : s.gainArs >= 0 ? 'up' : 'down';
-  const dc = s.dayArs == null ? '' : s.dayArs >= 0 ? 'up' : 'down';
-  const gword = s.gainArs == null ? 'Ganancias / Pérdidas' : s.gainArs >= 0 ? 'Ganás en total' : 'Perdés en total';
-  const avClass = s.available == null ? '' : s.available < 0 ? 'down' : '';
-  // Rendimiento por período
-  const periods = portfolioPeriodReturns(stats, s.dayPct);
-  const periodChips = periods.some(p => p.v != null) ? `
-    <div class="pdx-periods">${periods.map(p => `<div class="pdx-period ${p.v == null ? 'na' : p.v >= 0 ? 'up' : 'down'}"><span class="pdx-period-k">${p.k}</span><span class="pdx-period-v">${p.v == null ? '—' : `${p.v >= 0 ? '+' : ''}${p.v.toFixed(1)}%`}</span></div>`).join('')}</div>` : '';
-  // Veredicto vs inflación / dólar / plazo fijo
-  const bv = portfolioBenchmarkVerdict(stats);
-  const verdictLine = (ok, label, extra) => `<div class="pdx-vd ${ok ? 'good' : 'bad'}"><span class="pdx-vd-i">${ok ? '✓' : '✗'}</span><span>${label}${extra ? ` <b>${extra}</b>` : ''}</span></div>`;
-  let verdict = '';
-  if (bv) {
-    const parts = [];
-    if (bv.realPct != null) parts.push(verdictLine(bv.realPct >= 0, bv.realPct >= 0 ? 'Le ganaste a la inflación' : 'La inflación te ganó', `real ${bv.realPct >= 0 ? '+' : ''}${bv.realPct.toFixed(1)}%`));
-    if (bv.usdPct != null) parts.push(verdictLine(bv.usdPct >= 0, bv.usdPct >= 0 ? 'Le ganaste al dólar (CCL)' : 'El dólar te ganó', `en USD ${bv.usdPct >= 0 ? '+' : ''}${bv.usdPct.toFixed(1)}%`));
-    if (bv.realPct != null) parts.push(verdictLine(bv.realPct >= 0, bv.realPct >= 0 ? 'Mejor que un plazo fijo' : 'Un plazo fijo te habría cuidado más', bv.realPct >= 0 ? '(tu retorno real es positivo)' : '(tu retorno real es negativo)'));
-    verdict = `<div class="pdx-verdict"><div class="pdx-verdict-title">¿Le ganaste a…?</div>${parts.join('')}<div class="pdx-verdict-foot">Real = ajustado por inflación (IPC). Dólar = medido en CCL. El plazo fijo, históricamente, apenas empata la inflación — por eso se compara contra tu retorno real. Solo cuenta posiciones con fecha de compra.</div></div>`;
-  }
-  // Progreso hacia la meta (si está cargada, en USD)
-  let meta = '';
-  if (portState.goalUsd && stats.totalValue != null) {
-    const pct = Math.max(0, Math.min(100, (stats.totalValue / portState.goalUsd) * 100));
-    meta = `<div class="pdx-goal"><div class="pdx-goal-top"><span>🎯 Progreso hacia tu meta</span><b>${pct.toFixed(0)}%</b></div><div class="pdx-goal-bar"><i style="width:${pct}%;"></i></div><div class="pdx-goal-sub">${pv(fmtUsd(stats.totalValue))} de ${pv(fmtUsd(portState.goalUsd))} · te faltan ${pv(fmtUsd(Math.max(0, portState.goalUsd - stats.totalValue)))}</div></div>`;
-  }
-  // Atributos para el count-up: solo si hay número y NO estamos en modo privacidad
-  // (el valor crudo iría en el HTML y filtraría la cifra enmascarada).
-  const cu = (n, fmt) => (n != null && Number.isFinite(n) && !portState.privacy) ? ` data-countup="${n}" data-cfmt="${fmt}"` : '';
-  return `
-    <div class="card pdx-card">
-      <div class="pdx-head">
-        <div class="pdx-title">💡 Tu resumen, en criollo</div>
-        <label class="pdx-invested">¿Cuánto pusiste en tu cartera?<span class="pdx-inp"><span>AR$</span><input type="text" id="pdx-invested-input" inputmode="numeric" autocomplete="off" placeholder="ej. 1.000.000" value="${portState.investedArs != null ? Math.round(portState.investedArs).toLocaleString('es-AR') : ''}" /></span></label>
-      </div>
-      <div class="pdx-grid">
-        <div class="pdx-tile">
-          <div class="pdx-k">💰 Pusiste en tu cartera</div>
-          <div class="pdx-v"${cu(s.declared, 'ars')}>${s.declared != null ? pv(fmtArs(s.declared)) : '—'}</div>
-          <div class="pdx-sub">${s.declared != null ? 'lo que depositaste en la cuenta' : 'cargalo en el campo de arriba'}</div>
-        </div>
-        <div class="pdx-tile">
-          <div class="pdx-k">📈 Plata invertida</div>
-          <div class="pdx-v"${cu(s.investedNow, 'ars')}>${s.investedNow != null ? pv(fmtArs(s.investedNow)) : '—'}</div>
-          <div class="pdx-sub">${s.investedNow != null ? 'lo que gastaste comprando (costo de tus activos)' : 'cargá el costo de tus compras'}</div>
-        </div>
-        <div class="pdx-tile">
-          <div class="pdx-k">🏦 Disponible para invertir</div>
-          <div class="pdx-v ${avClass}"${cu(s.available, 'ars')}>${s.available != null ? pv(fmtArs(s.available)) : '—'}</div>
-          <div class="pdx-sub ${avClass}">${s.available == null ? 'poné lo que pusiste y el costo de tus compras' : s.available < 0 ? 'invertiste más de lo declarado — revisá' : 'depositado y todavía sin comprar'}</div>
-        </div>
-        <div class="pdx-tile pdx-hl ${gc}">
-          <div class="pdx-k">${s.gainArs == null ? '📊' : s.gainArs >= 0 ? '🟢' : '🔴'} ${gword}</div>
-          <div class="pdx-v ${gc}"${cu(s.gainArs, 'arsSigned')}>${s.gainArs != null ? `${s.gainArs >= 0 ? '+' : ''}${pv(fmtArs(s.gainArs))}` : '—'}</div>
-          <div class="pdx-sub ${gc}">${s.gainPct != null ? `${s.gainPct >= 0 ? '+' : ''}${s.gainPct.toFixed(1)}% sobre lo invertido` : 'cargá el costo de tus compras'}</div>
-        </div>
-        <div class="pdx-tile ${dc}">
-          <div class="pdx-k">${s.dayArs == null ? '📅' : s.dayArs >= 0 ? '⬆️' : '⬇️'} Hoy</div>
-          <div class="pdx-v ${dc}"${cu(s.dayArs, 'arsSigned')}>${s.dayArs != null ? `${s.dayArs >= 0 ? '+' : ''}${pv(fmtArs(s.dayArs))}` : '—'}</div>
-          <div class="pdx-sub ${dc}">${s.dayPct != null ? `${s.dayPct >= 0 ? '+' : ''}${s.dayPct.toFixed(1)}% en el día` : 'esperando cotizaciones'}</div>
-        </div>
-      </div>
-      ${periodChips}
-      ${verdict}
-      ${meta}
-      <div class="pdx-foot">Valores en pesos, a la última cotización real del CEDEAR${stats.arsEligibleCount < stats.rows.length ? ` · incluye ${stats.arsEligibleCount} de ${stats.rows.length} posiciones (las que tienen CEDEAR)` : ''}. La ganancia se mide sobre lo invertido (valor actual − costo de tus compras). El rendimiento por período asume las cantidades actuales sostenidas. No es asesoramiento financiero.</div>
-    </div>`;
-}
-
-/* Atribución de resultados: quién aporta a tu ganancia/pérdida, en pesos. */
-function portfolioAttributionHTML(stats) {
-  const ccl = portState.ccl?.value ?? portState.macro?.dolares?.ccl ?? null;
-  const rows = stats.rows.filter(r => r.gainAbs != null).map(r => ({
-    ticker: r.ticker, name: r.d?.name, sector: r.d?.sector, gainPct: r.gainPct,
-    gainArs: r.gainCurrency === 'ARS' ? r.gainAbs : (ccl ? r.gainAbs * ccl : null),
-  })).filter(x => x.gainArs != null);
-  if (!rows.length) return '';
-  const winners = rows.filter(r => r.gainArs > 0).sort((a, b) => b.gainArs - a.gainArs).slice(0, 5);
-  const losers = rows.filter(r => r.gainArs < 0).sort((a, b) => a.gainArs - b.gainArs).slice(0, 5);
-  const bySector = {};
-  for (const r of rows) { if (r.sector) bySector[r.sector] = (bySector[r.sector] || 0) + r.gainArs; }
-  const sectors = Object.entries(bySector).map(([sector, g]) => ({ sector, gainArs: g })).sort((a, b) => Math.abs(b.gainArs) - Math.abs(a.gainArs)).slice(0, 6);
-  // Escala común a ganadores y perdedores: la barra de cada fila mide su aporte
-  // relativo a la posición de mayor impacto (así se lee de un vistazo quién pesa).
-  const maxAbs = Math.max(...rows.map(r => Math.abs(r.gainArs)), 1);
-  const secMaxAbs = Math.max(...sectors.map(s => Math.abs(s.gainArs)), 1);
-  const row = (r) => {
-    const pctW = Math.max(4, Math.round((Math.abs(r.gainArs) / maxAbs) * 100));
-    const up = r.gainArs >= 0;
-    return `<div class="attr-row">
-      <span class="port-reco-ticker attr-tk" data-reco-ticker="${esc(r.ticker)}" title="${esc(r.name || r.ticker)}">${esc(r.ticker)}</span>
-      <span class="attr-bar-wrap"><span class="attr-bar ${up ? 'up' : 'down'}" style="width:${pctW}%;"></span></span>
-      <span class="attr-amt ${up ? 'up' : 'down'}">${up ? '+' : ''}${pv(fmtArs(r.gainArs))}</span>
-      ${r.gainPct != null ? `<span class="attr-pct ${r.gainPct >= 0 ? 'up' : 'down'}">${r.gainPct >= 0 ? '+' : ''}${(r.gainPct * 100).toFixed(1)}%</span>` : '<span class="attr-pct"></span>'}
-    </div>`;
-  };
-  const secRow = (sr) => {
-    const pctW = Math.max(4, Math.round((Math.abs(sr.gainArs) / secMaxAbs) * 100));
-    const up = sr.gainArs >= 0;
-    return `<div class="attr-sec-row">
-      <span class="attr-sec-name">${esc(sr.sector)}</span>
-      <span class="attr-bar-wrap sec"><span class="attr-bar ${up ? 'up' : 'down'}" style="width:${pctW}%;"></span></span>
-      <span class="attr-amt ${up ? 'up' : 'down'}">${up ? '+' : ''}${pv(fmtArs(sr.gainArs))}</span>
-    </div>`;
-  };
-  return `
-    ${sectionTitleHTML('Atribución de resultados', 'award')}
-    <div class="card">
-      <div class="port-note" style="padding:0 0 12px;">Quién te está haciendo ganar (o perder): cuánto aporta cada posición a tu resultado, en pesos${ccl ? ' — las de costo en USD, convertidas al CCL de hoy' : ''}. La barra mide el impacto relativo.</div>
-      <div class="attr-grid">
-        <div class="attr-col"><div class="attr-col-title good">${ICONS.check} Te hacen ganar</div>${winners.length ? winners.map(row).join('') : '<div class="attr-empty">Todavía ninguna en ganancia.</div>'}</div>
-        <div class="attr-col"><div class="attr-col-title bad">${ICONS.warning} Te hacen perder</div>${losers.length ? losers.map(row).join('') : '<div class="attr-empty">Ninguna en pérdida — bien ahí.</div>'}</div>
-      </div>
-      ${sectors.length ? `<div class="attr-sectors"><div class="attr-sectors-title">Por sector</div><div class="attr-sec-rows">${sectors.map(secRow).join('')}</div></div>` : ''}
-    </div>`;
-}
-
 function portfolioHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
@@ -8862,7 +5986,6 @@ function portfolioHTML() {
     </div>
 
     ${!holdings.length ? emptyStateHTML('briefcase', `Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}). Podés empezar cargando una a la vez arriba, o importar un CSV (columnas: ticker,shares,avgCost,costCurrency).`) : `
-    ${portfolioDidacticHTML(stats)}
     <div class="port-summary-grid">
       <div class="card port-summary-card">
         <div class="dash-radar-title">Valor total</div>
@@ -8888,14 +6011,9 @@ function portfolioHTML() {
       ${PORT_TABS.map(t => `<button class="port-tab ${tab === t.key ? 'active' : ''}" data-port-tab="${t.key}" role="tab" aria-selected="${tab === t.key}">${ICONS[t.icon]}<span>${esc(t.label)}</span></button>`).join('')}
     </div>
 
-    ${tab === 'hoy' ? portfolioTodayHTML(stats) : ''}
-
     ${tab === 'resumen' ? `
       ${portfolioCopilotCardHTML(copilot, health)}
       ${actionPlanCardHTML(stats, risk)}
-      ${sectorRotationCardHTML(stats)}
-      ${profitTakingCardHTML(stats)}
-      ${portfolioAttributionHTML(stats)}
       ${breadthCardHTML(stats)}
       ${portfolioTreemapSVG(stats.rows)}
       ${portfolioHealthCardHTML(health)}
@@ -8931,24 +6049,15 @@ function portfolioHTML() {
       ${tradingPlanCardHTML(stats)}
       <div class="card port-notes-card">
         <div class="dash-radar-title">Recomendación por posición</div>
-        <div class="port-note" style="padding:0 0 10px;">Cada posición con su acción sugerida, la <strong>convicción</strong> del motor, los factores que la sustentan y los niveles concretos del plan. Determinístico sobre los datos de cada activo — no es asesoramiento financiero.</div>
         ${stats.rows.filter(r => r.d).map(r => {
           const reco = portfolioRecommendation(r);
           if (!reco) return '';
           const tone = RECO_TONE[reco.tone];
-          const conv = reco.conviction;
-          const lv = reco.levels;
           return `
-          <div class="port-reco-card reco-${reco.tone}">
-            <div class="prr-head">
-              <span class="port-reco-ticker" data-reco-ticker="${esc(r.ticker)}">${esc(r.ticker)}</span>
-              <span class="watch-signal" style="background:${tone.bg}; color:${tone.color};">${esc(reco.label)}</span>
-              ${conv?.verdict ? `<span class="prr-conv prr-conv-${conv.verdict}">convicción ${esc(conv.verdict)}${conv.score != null ? ` · ${conv.score}` : ''}</span>` : ''}
-            </div>
-            <div class="prr-detail">${esc(reco.detail)}</div>
-            ${reco.factors?.length ? `<div class="prr-factors">${reco.factors.map(f => `<span class="prr-factor ${f.good ? 'good' : 'bad'}">${f.good ? '✓' : '✕'} ${esc(f.label)}</span>`).join('')}</div>` : ''}
-            ${lv && (lv.distStop != null || lv.targetUp != null) ? `<div class="prr-levels">${lv.distStop != null ? `<span>🛡 A <b>${Math.abs(lv.distStop).toFixed(1)}%</b> del stop</span>` : ''}${lv.targetUp != null ? `<span>🎯 Próx. objetivo <b>+${lv.targetUp.toFixed(1)}%</b></span>` : ''}</div>` : ''}
-            ${reco.sizing ? `<div class="prr-sizing">${esc(reco.sizing)}</div>` : ''}
+          <div class="port-reco-row">
+            <span class="port-reco-ticker">${esc(r.ticker)}</span>
+            <span class="watch-signal" style="background:${tone.bg}; color:${tone.color};">${esc(reco.label)}</span>
+            <span class="port-reco-detail">${esc(reco.detail)}</span>
           </div>`;
         }).join('') || '<div class="dash-loading-note">Cargando análisis de cada posición…</div>'}
       </div>
@@ -9035,22 +6144,24 @@ function portfolioRowHTML(r) {
   const signalTd = `<td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>`;
   const recoTd = `<td>${reco ? `<span class="watch-signal" style="background:${recoTone.bg}; color:${recoTone.color};" title="${esc(reco.detail)}">${esc(reco.label)}</span>` : 'N/D'}</td>`;
   const actionsTd = `<td class="port-actions-cell">
+      <button class="port-buy" data-port-buy="${esc(r.ticker)}" title="Comprar más" aria-label="Registrar una compra adicional de ${esc(r.ticker)}">＋</button>
       <button class="port-sell" data-port-sell="${esc(r.ticker)}" title="Registrar venta" aria-label="Registrar venta de ${esc(r.ticker)}">⤓</button>
       <button class="port-edit" data-port-edit="${esc(r.ticker)}" title="Editar" aria-label="Editar tenencia de ${esc(r.ticker)}">✎</button>
       <button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button>
     </td>`;
+  const ppcTxt = r.avgCost != null ? `<br><span class="port-pnl-abs" title="Precio promedio de compra">PPC ${pv((r.costCurrency === 'ARS' ? fmtArs : fmtUsd)(r.avgCost))}</span>` : '';
 
   if (portState.compact) {
     return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">${tickerCell}${valueCell}${pnlTd}${signalTd}${recoTd}${actionsTd}</tr>`;
   }
   return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">
     ${tickerCell}
-    <td>${r.shares}</td>
+    <td>${r.shares}${ppcTxt}</td>
     <td>${r.d.cedearArs != null
       ? `${pv(fmtArs(r.d.cedearArs))} <span title="${r.d.cedearSource === 'live' ? 'Precio real operado hoy en BYMA' : 'Estimado vía CCL — sin cotización real disponible para este símbolo'}">${r.d.cedearSource === 'live' ? '●' : '≈'}</span><br><span class="port-pnl-abs">subyacente ${pv(fmtUsd(r.d.price))}</span>`
       : pv(fmtUsd(r.d.price))}</td>
     ${valueCell}
-    <td class="port-weight-cell">${r.weight != null ? `<div class="port-weight"><span class="port-weight-bar"><i style="width:${Math.min(100, Math.round(r.weight * 100))}%;"></i></span><span class="port-weight-pct">${Math.round(r.weight * 100)}%</span></div>` : 'N/D'}</td>
+    <td>${r.weight != null ? `${Math.round(r.weight * 100)}%` : 'N/D'}</td>
     ${pnlTd}
     <td>${stopCell}</td>
     ${signalTd}
@@ -9097,24 +6208,10 @@ function wirePortfolioEvents() {
   });
   els.report.querySelectorAll('[data-port-ticker]').forEach(el => {
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.port-remove') || e.target.closest('.port-edit') || e.target.closest('.port-sell')) return;
+      if (e.target.closest('.port-remove') || e.target.closest('.port-edit') || e.target.closest('.port-sell') || e.target.closest('.port-buy')) return;
       selectTicker(el.dataset.portTicker);
     });
   });
-  els.report.querySelectorAll('[data-reco-ticker]').forEach(el => {
-    el.addEventListener('click', () => selectTicker(el.dataset.recoTicker));
-  });
-  const investedInput = document.getElementById('pdx-invested-input');
-  if (investedInput) {
-    const commitInvested = () => {
-      const raw = parseFloat(String(investedInput.value).replace(/[^\d]/g, ''));
-      portState.investedArs = isNaN(raw) || raw <= 0 ? null : raw;
-      lsSetSafe('icp_port_invested', portState.investedArs != null ? String(portState.investedArs) : '');
-      renderReport();
-    };
-    investedInput.addEventListener('change', commitInvested);
-    investedInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitInvested(); } });
-  }
   els.report.querySelectorAll('.port-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -9238,6 +6335,25 @@ function wirePortfolioEvents() {
     renderReport();
   });
 
+  // Libro de Operaciones: filtro, export CSV y borrar operación.
+  const ledgerFilter = document.getElementById('ledger-filter');
+  if (ledgerFilter) ledgerFilter.addEventListener('change', () => { portState.opsFilter = ledgerFilter.value; renderReport(); });
+  document.getElementById('ledger-export')?.addEventListener('click', () => {
+    const ops = getPortOps();
+    const header = 'fecha,tipo,ticker,cantidad,precio,moneda,monto,realizado';
+    const lines = ops.map(o => [new Date(o.ts).toISOString().slice(0, 10), o.type, o.ticker, o.shares, o.price ?? '', o.currency ?? '', o.price != null ? (o.price * o.shares).toFixed(2) : '', o.realized ?? ''].join(','));
+    downloadTextFile('operaciones.csv', [header, ...lines].join('\n'), 'text/csv');
+    showToast('Libro de operaciones exportado', 'success');
+  });
+  els.report.querySelectorAll('[data-ledger-del]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deletePortOp(btn.dataset.ledgerDel);
+      showToast('Operación borrada del libro', 'info');
+      renderReport();
+    });
+  });
+
   // Plan de Trading del Día: ejecutar una orden → registrar + ajustar tenencia.
   els.report.querySelectorAll('[data-plan-exec]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -9279,6 +6395,31 @@ function wirePortfolioEvents() {
 
   // Registrar venta: reduce (o cierra) la posición y loguea el P&L realizado
   // contra el costo promedio cargado. Solo en este navegador.
+  els.report.querySelectorAll('.port-buy').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ticker = btn.dataset.portBuy;
+      const h = getPortfolio().find(x => x.ticker === ticker);
+      if (!h) return;
+      const curLabel = h.costCurrency === 'ARS' ? 'AR$ por CEDEAR' : 'US$ por unidad';
+      const qtyStr = window.prompt(`¿Cuántas unidades más de ${ticker} compraste? (tenés ${h.shares})`);
+      if (qtyStr == null) return;
+      const qty = parseFloat(qtyStr);
+      if (!qty || qty <= 0) { showToast('Cantidad inválida — tiene que ser mayor a 0.', 'info'); return; }
+      const priceStr = window.prompt(`¿A qué precio compraste? (${curLabel})`);
+      if (priceStr == null) return;
+      const price = parseFloat(priceStr);
+      if (!price || price <= 0) { showToast('Precio inválido.', 'info'); return; }
+      // Precio promedio de compra PONDERADO: (costo viejo × cant. vieja +
+      // precio nuevo × cant. nueva) / cantidad total.
+      const newShares = h.shares + qty;
+      const newAvg = h.avgCost != null ? ((h.avgCost * h.shares) + (price * qty)) / newShares : price;
+      addHolding(ticker, newShares, newAvg, h.costCurrency, h.purchaseDate);
+      logPortOp({ type: 'buy', ticker, shares: qty, price, currency: h.costCurrency === 'ARS' ? 'ARS' : 'USD', realized: null });
+      showToast(`Compra de ${qty} ${ticker} registrada — nuevo PPC ${(h.costCurrency === 'ARS' ? fmtArs : fmtUsd)(newAvg)}`, 'success');
+      renderReport();
+    });
+  });
   els.report.querySelectorAll('.port-sell').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -9344,15 +6485,6 @@ async function loadPortfolioData() {
     }));
     contextLoaded = true;
   }
-  // Próximo balance por tenencia (para el calendario de catalizadores de "Mi Día").
-  const needEarnings = holdings.filter(h => !(h.ticker in portState.earnings));
-  if (needEarnings.length) {
-    await Promise.all(needEarnings.map(async (h) => {
-      try { portState.earnings[h.ticker] = await getEarnings(h.ticker); }
-      catch (e) { portState.earnings[h.ticker] = { nextDate: null }; }
-    }));
-    contextLoaded = true;
-  }
   // Aviso de ex-dividend próximo por cada tenencia (una sola vez por fecha).
   for (const h of holdings) notifyExDividend(h.ticker, portState.dividends[h.ticker]);
   syncPortfolioToTelegram(); // fire-and-forget: alimenta el resumen diario del bot
@@ -9360,7 +6492,6 @@ async function loadPortfolioData() {
   const missing = holdings.filter(h => !portState.data[h.ticker] && !portState.loading.has(h.ticker));
   if (!missing.length) {
     if (contextLoaded && !state.asset && state.view === 'portfolio') renderReport();
-    maybeComputeRotation(holdings); // fire-and-forget: re-renderiza cuando termina
     return;
   }
   await Promise.all(missing.map(async (h) => {
@@ -9380,7 +6511,6 @@ async function loadPortfolioData() {
       if (!state.asset && (state.view === 'portfolio' || state.view === 'dashboard' || state.view === 'simulator')) renderReport();
     }
   }));
-  maybeComputeRotation(holdings); // con todas las señales ya cargadas
 }
 
 /** Sincroniza (ticker, cantidad) de la cartera con el servidor de alertas,
@@ -9681,7 +6811,6 @@ function watchCardHTML(ticker) {
     <div class="watch-change ${up ? 'up' : 'down'}">${fmtPct(d.changePct)}</div>
     <div class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)} · ${d.score}</div>
     ${am ? `<div class="watch-alert" style="color:${am.color};"${alertTitleAttr(d.alert)}>⚡ ${esc(am.label)}${alertConfidenceSuffix(d.alert)}</div>` : ''}
-    ${am && alertNarrative(d.alert) ? `<span class="card-reveal-hint" aria-hidden="true">🔍</span><div class="card-reveal"><div class="watch-alert-narr ${d.alert.type === 'buy' ? 'up' : d.alert.type === 'sell' ? 'down' : 'stop'}">${alertNarrative(d.alert)}${alertWatchToday(d.alert) ? `<div class="watch-alert-watch">👀 <b>Qué mirar:</b> ${alertWatchToday(d.alert)}</div>` : ''}</div></div>` : ''}
   </div>`;
 }
 
@@ -9791,91 +6920,33 @@ function wireWatchlistEvents() {
 /** Página de Noticias & Macro: chips macro (ya reales, misma fuente que la
  *  ficha de cada activo) + noticias generales de mercado (no ligadas a un
  *  ticker puntual). */
-const macroNewsState = { macro: null, news: null, assetNews: null, newsFilter: 'all', loading: false, loadedAt: 0 };
+const macroNewsState = { macro: null, news: null, loading: false, loadedAt: 0 };
 function macroNewsPageHTML() {
   const macro = macroNewsState.macro;
   const news = macroNewsState.news;
-  const assetNews = macroNewsState.assetNews;
-  const f = macroNewsState.newsFilter;
-  const hasAssets = getPortfolio().length + getWatchlist().length > 0;
-
-  const renderGrid = (items) => {
-    const sorted = items.slice().filter(n => newsMatchesFilter(n, f)).sort((a, b) => newsRelevance(b) - newsRelevance(a));
-    if (!sorted.length) return `<div class="card news-empty-card">No hay noticias que coincidan con el filtro elegido.</div>`;
-    return `<div class="news-grid">${sorted.map(newsCardHTML).join('')}</div>`;
-  };
-  const filterChips = `<div class="news-filters" role="group" aria-label="Filtrar noticias por sentimiento">
-    ${[['all', 'Todas'], ['pos', 'Positivas'], ['neg', 'Negativas'], ['strong', 'Alto impacto']].map(([k, l]) =>
-      `<button class="news-filter-chip ${f === k ? 'active' : ''}" data-news-filter="${k}">${l}</button>`).join('')}
-  </div>`;
-
-  // ── Sección: Noticias sobre TUS activos ──
-  let assetSection;
-  if (assetNews == null) {
-    assetSection = `<div class="card"><div class="dash-loading-note">Cargando novedades de tus activos…</div></div>`;
-  } else if (!hasAssets) {
-    assetSection = `<div class="card news-empty-card">Todavía no tenés activos en tu cartera ni en tu watchlist. Sumá algunos y acá vas a ver las noticias que los mueven, ordenadas por relevancia.</div>`;
-  } else if (!assetNews.length) {
-    assetSection = `<div class="card news-empty-card">Sin novedades recientes de tus activos. Cuando salga una noticia de alguno de tus papeles, aparece acá primero.</div>`;
-  } else {
-    assetSection = renderGrid(assetNews);
-  }
-
   return `
     ${sectionTitleHTML('Noticias & Macro', 'globe')}
-    <div class="dash-intro">Las noticias de tus activos primero, después el contexto del mercado — ordenadas por relevancia (recencia + impacto) y con el sentimiento de cada titular.</div>
-
-    ${sectionTitleHTML('Contexto macro', 'globe', 'margin-top:20px;')}
-    <div class="card macro-card" style="margin-bottom:26px;">
+    <div class="dash-intro">Contexto macroeconómico y noticias generales del mercado — la misma fuente que se usa en cada ficha individual, acá agregada en una sola vista.</div>
+    <div class="card macro-card" style="margin-bottom:28px;">
       ${macro ? macroChips(macro).map(mc => `<div class="macro-chip">${mc.live ? '<span class="macro-chip-live" title="En vivo"></span>' : ''}<span class="macro-chip-label">${esc(mc.label)}: </span><span class="macro-chip-value">${esc(mc.value)}</span>${typeof mc.live === 'string' ? ` <span class="macro-chip-var">(${esc(mc.live)})</span>` : ''}</div>`).join('') : `<div class="dash-loading-note">Cargando…</div>`}
     </div>
-
-    <div class="news-section-head">
-      ${sectionTitleHTML('📌 Noticias sobre tus activos', 'bookmark', 'margin-bottom:0;')}
-      ${assetNews?.length ? `<span class="news-count">${assetNews.filter(n => newsMatchesFilter(n, f)).length}</span>` : ''}
-    </div>
-    ${assetNews?.length || news?.items?.length ? filterChips : ''}
-    ${assetSection}
-
-    ${sectionTitleHTML('Noticias del mercado', 'news', 'margin-top:28px;')}
-    ${!news ? `<div class="card"><div class="dash-loading-note">Cargando…</div></div>`
-      : news.items?.length ? renderGrid(news.items)
-      : `<div class="card news-empty-card">Sin noticias generales disponibles en este momento.</div>`}`;
+    ${sectionTitleHTML('Noticias generales', 'news', 'margin-top:8px;')}
+    <div class="card news-card">
+      ${!news ? `<div class="dash-loading-note">Cargando…</div>` : news.items?.length ? news.items.map(n => `
+        <div class="news-item">
+          <div class="news-tag" style="background:${n.bg}; color:${n.color};">${esc(n.tag)}</div>
+          <div class="news-text">${esc(n.text)}${n.source ? ` <span class="news-source">— ${esc(n.source)}</span>` : ''}</div>
+        </div>`).join('') : `<div class="news-empty">Sin noticias generales disponibles en este momento.</div>`}
+    </div>`;
 }
-function wireMacroNewsEvents() {
-  els.report.querySelectorAll('[data-news-filter]').forEach(btn => {
-    btn.addEventListener('click', () => { macroNewsState.newsFilter = btn.dataset.newsFilter; renderReport(); });
-  });
-  els.report.querySelectorAll('[data-news-ticker]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); selectTicker(btn.dataset.newsTicker); });
-  });
-}
+function wireMacroNewsEvents() { /* sin interacciones propias por ahora */ }
 async function loadMacroNewsData() {
   if (macroNewsState.loading || Date.now() - macroNewsState.loadedAt < 3 * 60 * 1000) return;
   macroNewsState.loading = true;
   try {
-    // Noticias de TUS activos: se piden por ticker (cartera primero, luego
-    // watchlist), deduplicadas y limitadas para no golpear el proveedor. Cada
-    // getNews está cacheado 15 min, así que es barato y se comparte con la ficha.
-    const assetTickers = [...new Set([...getPortfolio().map(h => h.ticker), ...getWatchlist()])].slice(0, 10);
-    const [macro, news, ...assetRes] = await Promise.all([
-      getMacro(), getGeneralNews(),
-      ...assetTickers.map(t => getNews(t).then(r => ({ t, r })).catch(() => ({ t, r: null }))),
-    ]);
+    const [macro, news] = await Promise.all([getMacro(), getGeneralNews()]);
     macroNewsState.macro = macro;
     macroNewsState.news = news;
-    const seen = new Set();
-    const assetNews = [];
-    for (const { t, r } of assetRes) {
-      if (!r?.items?.length) continue;
-      for (const it of r.items) {
-        const key = it.url || it.textEn || it.text;
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        assetNews.push({ ...it, ticker: t });
-      }
-    }
-    macroNewsState.assetNews = assetNews;
     macroNewsState.loadedAt = Date.now();
   } catch (e) {
     console.warn('[macro-news] no se pudo cargar', e.message);
@@ -9883,38 +6954,6 @@ async function loadMacroNewsData() {
     macroNewsState.loading = false;
     if (!state.asset && state.view === 'macro') renderReport();
   }
-}
-
-/* Relevancia de una noticia: la recencia manda; el sentimiento fuerte la sube
- * (una noticia "Muy Positiva/Negativa" pesa como ~6h más fresca). */
-function newsSentBonus(tag) {
-  if (tag === 'Muy Positiva' || tag === 'Muy Negativa') return 2;
-  if (tag === 'Positiva' || tag === 'Negativa') return 1;
-  return 0;
-}
-function newsRelevance(n) {
-  const dtMs = n.datetime ? n.datetime * 1000 : 0;
-  return dtMs + newsSentBonus(n.tag) * 6 * 3600 * 1000;
-}
-function newsMatchesFilter(n, f) {
-  if (f === 'pos') return n.tag === 'Positiva' || n.tag === 'Muy Positiva';
-  if (f === 'neg') return n.tag === 'Negativa' || n.tag === 'Muy Negativa';
-  if (f === 'strong') return n.tag === 'Muy Positiva' || n.tag === 'Muy Negativa';
-  return true; // 'all'
-}
-// Tarjeta de noticia: sentimiento + titular (linkeado) + fuente + antigüedad, y
-// el ticker (si es de tus activos) que abre la ficha.
-function newsCardHTML(n) {
-  const time = n.datetime ? relativeTime(n.datetime * 1000) : '';
-  return `<div class="news-card-item">
-    <div class="news-row-top">
-      ${n.ticker ? `<button class="news-ticker" data-news-ticker="${esc(n.ticker)}" title="Ver análisis de ${esc(n.ticker)}">${esc(n.ticker)}</button>` : ''}
-      <span class="news-tag" style="background:${n.bg}; color:${n.color};">${esc(n.tag)}</span>
-      ${time ? `<span class="news-time">${esc(time)}</span>` : ''}
-    </div>
-    ${n.url ? `<a class="news-headline" href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.text)}</a>` : `<div class="news-headline">${esc(n.text)}</div>`}
-    <div class="news-meta">${n.source ? `<span class="news-src">${esc(n.source)}</span>` : '<span></span>'}${n.url ? '<span class="news-ext">Leer nota ↗</span>' : ''}</div>
-  </div>`;
 }
 
 /** Tarjeta de vinculación/gestión de alertas por Telegram: avisa aunque el
@@ -10558,9 +7597,6 @@ async function computeLightSignal(ticker, macro) {
   // para stop sugerido y distancia al stop de cada tenencia.
   const planRaw = computePlan(technical, scoreResult.score).raw;
   const setup = shortTermSetup(technical, candles); // radar de trades cortos, sin pedidos extra
-  const rebound = reboundSetup(technical, candles); // rebote de sobreventa de 1-2 días, sin pedidos extra
-  const pullback = pullbackSetup(technical, candles); // retroceso a favor de tendencia (continuación)
-  const squeeze = squeezeSetup(technical, candles); // "por explotar": compresión de volatilidad
   const gap = computeGap(candles, technical); // radar de gaps de apertura, sin pedidos extra
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
@@ -10577,15 +7613,11 @@ async function computeLightSignal(ticker, macro) {
     alert: priceAlert,
     structure: technical.structure, // BOS/CHoCH — ya calculado acá, sin pedidos extra
     rsi: isNaN(technical.rsi) ? null : technical.rsi, // ya calculado acá — sin pedidos extra, para el Screener
-    relVolume: technical.relVolume != null && !isNaN(technical.relVolume) ? technical.relVolume : null, // volumen de hoy vs. promedio — para los radares de rupturas y volumen inusual
     sparkline: candles.c.slice(-30), // últimos cierres reales, ya obtenidos acá — sin pedidos extra
     closes: candles.c, // serie completa (~220 ruedas) — reusada para volatilidad/drawdown de la cartera, sin pedidos extra
     highlight: technicalHighlight(technical),
     planRaw, // stop/objetivos numéricos (USD) — para la columna de stop del Portfolio
     setup, // setup de trade corto (o null) — para el Radar de Trades Cortos
-    rebound, // rebote de sobreventa de 1-2 días (o null) — sección de rebotes en Trades Cortos
-    pullback, // retroceso a favor de tendencia (o null) — sección de pullbacks en Trades Cortos
-    squeezeWatch: squeeze, // compresión de volatilidad (o null) — sección "por explotar"
     gap, // hueco de apertura de la última rueda (o null) — para el Radar de Gaps
   };
 }
@@ -10598,353 +7630,80 @@ async function computeLightSignal(ticker, macro) {
  * tendencia fuerte, etc. Suma un puntaje de confianza y exige al menos un
  * disparador "primario" para calificar — no es una recomendación ni una
  * garantía, es un tamiz técnico para el trader de corto plazo (alto riesgo). */
-// Evalúa un setup de corto plazo en UNA dirección ('long' | 'short') y devuelve
-// su score, triggers, riesgos y plan (entrada/stop/objetivos por ATR). Es el
-// espejo simétrico: cada gatillo alcista tiene su versión bajista. shortTermSetup
-// corre las dos direcciones y se queda con la dominante.
-function directionalSetup(technical, candles, dir) {
+function shortTermSetup(technical, candles) {
   const c = candles.c, h = candles.h, l = candles.l, v = candles.v || [];
   const n = c.length;
+  if (n < 30) return null;
   const price = c[n - 1], atr = technical.atr;
-  const long = dir === 'long';
+  if (!(atr > 0) || isNaN(atr)) return null;
+
   const triggers = [];
   const risks = [];
   let score = 0;
   const add = (pts, label, primary = false) => { score += pts; triggers.push({ label, primary }); };
 
-  // 1 · Squeeze de volatilidad (resorte comprimido) — direccionado por dónde rompe.
-  const breakingDir = long ? price > technical.ema20 : price < technical.ema20;
-  if (technical.squeeze?.justFired && breakingDir) add(24, `Squeeze de volatilidad recién liberado ${long ? 'al alza' : 'a la baja'} tras ${technical.squeeze.barsInSqueeze} ruedas`, true);
-  else if (technical.squeeze?.active) add(7, `Volatilidad comprimida hace ${technical.squeeze.barsInSqueeze} ruedas — ruptura próxima`);
+  // 1. Squeeze de volatilidad (resorte comprimido)
+  if (technical.squeeze?.justFired) add(26, `Squeeze de volatilidad recién liberado tras ${technical.squeeze.barsInSqueeze} ruedas`, true);
+  else if (technical.squeeze?.active) add(8, `Volatilidad comprimida hace ${technical.squeeze.barsInSqueeze} ruedas — ruptura próxima`);
 
-  // 2 · Ruptura de extremos de 20 ruedas con volumen.
+  // 2. Ruptura de máximos de 20 ruedas con volumen
+  const hi20 = Math.max(...h.slice(-21, -1));
   const hasVol = v.some(x => x > 0);
   const volAvg = hasVol ? v.slice(-21, -1).reduce((a, b) => a + b, 0) / 20 : 0;
   const volRatio = hasVol && volAvg > 0 ? v[n - 1] / volAvg : null;
-  const hi20 = Math.max(...h.slice(-21, -1));
-  const lo20 = Math.min(...l.slice(-21, -1));
-  const brokeExtreme = long ? price >= hi20 * 0.997 : price <= lo20 * 1.003;
-  if (brokeExtreme) {
-    const what = long ? 'máximos' : 'mínimos';
-    if (volRatio && volRatio >= 1.3) add(22, `Ruptura de ${what} de 20 ruedas con volumen alto (${volRatio.toFixed(1)}× el promedio)`, true);
-    else add(12, `Ruptura de ${what} de 20 ruedas`, true);
+  if (price >= hi20 * 0.997) {
+    if (volRatio && volRatio >= 1.3) add(22, `Ruptura de máximos de 20 ruedas con volumen alto (${volRatio.toFixed(1)}× el promedio)`, true);
+    else add(12, 'Ruptura de máximos de 20 ruedas', true);
   }
 
-  // 3 · Cruce de MACD reciente en la dirección del setup.
+  // 3. Cruce alcista de MACD reciente (histograma pasó a positivo)
   const { hist } = macd(c);
-  if (hist[n - 1] != null && hist[n - 2] != null) {
-    if (long && hist[n - 2] <= 0 && hist[n - 1] > 0) add(16, 'Cruce alcista de MACD en la última rueda', true);
-    if (!long && hist[n - 2] >= 0 && hist[n - 1] < 0) add(16, 'Cruce bajista de MACD en la última rueda', true);
-  }
+  if (hist[n - 1] != null && hist[n - 2] != null && hist[n - 2] <= 0 && hist[n - 1] > 0) add(16, 'Cruce alcista de MACD en la última rueda', true);
 
-  // 4 · Patrón de vela en la dirección.
-  if (technical.candlePattern?.bias === (long ? 'bullish' : 'bearish')) add(12, technical.candlePattern.label);
+  // 4. Patrón de vela alcista
+  if (technical.candlePattern?.bias === 'bullish') add(12, technical.candlePattern.label);
 
-  // 5 · RSI girando desde un extremo.
+  // 5. RSI saliendo de sobreventa
   const rs = rsi(c, 14);
-  if (rs[n - 1] != null && rs[n - 2] != null) {
-    if (long && rs[n - 2] < 42 && rs[n - 1] > rs[n - 2] && rs[n - 1] >= 40) add(12, 'RSI girando al alza desde sobreventa');
-    if (!long && rs[n - 2] > 58 && rs[n - 1] < rs[n - 2] && rs[n - 1] <= 60) add(12, 'RSI girando a la baja desde sobrecompra');
-  }
+  if (rs[n - 1] != null && rs[n - 2] != null && rs[n - 2] < 42 && rs[n - 1] > rs[n - 2] && rs[n - 1] >= 40) add(12, 'RSI girando al alza desde sobreventa');
 
-  // 6 · Divergencia en la dirección.
-  if (technical.divergence?.type === (long ? 'bullish' : 'bearish')) add(15, `Divergencia ${long ? 'alcista' : 'bajista'} (RSI vs precio)`, true);
+  // 6. Divergencia alcista
+  if (technical.divergence?.type === 'bullish') add(15, 'Divergencia alcista (RSI vs precio)', true);
 
-  // 7 · Tendencia fuerte alineada.
-  const trendAligned = long
-    ? (technical.adx > 25 && price > technical.ema20 && technical.ema20 > technical.ema50)
-    : (technical.adx > 25 && price < technical.ema20 && technical.ema20 < technical.ema50);
-  if (trendAligned) add(11, `Tendencia ${long ? 'alcista' : 'bajista'} fuerte (ADX ${technical.adx.toFixed(0)})`);
+  // 7. Tendencia fuerte
+  if (technical.adx > 25 && price > technical.ema20 && technical.ema20 > technical.ema50) add(11, `Tendencia fuerte (ADX ${technical.adx.toFixed(0)})`);
 
-  // 8 · Volumen (OBV) acompaña la dirección.
-  if (long && technical.obvConfirms === true) add(8, 'El volumen (OBV) acompaña el movimiento');
-  if (!long && technical.obvConfirms === false) add(8, 'El volumen (OBV) no sostiene el precio');
+  // 8. Volumen confirma
+  if (technical.obvConfirms === true) add(8, 'El volumen (OBV) acompaña el movimiento');
 
-  // 9 · Pérdida/recuperación de la EMA20 dentro de la tendencia.
-  if (long && technical.bullishAlign && c[n - 2] < technical.ema20 && price > technical.ema20) add(10, 'Recuperó la EMA20 (rebote dentro de la tendencia)');
-  if (!long && technical.bearishAlign && c[n - 2] > technical.ema20 && price < technical.ema20) add(10, 'Perdió la EMA20 (continuación bajista)');
+  // 9. Recuperó la EMA20 tras pullback en tendencia alcista
+  if (technical.bullishAlign && c[n - 2] < technical.ema20 && price > technical.ema20) add(10, 'Recuperó la EMA20 (rebote dentro de la tendencia)');
 
-  // Riesgos / penalizaciones (espejo por dirección).
-  if (long && !isNaN(technical.rsi) && technical.rsi > 72) { score -= 12; risks.push(`RSI sobrecomprado (${technical.rsi.toFixed(0)}) — puede corregir antes de seguir`); }
-  if (!long && !isNaN(technical.rsi) && technical.rsi < 28) { score -= 12; risks.push(`RSI sobrevendido (${technical.rsi.toFixed(0)}) — puede rebotar antes de seguir`); }
-  if (long && technical.resistance && price >= technical.resistance * 0.99 && price <= technical.resistance * 1.01) risks.push('Muy cerca de una resistencia — puede frenar ahí');
-  if (!long && technical.support && price >= technical.support * 0.99 && price <= technical.support * 1.01) risks.push('Muy cerca de un soporte — puede rebotar ahí');
-  if (long && technical.obvConfirms === false) { score -= 8; risks.push('El volumen no acompaña — riesgo de movimiento en falso'); }
-  if (!long && technical.obvConfirms === true) { score -= 8; risks.push('El volumen todavía empuja el precio arriba — riesgo de que el corto falle'); }
-  if (long && technical.divergence?.type === 'bearish') { score -= 10; risks.push('Divergencia bajista activa — cautela'); }
-  if (!long && technical.divergence?.type === 'bullish') { score -= 10; risks.push('Divergencia alcista activa — cautela'); }
-
-  score = Math.max(0, Math.min(100, score));
-
-  // Plan (horizonte 1-3 ruedas): stop ajustado al swing reciente, objetivos por
-  // múltiplos de ATR, en la dirección del setup.
-  const swingLow = Math.min(...l.slice(-6));
-  const swingHigh = Math.max(...h.slice(-6));
-  const stop = long ? Math.max(swingLow - 0.2 * atr, price - 1.5 * atr) : Math.min(swingHigh + 0.2 * atr, price + 1.5 * atr);
-  const target1 = long ? price + 1.5 * atr : price - 1.5 * atr;
-  const target2 = long ? price + 2.5 * atr : price - 2.5 * atr;
-  const risk = Math.abs(price - stop), reward = Math.abs(target1 - price);
-  const rr = risk > 0 ? reward / risk : null;
-  // Gatillo de entrada: confirmación al superar el extremo de la última rueda.
-  const entryTrigger = long ? h[n - 1] : l[n - 1];
-
-  return {
-    direction: dir, score, triggers, risks,
-    entry: price, stop, target1, target2, rr,
-    entryTrigger, invalidation: stop,
-    expectedMovePct: (atr / price) * 100,
-  };
-}
-
-/* ─────────────────────── detector de rebote de 1-2 días ─────────────────────
- * Distinto del setup de tendencia: busca activos SOBREVENDIDOS de corto plazo
- * con chances de un rebote técnico de 1-2 ruedas (mean-reversion). Combina
- * varios indicadores de corto plazo: RSI en/saliendo de sobreventa, precio en la
- * banda inferior de Bollinger, estiramiento debajo de la EMA20, vela de reversión
- * alcista, divergencia alcista, volumen de capitulación, rebote sobre un soporte
- * y racha bajista. El objetivo del rebote es la vuelta a la media (EMA20/banda
- * media) — un objetivo realista a pocos días, no una tendencia nueva. Todo sobre
- * indicadores ya calculados; nada se inventa. */
-function reboundSetup(technical, candles) {
-  const c = candles.c, l = candles.l, n = c.length;
-  if (n < 25) return null;
-  const price = c[n - 1], atr = technical.atr;
-  if (!(atr > 0) || isNaN(atr)) return null;
-  const rArr = rsi(c, 14);
-  const rsiNow = technical.rsi, rsiPrev = rArr[n - 2];
-  const triggers = [], risks = [];
-  let score = 0;
-  const add = (pts, label, primary = false) => { score += pts; triggers.push({ label, primary }); };
-
-  // 1 · RSI en sobreventa (o girando desde zona baja) — el corazón del rebote.
-  if (!isNaN(rsiNow)) {
-    if (rsiNow < 30) add(26, `RSI en sobreventa (${rsiNow.toFixed(0)})`, true);
-    else if (rsiNow < 40 && rsiPrev != null && rsiNow > rsiPrev) add(16, `RSI girando al alza desde zona baja (${rsiNow.toFixed(0)})`, true);
-  }
-  // 2 · Precio tocando o debajo de la banda inferior de Bollinger.
-  if (technical.bbLower != null && price <= technical.bbLower * 1.01) add(22, 'Precio en la banda inferior de Bollinger', true);
-  // 3 · Estirado debajo de la EMA20 (goma estirada que tiende a volver).
-  const belowEma = technical.ema20 ? (technical.ema20 - price) / price * 100 : 0;
-  if (belowEma >= 4) add(14, `Estirado ${belowEma.toFixed(0)}% debajo de la EMA20`);
-  // 4 · Vela de reversión alcista (martillo, envolvente…).
-  if (technical.candlePattern?.bias === 'bullish') add(15, technical.candlePattern.label, true);
-  // 5 · Divergencia alcista (RSI hace piso más alto que el precio).
-  if (technical.divergence?.type === 'bullish') add(15, 'Divergencia alcista (RSI vs. precio)', true);
-  // 6 · Volumen de capitulación (venta con volumen alto suele marcar el piso).
-  if (technical.relVolume != null && technical.relVolume >= 1.5) add(9, `Volumen de capitulación (${technical.relVolume.toFixed(1)}× el promedio)`);
-  // 7 · Rebotando sobre un soporte técnico.
-  if (technical.support && price <= technical.support * 1.02 && price >= technical.support * 0.98) add(12, 'Rebotando sobre un soporte', true);
-  // 8 · Racha bajista corta (sobreventa de muy corto plazo).
-  let downDays = 0;
-  for (let i = n - 1; i > Math.max(0, n - 5); i--) { if (c[i] < c[i - 1]) downDays++; else break; }
-  if (downDays >= 2) add(8, `${downDays} ruedas seguidas de baja`);
-
-  // Advertencias (no invalidan, avisan): un rebote contra tendencia fuerte es más frágil.
-  if (technical.bearishAlign && technical.adx > 25) risks.push('Tendencia bajista de fondo fuerte — el rebote puede ser breve');
-  if (technical.divergence?.type === 'bearish') { score -= 8; risks.push('Divergencia bajista activa — cautela'); }
-  if (technical.obvConfirms === false) risks.push('El volumen todavía no acompaña un giro');
+  // Riesgos / penalizaciones
+  if (!isNaN(technical.rsi) && technical.rsi > 72) { score -= 12; risks.push(`RSI sobrecomprado (${technical.rsi.toFixed(0)}) — puede corregir antes de seguir`); }
+  if (technical.resistance && price >= technical.resistance * 0.99 && price <= technical.resistance * 1.01) risks.push('Muy cerca de una resistencia — puede frenar ahí');
+  if (technical.obvConfirms === false) { score -= 8; risks.push('El volumen no acompaña — riesgo de movimiento en falso'); }
+  if (technical.divergence?.type === 'bearish') { score -= 10; risks.push('Divergencia bajista activa — cautela'); }
 
   score = Math.max(0, Math.min(100, score));
   const hasPrimary = triggers.some(t => t.primary);
   const qualifies = hasPrimary && score >= 45;
 
-  // Objetivo: la vuelta a la media (EMA20 / banda media), lo primero que busca un rebote.
-  const meanTarget = Math.min(technical.ema20 ?? Infinity, technical.bbMid ?? Infinity);
-  const target = isFinite(meanTarget) && meanTarget > price ? meanTarget : price + 1.5 * atr;
-  const recentLow = Math.min(l[n - 1], l[n - 2] ?? l[n - 1]);
-  const stop = recentLow - 0.3 * atr;
-  const risk = price - stop, reward = target - price;
-  const rr = risk > 0 && reward > 0 ? reward / risk : null;
-  const expectedBouncePct = (target - price) / price * 100;
-  const entryTrigger = Math.max(c[n - 1], candles.h[n - 1]); // confirmación: superar el máximo de la última rueda
+  // Plan de trade corto (horizonte 1-3 días): stop ajustado bajo el swing
+  // reciente, objetivos por múltiplos de ATR.
+  const swingLow = Math.min(...l.slice(-6));
+  const stop = Math.max(swingLow - 0.2 * atr, price - 1.5 * atr);
+  const target1 = price + 1.5 * atr;
+  const target2 = price + 2.5 * atr;
+  const risk = price - stop, reward = target1 - price;
+  const rr = risk > 0 ? reward / risk : null;
+  const expectedMovePct = (atr / price) * 100;
 
   return {
-    qualifies, score, triggers, risks,
-    entry: price, target, stop, rr, entryTrigger,
-    expectedBouncePct,
-    confidence: score >= 70 ? 'muy alta' : score >= 58 ? 'alta' : score >= 45 ? 'media' : 'baja',
-    timeStopDays: 2,
-    narrative: reboundNarrative(technical, price, target, rsiNow),
+    score, qualifies, triggers, risks,
+    entry: price, stop, target1, target2, rr, expectedMovePct,
+    confidence: score >= 75 ? 'muy alta' : score >= 60 ? 'alta' : score >= 45 ? 'media' : 'baja',
   };
-}
-function reboundNarrative(technical, price, target, rsiNow) {
-  const parts = [];
-  if (!isNaN(rsiNow) && rsiNow < 35) parts.push(`RSI en <b>${rsiNow.toFixed(0)}</b> (sobreventa)`);
-  if (technical.bbLower != null && price <= technical.bbLower * 1.01) parts.push('en la <b>banda inferior</b>');
-  if (technical.candlePattern?.bias === 'bullish') parts.push('con <b>vela de reversión</b>');
-  if (technical.divergence?.type === 'bullish') parts.push('y <b>divergencia alcista</b>');
-  const lead = parts.length ? parts.join(', ') : 'Sobrevendido de corto plazo';
-  const pct = (target - price) / price * 100;
-  const proj = target > price ? ` Posible rebote de <b class="up">+${pct.toFixed(1)}%</b> hacia la media (${fmtUsd(target)}).` : '';
-  return `🔄 ${lead}.${proj}`;
-}
-
-/* ─────────────────────── pullback en tendencia (continuación) ───────────────
- * A diferencia del rebote (sobreventa CONTRA la tendencia), esto busca el
- * retroceso a favor de la corriente: una tendencia alcista sana que "descansa"
- * sobre la EMA20/50 y ofrece una recompra de continuación (mayor probabilidad
- * que ir contra la tendencia). Solo largos en tendencia alcista alineada. */
-function pullbackSetup(technical, candles) {
-  const c = candles.c, l = candles.l, h = candles.h, n = c.length;
-  if (n < 30) return null;
-  const price = c[n - 1], atr = technical.atr;
-  if (!(atr > 0) || isNaN(atr)) return null;
-  const e20 = technical.ema20, e50 = technical.ema50, e200 = technical.ema200;
-  const uptrend = e20 && e50 && e200 && e20 > e50 && e50 > e200 && price > e200;
-  if (!uptrend) return null; // pullback SOLO a favor de una tendencia alcista alineada
-  const strongTrend = technical.adx > 20;
-  const triggers = [], risks = [];
-  let score = 0;
-  const add = (pts, label, primary = false) => { score += pts; triggers.push({ label, primary }); };
-  add(strongTrend ? 22 : 12, `Tendencia alcista${strongTrend ? ` fuerte (ADX ${technical.adx.toFixed(0)})` : ''} — EMAs alineadas`, true);
-  // El retroceso: cerca de la EMA20 (leve) o EMA50 (más profundo).
-  const nearE20 = Math.abs(price - e20) / price <= 0.02;
-  const nearE50 = price <= e20 && price >= e50 * 0.985 && Math.abs(price - e50) / price <= 0.03;
-  if (nearE20) add(22, 'Retrocedió a la EMA20 (zona de recompra)', true);
-  else if (nearE50) add(20, 'Retrocedió a la EMA50 (soporte dinámico más profundo)', true);
-  else if (price > e20 && (price - e20) / price < 0.05) add(10, 'Descansando cerca de la EMA20');
-  else return null; // sin un retroceso claro no es un pullback
-  const rArr = rsi(c, 14); const rNow = technical.rsi, rPrev = rArr[n - 2];
-  if (!isNaN(rNow) && rNow >= 40 && rNow <= 58) add(12, `RSI en zona de pausa (${rNow.toFixed(0)}) — ni caro ni sobrevendido`);
-  if (rPrev != null && rNow > rPrev && rNow < 60) add(8, 'RSI girando al alza');
-  if (technical.candlePattern?.bias === 'bullish') add(12, technical.candlePattern.label, true);
-  let downDays = 0;
-  for (let i = n - 1; i > Math.max(0, n - 5); i--) { if (c[i] < c[i - 1]) downDays++; else break; }
-  if (downDays >= 1 && downDays <= 3) add(6, `Retroceso corto de ${downDays} rueda(s)`);
-  if (technical.divergence?.type === 'bearish') { score -= 8; risks.push('Divergencia bajista — el retroceso podría profundizar'); }
-  if (technical.obvConfirms === false) risks.push('El volumen no está acompañando el retroceso');
-  score = Math.max(0, Math.min(100, score));
-  const qualifies = triggers.some(t => t.primary) && score >= 48;
-  const swingHigh = Math.max(...h.slice(-15));
-  const target = Math.max(swingHigh, technical.resistance ?? 0, price + 1.5 * atr);
-  const swingLow = Math.min(...l.slice(-4));
-  const stop = Math.min(e50 - 0.3 * atr, swingLow - 0.3 * atr);
-  const risk = price - stop, reward = target - price;
-  const rr = risk > 0 && reward > 0 ? reward / risk : null;
-  const expectedMovePct = (target - price) / price * 100;
-  return {
-    qualifies, score, triggers, risks,
-    entry: price, target, stop, rr, entryTrigger: h[n - 1], expectedMovePct,
-    confidence: score >= 72 ? 'muy alta' : score >= 60 ? 'alta' : score >= 48 ? 'media' : 'baja',
-    timeStopDays: 3,
-    narrative: pullbackNarrative(technical, price, target, nearE20 ? e20 : e50, nearE20 ? 'EMA20' : 'EMA50'),
-  };
-}
-function pullbackNarrative(technical, price, target, emaLevel, emaName) {
-  const pct = (target - price) / price * 100;
-  const proj = target > price ? ` Si retoma, apunta al máximo reciente en <b>${fmtUsd(target)}</b> (<b class="up">+${pct.toFixed(1)}%</b>).` : '';
-  return `📈 Tendencia alcista sana que <b>descansó sobre la ${esc(emaName)}</b> (${fmtUsd(emaLevel)}) — retroceso a favor de la corriente.${proj}`;
-}
-
-/* ─────────────────────── "por explotar": squeeze de volatilidad ─────────────
- * Activos con las Bandas de Bollinger comprimidas dentro de las de Keltner
- * (squeeze): la volatilidad está en mínimos y suele preceder a un movimiento
- * fuerte. La dirección todavía no está definida — se marcan los niveles de
- * ruptura (bandas) y un sesgo tentativo por la posición vs. la EMA20. */
-function squeezeSetup(technical, candles) {
-  const sq = technical.squeeze;
-  if (!sq || (!sq.active && !sq.justFired)) return null;
-  const c = candles.c, n = c.length, price = c[n - 1], atr = technical.atr;
-  if (!(atr > 0) || technical.bbUpper == null || technical.bbLower == null) return null;
-  const bars = sq.barsInSqueeze ?? 0;
-  if (!sq.justFired && bars < 3) return null; // muy poco comprimido todavía
-  const bias = price > technical.ema20 ? 'alcista' : price < technical.ema20 ? 'bajista' : 'neutral';
-  const expectedMovePct = (atr / price) * 100 * 2; // una ruptura suele mover ~2 ATR
-  const score = Math.min(100, 42 + bars * 3 + (sq.justFired ? 20 : 0));
-  return {
-    qualifies: true, justFired: !!sq.justFired, bars,
-    upperTrigger: technical.bbUpper, lowerTrigger: technical.bbLower, price,
-    bias, expectedMovePct, score,
-    confidence: sq.justFired ? 'alta' : bars >= 8 ? 'alta' : 'media',
-  };
-}
-
-function shortTermSetup(technical, candles) {
-  const c = candles.c;
-  const n = c.length;
-  if (n < 30) return null;
-  const atr = technical.atr;
-  if (!(atr > 0) || isNaN(atr)) return null;
-
-  // Corre ambas direcciones y elige la dominante (mayor score que califique).
-  const longS = directionalSetup(technical, candles, 'long');
-  const shortS = directionalSetup(technical, candles, 'short');
-  const best = shortS.score > longS.score ? shortS : longS;
-
-  const hasPrimary = best.triggers.some(t => t.primary);
-  const qualifies = hasPrimary && best.score >= 45;
-
-  return {
-    ...best,
-    qualifies,
-    narrative: setupNarrative(technical, candles, best),
-    timeStopDays: 3, // los setups de corto plazo caducan: si no se activa en ~3 ruedas, se descarta
-    confidence: best.score >= 75 ? 'muy alta' : best.score >= 60 ? 'alta' : best.score >= 45 ? 'media' : 'baja',
-  };
-}
-
-/* ─────────────────────── narrativa del setup (en criollo) ───────────────────
- * Traduce lo que ACABA de pasar con un nivel de referencia (EMA200/EMA50/EMA21
- * o un swing) a una frase clara, con la proyección real hasta el próximo nivel
- * estructural (la próxima resistencia si es alcista, el próximo soporte si es
- * bajista). Nada se inventa: el % proyectado es la distancia al nivel de S/R que
- * ya calcula indicators.js sobre swings reales; es un objetivo estructural, no
- * una promesa. Devuelve null si no hay un evento nítido para narrar. */
-function setupNarrative(technical, candles, setup) {
-  const c = candles.c, l = candles.l, h = candles.h;
-  const n = c.length;
-  if (n < 25) return null;
-  const price = c[n - 1], prev = c[n - 2];
-  const long = setup.direction === 'long';
-  const ema21arr = ema(c, 21);
-  const e21 = ema21arr[n - 1], e21p = ema21arr[n - 2];
-  const e50 = technical.ema50, e200 = technical.ema200;
-  const res = technical.resistance, sup = technical.support;
-  // Proyección hacia el próximo nivel estructural, en la dirección del setup.
-  const upPct = (res != null && res > price) ? ((res - price) / price) * 100 : null;
-  const downPct = (sup != null && sup < price) ? ((price - sup) / price) * 100 : null;
-  const projUp = upPct != null ? ` Si sigue, la próxima resistencia está en <b>${fmtUsd(res)}</b> (<b class="up">+${upPct.toFixed(1)}%</b>).` : '';
-  const projDown = downPct != null ? ` Si cae, el próximo soporte está en <b>${fmtUsd(sup)}</b> (<b class="down">−${downPct.toFixed(1)}%</b>).` : '';
-  const near = (a, b, tol) => a != null && b != null && Math.abs(a - b) / b <= tol;
-  const recentLow = Math.min(l[n - 1], l[n - 2]);
-  const recentHigh = Math.max(h[n - 1], h[n - 2]);
-
-  if (long) {
-    // 1 · Rebote en la EMA200 (soporte de fondo).
-    if (e200 && price > e200 && recentLow <= e200 * 1.012 && price <= e200 * 1.05)
-      return `📈 Acaba de tocar la <b>EMA200</b> (${fmtUsd(e200)}) y la respetó como soporte — suele ser un piso de rebote.${projUp}`;
-    // 2 · Recuperó la EMA200 (vuelve a ser alcista de fondo).
-    if (e200 && prev < e200 && price >= e200)
-      return `📈 Acaba de <b>recuperar la EMA200</b> (${fmtUsd(e200)}) — vuelve a ponerse alcista de fondo.${projUp}`;
-    // 3 · Cruce fresco de la EMA21 al alza (alcista de corto).
-    if (e21 && e21p && prev < e21p && price >= e21)
-      return `📈 Acaba de <b>cruzar la EMA21</b> (${fmtUsd(e21)}) y se puso alcista de corto plazo.${projUp}`;
-    // 4 · Cruce de la EMA50.
-    if (e50 && prev < e50 && price >= e50)
-      return `📈 Acaba de <b>superar la EMA50</b> (${fmtUsd(e50)}) — mejora la tendencia de mediano plazo.${projUp}`;
-    // 5 · Rebote desde un soporte estructural.
-    if (sup && near(recentLow, sup, 0.015) && price > sup)
-      return `📈 Rebotó desde el soporte de <b>${fmtUsd(sup)}</b>.${projUp}`;
-    if (projUp) return `📈 Setup alcista de corto plazo.${projUp}`;
-  } else {
-    // 1 · Rechazo en la EMA200 (resistencia de fondo).
-    if (e200 && price < e200 && recentHigh >= e200 * 0.988 && price >= e200 * 0.95)
-      return `📉 Acaba de <b>rechazar la EMA200</b> (${fmtUsd(e200)}) como resistencia — suele frenar rebotes.${projDown}`;
-    // 2 · Perdió la EMA200.
-    if (e200 && prev > e200 && price <= e200)
-      return `📉 Acaba de <b>perder la EMA200</b> (${fmtUsd(e200)}) — se pone bajista de fondo.${projDown}`;
-    // 3 · Cruce fresco de la EMA21 a la baja.
-    if (e21 && e21p && prev > e21p && price <= e21)
-      return `📉 Acaba de <b>perder la EMA21</b> (${fmtUsd(e21)}) y se puso bajista de corto plazo.${projDown}`;
-    // 4 · Perdió la EMA50.
-    if (e50 && prev > e50 && price <= e50)
-      return `📉 Acaba de <b>perder la EMA50</b> (${fmtUsd(e50)}) — se debilita el mediano plazo.${projDown}`;
-    // 5 · Rechazo en una resistencia estructural.
-    if (res && near(recentHigh, res, 0.015) && price < res)
-      return `📉 Rechazó la resistencia de <b>${fmtUsd(res)}</b>.${projDown}`;
-    if (projDown) return `📉 Setup bajista de corto plazo.${projDown}`;
-  }
-  return null;
 }
 
 /* ───────────────────────── radar de gaps / pre-market ─────────────────────
