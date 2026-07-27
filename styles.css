@@ -2610,6 +2610,26 @@ button:focus-visible, a:focus-visible, input:focus-visible,
   outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px;
 }
 
+/* ── Screener: barra de alcance (curado / universo completo) + contador ───── */
+.screener-scope {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px; margin-bottom: 12px;
+}
+.screener-scope-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.screener-scope-badge {
+  font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border-soft); color: var(--text-dim);
+}
+.screener-scope-count { font-size: 12px; color: var(--text-faint); font-family: 'IBM Plex Mono', monospace; }
+.screener-scope-btn { font-weight: 700; }
+.screener-results-count { font-size: 12.5px; color: var(--text-faint); margin: 0 2px 10px; }
+.scr-buy-dot { font-size: 10px; }
+
+/* ── Comparador: resaltado del mejor valor por métrica ─────────────────────── */
+.cmp-best { position: relative; font-weight: 800; color: var(--up-text) !important; }
+.cmp-best::after { content: ' ★'; font-size: 10px; opacity: 0.85; }
+.cmp-win::after { content: ' ★'; font-size: 10px; opacity: 0.85; } /* marca al ganador sin pisar el color de la etiqueta */
+
 /* ── Alertas de Cashflow (Dividendos): doble ganancia renta + zona de compra ─ */
 .cfa-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));

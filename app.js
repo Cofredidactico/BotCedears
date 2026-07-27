@@ -4256,10 +4256,51 @@ function wireDashboardEvents() {
 const SCREENER_SORT_OPTIONS = [
   { key: 'score', label: 'Score (mayor a menor)' },
   { key: 'change', label: 'Variación % (mayor a menor)' },
+  { key: 'volume', label: 'Volumen relativo (mayor a menor)' },
   { key: 'rsi', label: 'RSI (menor a mayor)' },
   { key: 'ticker', label: 'Ticker (A-Z)' },
 ];
-const screenerState = { minScore: 0, category: 'all', sector: 'all', signal: 'all', rsiFilter: 'all', sortBy: 'score', quick: 'all' };
+// Barrido del universo completo (opt-in): computeLightSignal pide 2 requests
+// por activo, así que los ~400 que no están en el dashboard se cargan en lotes
+// con pausa entre cada uno para no saturar la API. Se cachean en dashState.data
+// (mismo store que el dashboard) → una vez cargados, sirven a toda la app.
+const SCREENER_BATCH_SIZE = 12;
+const SCREENER_BATCH_DELAY_MS = 900;
+const screenerState = { minScore: 0, category: 'all', sector: 'all', signal: 'all', rsiFilter: 'all', zone: 'all', volume: 'all', sortBy: 'score', quick: 'all', scope: 'curated', loadingFull: false };
+
+// Tickers base según el alcance elegido: universo curado (rápido, ya cargado
+// por el dashboard) o universo completo (opt-in, se carga progresivamente).
+function screenerBaseTickers() {
+  return screenerState.scope === 'full' ? universe.map(a => a.ticker) : DASHBOARD_UNIVERSE;
+}
+
+// Carga progresiva del universo completo para el Screener. Solo corre cuando el
+// usuario activa el alcance "completo"; se detiene sola si vuelve al curado.
+async function loadScreenerUniverse() {
+  if (screenerState.loadingFull) return;
+  screenerState.loadingFull = true;
+  if (!state.asset && state.view === 'screener') renderReport();
+  try {
+    const macro = dashState.macro ?? await getMacro();
+    dashState.macro = macro;
+    const pending = universe.map(a => a.ticker).filter(t => !dashState.data[t] && !dashState.loading.has(t));
+    for (let i = 0; i < pending.length; i += SCREENER_BATCH_SIZE) {
+      if (screenerState.scope !== 'full') break; // el usuario volvió al universo curado
+      const batch = pending.slice(i, i + SCREENER_BATCH_SIZE);
+      await Promise.all(batch.map(async (ticker) => {
+        dashState.loading.add(ticker);
+        try { dashState.data[ticker] = await computeLightSignal(ticker, macro); }
+        catch (_) { /* se saltea el activo que falle, sin romper el barrido */ }
+        finally { dashState.loading.delete(ticker); }
+      }));
+      if (!state.asset && state.view === 'screener') renderReport();
+      if (i + SCREENER_BATCH_SIZE < pending.length) await new Promise(res => setTimeout(res, SCREENER_BATCH_DELAY_MS));
+    }
+  } finally {
+    screenerState.loadingFull = false;
+    if (!state.asset && state.view === 'screener') renderReport();
+  }
+}
 const SCREENER_QUICK_FILTERS = [
   { key: 'all', label: 'Todo el universo' },
   { key: 'argentina', label: '🇦🇷 Argentina' },
@@ -4268,7 +4309,7 @@ const SCREENER_QUICK_FILTERS = [
 
 function screenerSectorOptions() {
   const set = new Set();
-  for (const ticker of DASHBOARD_UNIVERSE) {
+  for (const ticker of screenerBaseTickers()) {
     const a = universe.find(x => x.ticker === ticker);
     if (a?.sector) set.add(a.sector);
   }
@@ -4276,19 +4317,22 @@ function screenerSectorOptions() {
 }
 
 function screenerRows() {
-  let rows = DASHBOARD_UNIVERSE.map(ticker => ({ ticker, d: dashState.data[ticker] })).filter(e => e.d);
+  let rows = screenerBaseTickers().map(ticker => ({ ticker, d: dashState.data[ticker] })).filter(e => e.d);
   if (screenerState.quick === 'argentina') rows = rows.filter(e => AR_TICKERS.has(e.ticker));
   else if (screenerState.quick === 'cripto') rows = rows.filter(e => CRYPTO_RELATED.has(e.ticker));
   if (screenerState.category !== 'all') rows = rows.filter(e => e.d.category === screenerState.category);
   if (screenerState.sector !== 'all') rows = rows.filter(e => e.d.sector === screenerState.sector);
   if (screenerState.signal !== 'all') rows = rows.filter(e => e.d.scoreLabel === screenerState.signal);
   if (screenerState.minScore > 0) rows = rows.filter(e => e.d.score >= screenerState.minScore);
+  if (screenerState.zone === 'buy') rows = rows.filter(e => e.d.alert?.type === 'buy');
+  if (screenerState.volume === 'unusual') rows = rows.filter(e => e.d.relVolume != null && e.d.relVolume >= 1.5);
   if (screenerState.rsiFilter === 'oversold') rows = rows.filter(e => e.d.rsi != null && e.d.rsi < 30);
   else if (screenerState.rsiFilter === 'overbought') rows = rows.filter(e => e.d.rsi != null && e.d.rsi > 70);
   else if (screenerState.rsiFilter === 'neutral') rows = rows.filter(e => e.d.rsi != null && e.d.rsi >= 30 && e.d.rsi <= 70);
   const sorters = {
     score: (a, b) => b.d.score - a.d.score,
     change: (a, b) => b.d.changePct - a.d.changePct,
+    volume: (a, b) => (b.d.relVolume ?? 0) - (a.d.relVolume ?? 0),
     rsi: (a, b) => (a.d.rsi ?? 999) - (b.d.rsi ?? 999),
     ticker: (a, b) => a.ticker.localeCompare(b.ticker),
   };
@@ -4297,7 +4341,10 @@ function screenerRows() {
 
 function screenerPageHTML() {
   const rows = screenerRows();
-  const totalLoaded = DASHBOARD_UNIVERSE.filter(t => dashState.data[t]).length;
+  const full = screenerState.scope === 'full';
+  const universeSize = full ? universe.length : DASHBOARD_UNIVERSE.length;
+  const analyzed = full ? universe.filter(a => dashState.data[a.ticker]).length : DASHBOARD_UNIVERSE.filter(t => dashState.data[t]).length;
+  const stillLoading = analyzed < universeSize;
   const sectorOptions = screenerSectorOptions();
   const selectField = (id, label, options) => `
     <label class="screener-filter"><span>${esc(label)}</span>
@@ -4305,7 +4352,18 @@ function screenerPageHTML() {
     </label>`;
   return `
     ${sectionTitleHTML('Screener', 'filter')}
-    <div class="dash-intro">Filtrá el universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos por score, sector, categoría, señal técnica y RSI — mismo motor de análisis que el resto de la plataforma, sin pedidos extra.${totalLoaded < DASHBOARD_UNIVERSE.length ? ` Cargando datos de ${DASHBOARD_UNIVERSE.length - totalLoaded} activo(s) más…` : ''}</div>
+    <div class="dash-intro">Filtrá ${full ? `el universo <strong>completo</strong> de ${universe.length} activos` : `el universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos`} por score, sector, categoría, señal, RSI, <strong>zona de compra</strong> y <strong>volumen inusual</strong> — mismo motor de análisis que el resto de la plataforma.${stillLoading ? ` ${full && screenerState.loadingFull ? 'Analizando' : 'Cargando'} ${universeSize - analyzed} activo(s) más…` : ''}</div>
+
+    <div class="screener-scope">
+      <div class="screener-scope-info">
+        <span class="screener-scope-badge">${full ? '🌐 Universo completo' : '⚡ Universo curado'}</span>
+        <span class="screener-scope-count">${analyzed}${stillLoading ? `/${universeSize}` : ''} analizados</span>
+      </div>
+      ${full
+        ? `<button class="screener-quick-chip" id="scr-scope-curated">← Volver al universo curado (rápido)</button>`
+        : `<button class="screener-quick-chip screener-scope-btn" id="scr-scope-full">🌐 Analizar universo completo (${universe.length} activos)</button>`}
+    </div>
+
     <div class="screener-quick-filters">
       ${SCREENER_QUICK_FILTERS.map(q => `<button class="screener-quick-chip ${screenerState.quick === q.key ? 'active' : ''}" data-quick="${q.key}">${esc(q.label)}</button>`).join('')}
     </div>
@@ -4313,6 +4371,12 @@ function screenerPageHTML() {
       <div class="screener-filters">
         ${selectField('scr-minscore', 'Score mínimo', [0, 30, 45, 65, 80].map(v => `<option value="${v}" ${screenerState.minScore === v ? 'selected' : ''}>${v === 0 ? 'Cualquiera' : `${v}+`}</option>`).join(''))}
         ${selectField('scr-signal', 'Señal', SIGNAL_FILTERS.map(s => `<option value="${esc(s)}" ${screenerState.signal === s ? 'selected' : ''}>${s === 'all' ? 'Todas' : esc(s)}</option>`).join(''))}
+        ${selectField('scr-zone', 'Zona de compra', `
+          <option value="all" ${screenerState.zone === 'all' ? 'selected' : ''}>Cualquiera</option>
+          <option value="buy" ${screenerState.zone === 'buy' ? 'selected' : ''}>Solo en zona de compra</option>`)}
+        ${selectField('scr-volume', 'Volumen', `
+          <option value="all" ${screenerState.volume === 'all' ? 'selected' : ''}>Cualquiera</option>
+          <option value="unusual" ${screenerState.volume === 'unusual' ? 'selected' : ''}>Inusual (≥1,5x)</option>`)}
         ${selectField('scr-sector', 'Sector', `<option value="all" ${screenerState.sector === 'all' ? 'selected' : ''}>Todos</option>` + sectorOptions.map(s => `<option value="${esc(s)}" ${screenerState.sector === s ? 'selected' : ''}>${esc(s)}</option>`).join(''))}
         ${selectField('scr-category', 'Categoría', ['all', 'CEDEAR', 'ETF', 'Cripto'].map(c => `<option value="${c}" ${screenerState.category === c ? 'selected' : ''}>${c === 'all' ? 'Todas' : c}</option>`).join(''))}
         ${selectField('scr-rsi', 'RSI', `
@@ -4323,19 +4387,21 @@ function screenerPageHTML() {
         ${selectField('scr-sort', 'Ordenar por', SCREENER_SORT_OPTIONS.map(o => `<option value="${o.key}" ${screenerState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join(''))}
       </div>
     </div>
+    <div class="screener-results-count">${rows.length} activo(s) cumplen los filtros${stillLoading ? ` · ${analyzed} analizados hasta ahora` : ''}</div>
     <div class="card bt-table-card">
       <div class="bt-table-wrap">
         <table class="bt-table screener-table">
-          <thead><tr><th class="scr-left">Ticker</th><th class="scr-left">Nombre</th><th class="scr-left">Sector</th><th>Precio</th><th>Var %</th><th>RSI</th><th class="scr-left">Señal</th><th>Score</th></tr></thead>
+          <thead><tr><th class="scr-left">Ticker</th><th class="scr-left">Nombre</th><th class="scr-left">Sector</th><th>Precio</th><th>Var %</th><th>RSI</th><th>Vol.</th><th class="scr-left">Señal</th><th>Score</th></tr></thead>
           <tbody>
-            ${!rows.length ? `<tr><td colspan="8" class="bt-nd" style="text-align:center; padding:26px;">Ningún activo del universo curado cumple estos filtros ahora mismo.</td></tr>` : rows.map(({ ticker, d }) => `
+            ${!rows.length ? `<tr><td colspan="9" class="bt-nd" style="text-align:center; padding:26px;">${stillLoading ? 'Analizando activos… los resultados aparecen a medida que se cargan.' : 'Ningún activo cumple estos filtros ahora mismo.'}</td></tr>` : rows.map(({ ticker, d }) => `
               <tr class="screener-row" data-ticker="${esc(ticker)}">
-                <td class="scr-left" style="font-weight:700;">${esc(ticker)}</td>
+                <td class="scr-left" style="font-weight:700;">${esc(ticker)}${d.alert?.type === 'buy' ? ' <span class="scr-buy-dot" title="En zona de compra">🟢</span>' : ''}</td>
                 <td class="scr-left" style="color:var(--text-mute);">${esc(d.name)}</td>
                 <td class="scr-left" style="color:var(--text-mute);">${esc(d.sector ?? 'N/D')}</td>
                 <td>${fmtUsd(d.price)}</td>
                 <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
                 <td>${d.rsi != null ? d.rsi.toFixed(0) : 'N/D'}</td>
+                <td class="${d.relVolume != null && d.relVolume >= 1.5 ? 'bt-pos' : ''}" title="Volumen de hoy vs. promedio">${d.relVolume != null ? d.relVolume.toFixed(1) + 'x' : 'N/D'}</td>
                 <td class="scr-left"><span class="bt-label-dot" style="background:${scoreLabelColor(d.scoreLabel).color};"></span>${esc(d.scoreLabel)}</td>
                 <td style="font-weight:700;">${d.score}</td>
               </tr>`).join('')}
@@ -4352,12 +4418,27 @@ function wireScreenerEvents() {
   };
   bind('scr-minscore', 'minScore', Number);
   bind('scr-signal', 'signal');
+  bind('scr-zone', 'zone');
+  bind('scr-volume', 'volume');
   bind('scr-sector', 'sector');
   bind('scr-category', 'category');
   bind('scr-rsi', 'rsiFilter');
   bind('scr-sort', 'sortBy');
-  els.report.querySelectorAll('.screener-quick-chip').forEach(el => {
+  els.report.querySelectorAll('.screener-quick-chip[data-quick]').forEach(el => {
     el.addEventListener('click', () => { screenerState.quick = el.dataset.quick; renderReport(); });
+  });
+  const fullBtn = document.getElementById('scr-scope-full');
+  if (fullBtn) fullBtn.addEventListener('click', () => {
+    screenerState.scope = 'full';
+    renderReport();
+    loadScreenerUniverse(); // carga progresiva del resto del universo (opt-in)
+  });
+  const curatedBtn = document.getElementById('scr-scope-curated');
+  if (curatedBtn) curatedBtn.addEventListener('click', () => {
+    screenerState.scope = 'curated'; // detiene el barrido en curso (el loop chequea el scope)
+    // el sector seleccionado puede no existir en el universo curado → reset defensivo
+    if (screenerState.sector !== 'all' && !screenerSectorOptions().includes(screenerState.sector)) screenerState.sector = 'all';
+    renderReport();
   });
   els.report.querySelectorAll('.screener-row').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.ticker));
@@ -5556,8 +5637,11 @@ const compareState = { tickers: [], loading: false, error: null, results: [] };
 async function computeCompareEntry(ticker, macro) {
   const asset = await getAsset(ticker);
   if (!asset) throw new Error(`"${ticker}" no está en el universo cargado.`);
-  const [quote, candles, fundamentals] = await Promise.all([getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker)]);
+  const [quote, candles, fundamentals, dividends] = await Promise.all([getQuote(ticker), getCandles(ticker, '1day', 220), getFundamentals(ticker), getDividends(ticker).catch(() => null)]);
   const technical = computeTechnical(candles);
+  // Yield TTM directo sobre el precio ya obtenido (no depende de los stores de
+  // otras vistas, como sí lo hace dividendYield()/dividendPrice()).
+  const divYield = dividends?.ttm > 0 && quote.usd > 0 ? (dividends.ttm / quote.usd) * 100 : null;
   const fundForScore = fundamentals?.hasData ? {
     hasData: true, revenueGrowth: fundamentals.revenueGrowth ?? null, epsGrowth: fundamentals.epsGrowth ?? null,
     roe: fundamentals.roe ?? null, netMargin: fundamentals.netMargin ?? null, peg: fundamentals.peg,
@@ -5569,8 +5653,20 @@ async function computeCompareEntry(ticker, macro) {
     price: quote.usd, changePct: quote.changePct, isReal: quote.isReal && candles.isReal,
     score: scoreResult.score, scoreLabel: scoreResult.scoreLabel, scoreBreakdown: scoreResult.scoreBreakdown,
     fundamentals, rsi: isNaN(technical.rsi) ? null : technical.rsi, atr: technical.atr,
+    divYield,
     closes: candles.c, dates: candles.t,
   };
+}
+
+// Marca con la clase .cmp-best la celda del "ganador" de una fila del
+// comparador. dir='high' → gana el mayor; dir='low' → gana el menor. Ignora
+// nulos y no marca nada si hay empate en la cima o un solo valor válido.
+function compareBestIndex(values, dir) {
+  const valid = values.map((v, i) => ({ v, i })).filter(e => e.v != null && !isNaN(e.v));
+  if (valid.length < 2) return -1;
+  valid.sort((a, b) => dir === 'low' ? a.v - b.v : b.v - a.v);
+  if (valid[0].v === valid[1].v) return -1; // empate en la cima → no se resalta
+  return valid[0].i;
 }
 
 async function runCompare(tickers) {
@@ -5596,7 +5692,7 @@ function comparePageHTML() {
   const results = compareState.results;
   return `
     ${sectionTitleHTML('Comparador de Activos', 'compare')}
-    <div class="dash-intro">Compará hasta ${COMPARE_MAX} activos lado a lado: score y su desglose por categoría, fundamentales, valuación y retorno % superpuesto en el mismo gráfico — todo calculado en el momento con datos reales.</div>
+    <div class="dash-intro">Compará hasta ${COMPARE_MAX} activos lado a lado: score y su desglose por categoría, fundamentales, valuación, <strong>dividend yield</strong> y retorno % superpuesto en el mismo gráfico — todo calculado en el momento con datos reales. La ★ marca al <strong>ganador de cada métrica</strong>.</div>
     <div class="card port-form-card">
       <div class="port-form">
         ${slots.map((v, i) => `
@@ -5618,7 +5714,19 @@ function comparePageHTML() {
               ${results.map(r => `<th>${esc(r.ticker)}</th>`).join('')}
             </tr></thead>
             <tbody>
-              <tr><td class="scr-left" style="font-weight:600;">Score</td>${results.map(r => `<td style="font-weight:700; color:${scoreLabelColor(r.scoreLabel).color};">${r.score} · ${esc(r.scoreLabel)}</td>`).join('')}</tr>
+              ${(() => {
+                // Índice ganador por métrica (mayor es mejor, salvo PE/PEG donde
+                // menor es mejor). Se resalta con ★ para leer de un vistazo cuál
+                // activo domina cada dimensión.
+                const bestScore = compareBestIndex(results.map(r => r.score), 'high');
+                const bestYield = compareBestIndex(results.map(r => r.divYield), 'high');
+                const bestPE = compareBestIndex(results.map(r => r.fundamentals?.peTTM ?? null), 'low');
+                const bestPEG = compareBestIndex(results.map(r => r.fundamentals?.peg ?? null), 'low');
+                const bestROE = compareBestIndex(results.map(r => r.fundamentals?.roe ?? null), 'high');
+                const bestRev = compareBestIndex(results.map(r => r.fundamentals?.revenueGrowth ?? null), 'high');
+                const anyYield = results.some(r => r.divYield != null);
+                return `
+              <tr><td class="scr-left" style="font-weight:600;">Score</td>${results.map((r, i) => `<td class="${i === bestScore ? 'cmp-win' : ''}" style="font-weight:700; color:${scoreLabelColor(r.scoreLabel).color};">${r.score} · ${esc(r.scoreLabel)}</td>`).join('')}</tr>
               <tr><td class="scr-left">Precio</td>${results.map(r => `<td>${fmtUsd(r.price)}</td>`).join('')}</tr>
               <tr><td class="scr-left">Variación diaria</td>${results.map(r => `<td class="${r.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(r.changePct)}</td>`).join('')}</tr>
               <tr><td class="scr-left">Sector</td>${results.map(r => `<td>${esc(r.sector ?? 'N/D')}</td>`).join('')}</tr>
@@ -5630,10 +5738,12 @@ function comparePageHTML() {
                   return `<td class="${!sb?.available ? 'bt-nd' : ''}">${sb?.available ? `${sb.pct}%` : 'N/D'}</td>`;
                 }).join('')}</tr>`;
               }).join('')}
-              <tr><td class="scr-left">PE (TTM)</td>${results.map(r => `<td>${r.fundamentals?.peTTM != null ? `${r.fundamentals.peTTM.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
-              <tr><td class="scr-left">PEG</td>${results.map(r => `<td>${r.fundamentals?.peg != null ? `${r.fundamentals.peg.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
-              <tr><td class="scr-left">ROE</td>${results.map(r => `<td>${r.fundamentals?.roe != null ? `${r.fundamentals.roe.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>
-              <tr><td class="scr-left">Crecimiento de ingresos</td>${results.map(r => `<td>${r.fundamentals?.revenueGrowth != null ? `${r.fundamentals.revenueGrowth.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>
+              ${anyYield ? `<tr><td class="scr-left">Dividend yield (TTM)</td>${results.map((r, i) => `<td class="${i === bestYield ? 'cmp-best' : ''}">${r.divYield != null ? `${r.divYield.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>` : ''}
+              <tr><td class="scr-left">PE (TTM)</td>${results.map((r, i) => `<td class="${i === bestPE ? 'cmp-best' : ''}">${r.fundamentals?.peTTM != null ? `${r.fundamentals.peTTM.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
+              <tr><td class="scr-left">PEG</td>${results.map((r, i) => `<td class="${i === bestPEG ? 'cmp-best' : ''}">${r.fundamentals?.peg != null ? `${r.fundamentals.peg.toFixed(1)}x` : 'N/D'}</td>`).join('')}</tr>
+              <tr><td class="scr-left">ROE</td>${results.map((r, i) => `<td class="${i === bestROE ? 'cmp-best' : ''}">${r.fundamentals?.roe != null ? `${r.fundamentals.roe.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>
+              <tr><td class="scr-left">Crecimiento de ingresos</td>${results.map((r, i) => `<td class="${i === bestRev ? 'cmp-best' : ''}">${r.fundamentals?.revenueGrowth != null ? `${r.fundamentals.revenueGrowth.toFixed(1)}%` : 'N/D'}</td>`).join('')}</tr>`;
+              })()}
             </tbody>
           </table>
         </div>
