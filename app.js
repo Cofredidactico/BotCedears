@@ -2179,6 +2179,7 @@ const VIEW_PAGES = {
   trackrecord: { html: trackRecordPageHTML, wire: wireTrackRecordEvents, load: () => { if (!trackState.started) loadTrackRecord(); } },
   dividends: { html: dividendsPageHTML, wire: wireDividendsEvents, load: loadDividendsData },
   compare: { html: comparePageHTML, wire: wireCompareEvents, load: () => {} },
+  basket: { html: basketPageHTML, wire: wireBasketEvents, load: () => {} },
   settings: { html: settingsPageHTML, wire: wireSettingsEvents, load: () => {} },
   bonds: { html: bondsPageHTML, wire: wireBondsEvents, load: loadBondsData },
   academy: { html: academyPageHTML, wire: wireAcademyEvents, load: () => {} },
@@ -2271,6 +2272,27 @@ function animateCountUp(el, target, duration = 700) {
     if (progress < 1) requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
+}
+
+// Explicabilidad del score: qué mide cada factor y cómo leer su valor. Texto
+// estático y honesto (describe la metodología real de scoring.js), no inventa
+// drivers puntuales. Se muestra al expandir cada fila de la Composición del Score.
+const SCORE_FACTOR_INFO = {
+  trend: 'Mide si el precio está en tendencia sostenida: medias móviles alineadas, ADX (fuerza de la tendencia), confirmación en el timeframe semanal, volumen (OBV) y fuerza relativa vs. el mercado. Alto = tendencia clara y confirmada a favor.',
+  momentum: 'El envión de corto plazo: RSI, MACD, divergencias precio/RSI y patrón de la última vela. Alto = el movimiento tiene impulso; una divergencia lo baja porque suele anticipar agotamiento.',
+  fundamentals: 'La salud del negocio detrás del papel: crecimiento de ingresos y ganancias (EPS), ROE y margen neto. Alto = la empresa crece y es rentable. Requiere datos fundamentales — en muchos ETFs y cripto no aplica.',
+  valuation: 'Qué tan caro o barato cotiza comparado con su PROPIO sector (rangos de PE por industria, no un umbral único). Alto = múltiplo atractivo para su sector; bajo = exigente.',
+  news: 'Señal agregada del flujo de noticias reciente del activo. Alto = titulares mayormente favorables en las últimas semanas.',
+  macro: 'El contexto de mercado que rodea a todos los activos: volatilidad (VIX), riesgo país y clima general de riesgo. Alto = entorno favorable para tomar riesgo.',
+  risk: 'Penaliza volatilidad y drawdown elevados. Alto = el papel se movió de forma más estable; bajo = más brusco y arriesgado de aguantar.',
+  sentiment: 'Termómetro del ánimo del mercado (Fear & Greed, sentimiento de noticias). Complementa la lectura, no la manda: pesa poco a propósito.',
+  liquidity: 'Qué tan fácil es entrar y salir sin mover el precio (volumen operado). Alto = más líquido, con spreads más sanos y menos slippage.',
+};
+function scoreFactorReading(sb) {
+  if (!sb.available) return { txt: 'Sin datos suficientes para este factor: se excluye del score y su peso se reparte entre los demás.', cls: 'nd' };
+  if (sb.pct >= 66) return { txt: `Lectura fuerte (${sb.pct}/100): este factor suma a favor.`, cls: 'up' };
+  if (sb.pct >= 40) return { txt: `Lectura neutral (${sb.pct}/100): ni suma ni resta con claridad.`, cls: 'mid' };
+  return { txt: `Lectura débil (${sb.pct}/100): este factor resta al score.`, cls: 'down' };
 }
 
 function renderReportImpl() {
@@ -2507,13 +2529,25 @@ function renderReportImpl() {
 
     <div class="card score-card">
       <div class="score-card-title">Composición del Score ${coverageWeight < fullWeight ? `<span style="text-transform:none; letter-spacing:0; color:oklch(0.58 0.018 260);">— calculado sobre ${coverageWeight}/${fullWeight} puntos de peso (categorías sin datos excluidas y redistribuidas)</span>` : ''}</div>
+      <div class="score-card-hint">Tocá cada factor para ver <strong>qué mide</strong> y <strong>cómo viene</strong>.</div>
       <div class="score-rows">
-        ${scoreBreakdown.map(sb => `
-          <div class="score-row">
-            <div class="score-label">${esc(sb.label)}${sb.available ? '' : ' (sin datos)'}</div>
-            <div class="score-bar-bg"><div class="score-bar-fill" style="width:${sb.pct}%; opacity:${sb.available ? 1 : 0.25};"></div></div>
-            <div class="score-fraction">${sb.value}/${sb.weight}</div>
-          </div>`).join('')}
+        ${scoreBreakdown.map(sb => {
+          const rd = scoreFactorReading(sb);
+          const info = SCORE_FACTOR_INFO[sb.key];
+          return `
+          <details class="score-row-x">
+            <summary class="score-row">
+              <div class="score-label">${esc(sb.label)}${sb.available ? '' : ' (sin datos)'} <span class="score-why-caret" aria-hidden="true">▾</span></div>
+              <div class="score-bar-bg"><div class="score-bar-fill" style="width:${sb.pct}%; opacity:${sb.available ? 1 : 0.25};"></div></div>
+              <div class="score-fraction">${sb.value}/${sb.weight}</div>
+            </summary>
+            <div class="score-why">
+              <div class="score-why-read ${rd.cls}">${esc(rd.txt)}</div>
+              ${info ? `<div class="score-why-what">${esc(info)}</div>` : ''}
+              <div class="score-why-weight">Peso base en el score: <strong>${sb.weight}</strong> puntos.</div>
+            </div>
+          </details>`;
+        }).join('')}
       </div>
     </div>
 
@@ -3232,6 +3266,7 @@ const SIDEBAR_NAV_GROUPS = [
   ] },
   { label: 'Motor de Análisis', items: [
     { view: 'compare', label: 'Comparador', icon: 'compare' },
+    { view: 'basket', label: 'Modo Cesta', icon: 'radar' },
     { view: 'backtest', label: 'Backtesting', icon: 'trend' },
     { view: 'trackrecord', label: 'Track Record del Motor', icon: 'award' },
   ] },
@@ -5769,6 +5804,187 @@ function wireCompareEvents() {
     const tickers = Array.from(new Set(compareState.tickers.map(t => (t || '').trim().toUpperCase()).filter(Boolean)));
     if (tickers.length < 2) { compareState.error = `Ingresá al menos 2 tickers para comparar.`; renderReport(); return; }
     runCompare(tickers.slice(0, COMPARE_MAX));
+  });
+}
+
+/* ───────────────────────── Modo Cesta ─────────────────────────
+ * Analiza un CONJUNTO de activos como grupo ANTES de comprarlo: score
+ * combinado ponderado, asignación por sector, y correlación promedio entre
+ * los miembros (sobre los retornos diarios reales) para leer si la cesta está
+ * bien diversificada o si sus papeles se mueven todos juntos. 100% client-side
+ * reusando computeLightSignal (score + sector + cierres), sin API nueva. */
+const BASKET_MAX = 8;
+const basketState = { inputs: [''], weights: {}, loading: false, error: null, results: [] };
+
+// Serie de retornos diarios a partir de los cierres. La correlación entre pares
+// reusa pearsonCorr() (ya definido para la matriz de correlación de la cartera),
+// que exige arrays de igual largo → se alinean por las últimas N comunes.
+function returnsSeries(closes) {
+  const r = [];
+  for (let i = 1; i < closes.length; i++) if (closes[i - 1] > 0) r.push(closes[i] / closes[i - 1] - 1);
+  return r;
+}
+function alignedCorr(a, b) {
+  const n = Math.min(a.length, b.length);
+  if (n < 20) return null;
+  return pearsonCorr(a.slice(-n), b.slice(-n));
+}
+
+async function runBasket(tickers) {
+  basketState.loading = true;
+  basketState.error = null;
+  renderReport();
+  try {
+    const macro = await getMacro();
+    basketState.results = await Promise.all(tickers.map(t => computeLightSignal(t, macro).then(d => ({ ticker: t, d })).catch(() => ({ ticker: t, d: null }))));
+    const ok = basketState.results.filter(r => r.d);
+    if (!ok.length) throw new Error('No se pudo analizar ninguno de los activos ingresados.');
+    // Peso por defecto: equitativo entre los que cargaron bien.
+    for (const r of ok) if (basketState.weights[r.ticker] == null) basketState.weights[r.ticker] = Math.round((100 / ok.length) * 10) / 10;
+    showToast(`Cesta de ${ok.length} activo(s) analizada`, 'success');
+  } catch (e) {
+    basketState.error = e.message;
+    basketState.results = [];
+    showToast(e.message, 'error');
+  } finally {
+    basketState.loading = false;
+    if (!state.asset && state.view === 'basket') renderReport();
+  }
+}
+
+// Métricas de la cesta a partir de los resultados y los pesos actuales.
+function basketMetrics() {
+  const rows = basketState.results.filter(r => r.d);
+  if (!rows.length) return null;
+  const w = {};
+  let wsum = 0;
+  for (const r of rows) { const x = Math.max(0, Number(basketState.weights[r.ticker]) || 0); w[r.ticker] = x; wsum += x; }
+  if (wsum <= 0) { for (const r of rows) w[r.ticker] = 1; wsum = rows.length; } // fallback equitativo
+  // Score combinado ponderado.
+  const combinedScore = Math.round(rows.reduce((s, r) => s + r.d.score * w[r.ticker], 0) / wsum);
+  // Asignación por sector.
+  const bySector = {};
+  for (const r of rows) { const sec = r.d.sector ?? 'Otros'; bySector[sec] = (bySector[sec] ?? 0) + w[r.ticker] / wsum; }
+  const sectorRows = Object.entries(bySector).map(([sector, pct]) => ({ sector, pct })).sort((a, b) => b.pct - a.pct);
+  const topSectorPct = sectorRows[0]?.pct ?? 0;
+  // Correlación promedio entre pares (sobre retornos diarios reales).
+  const series = rows.map(r => ({ ticker: r.ticker, ret: returnsSeries(r.d.closes || []) }));
+  let sum = 0, cnt = 0;
+  for (let i = 0; i < series.length; i++) for (let j = i + 1; j < series.length; j++) {
+    const c = alignedCorr(series[i].ret, series[j].ret);
+    if (c != null) { sum += c; cnt++; }
+  }
+  const avgCorr = cnt ? sum / cnt : null;
+  const label = combinedScore >= 80 ? 'Compra Fuerte' : combinedScore >= 65 ? 'Compra Moderada' : combinedScore >= 45 ? 'Mantener' : combinedScore >= 30 ? 'Reducir' : 'Venta';
+  return { rows, w, wsum, combinedScore, combinedLabel: label, sectorRows, topSectorPct, avgCorr };
+}
+
+function basketPageHTML() {
+  const slots = basketState.inputs.length ? basketState.inputs : [''];
+  const m = basketState.results.length ? basketMetrics() : null;
+  const corrRead = m?.avgCorr == null ? null
+    : m.avgCorr < 0.4 ? { txt: 'Correlación baja: buena diversificación — los papeles no se mueven todos juntos.', cls: 'up' }
+    : m.avgCorr < 0.7 ? { txt: 'Correlación media: diversificación moderada.', cls: 'mid' }
+    : { txt: 'Correlación alta: poca diversificación real — la cesta se mueve casi como un solo activo.', cls: 'down' };
+  const concRead = m && m.topSectorPct > 0.5 ? `⚠ Concentración: ${Math.round(m.topSectorPct * 100)}% en ${esc(m.sectorRows[0].sector)}.` : null;
+  return `
+    ${sectionTitleHTML('Modo Cesta', 'radar')}
+    <div class="dash-intro">Armá un conjunto de hasta ${BASKET_MAX} activos y analizalo <strong>como grupo antes de comprarlo</strong>: score combinado ponderado, asignación por sector y correlación promedio entre sus miembros (sobre retornos diarios reales). Ajustá los pesos para ver cómo cambia el conjunto. Todo con datos reales, sin guardar nada.</div>
+
+    <div class="card port-form-card">
+      <div class="basket-inputs">
+        ${slots.map((v, i) => `<input list="basket-ticker-list" data-basket-slot="${i}" class="port-input basket-input" placeholder="Ticker ${i + 1}" aria-label="Ticker ${i + 1} de la cesta" autocomplete="off" style="text-transform:uppercase;" value="${esc(v)}" />`).join('')}
+        <datalist id="basket-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
+      </div>
+      <div class="basket-form-actions">
+        ${slots.length < BASKET_MAX ? '<button class="port-csv-btn" id="basket-add-slot">+ Agregar activo</button>' : ''}
+        <button class="port-add-btn" id="basket-run" ${basketState.loading ? 'disabled' : ''}>${basketState.loading ? 'Analizando…' : 'Analizar cesta'}</button>
+      </div>
+    </div>
+
+    ${basketState.error ? `<div class="card watch-empty">${esc(basketState.error)}</div>` : ''}
+    ${!m ? '' : `
+      <div class="basket-summary-grid">
+        <div class="card port-summary-card">
+          <div class="dash-radar-title">Score combinado</div>
+          <div class="port-summary-value" style="color:${scoreLabelColor(m.combinedLabel).color};">${m.combinedScore}</div>
+          <div class="port-summary-sub">${esc(m.combinedLabel)} · ponderado por peso</div>
+        </div>
+        <div class="card port-summary-card">
+          <div class="dash-radar-title">Correlación promedio</div>
+          <div class="port-summary-value">${m.avgCorr != null ? m.avgCorr.toFixed(2) : 'N/D'}</div>
+          <div class="port-summary-sub">${m.rows.length} activo(s) en la cesta</div>
+        </div>
+        <div class="card port-summary-card">
+          <div class="dash-radar-title">Sectores</div>
+          <div class="port-summary-value">${m.sectorRows.length}</div>
+          <div class="port-summary-sub">${concRead ? concRead : 'distribución balanceada'}</div>
+        </div>
+      </div>
+
+      ${corrRead ? `<div class="basket-read ${corrRead.cls}">${esc(corrRead.txt)}</div>` : ''}
+
+      <div class="card bt-table-card" style="margin-bottom:20px;">
+        <div class="bt-table-wrap">
+          <table class="bt-table">
+            <thead><tr><th class="scr-left">Activo</th><th class="scr-left">Sector</th><th>Var %</th><th>Score</th><th>Peso %</th></tr></thead>
+            <tbody>
+              ${m.rows.map(r => `
+                <tr class="port-row" data-dash-ticker="${esc(r.ticker)}">
+                  <td class="scr-left" style="font-weight:700;">${esc(r.ticker)} <span class="port-pnl-abs">${esc(r.d.name)}</span></td>
+                  <td class="scr-left" style="color:var(--text-mute);">${esc(r.d.sector ?? 'N/D')}</td>
+                  <td class="${r.d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(r.d.changePct)}</td>
+                  <td style="font-weight:700; color:${scoreLabelColor(r.d.scoreLabel).color};">${r.d.score}</td>
+                  <td><input type="number" class="basket-weight" data-basket-weight="${esc(r.ticker)}" min="0" step="1" value="${m.w[r.ticker]}" style="width:64px;" aria-label="Peso de ${esc(r.ticker)}" /></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="bt-disclaimer">Los pesos no tienen que sumar 100: se normalizan solos. Tocá una fila (fuera del campo de peso) para abrir la ficha del activo.</div>
+      </div>
+
+      <div class="card port-notes-card">
+        <div class="dash-radar-title">Asignación por sector</div>
+        ${m.sectorRows.map(s => `
+          <div class="score-row" style="grid-template-columns: 150px 1fr 50px;">
+            <span class="score-label">${esc(s.sector)}</span>
+            <div class="score-bar-bg"><div class="score-bar-fill" style="width:${Math.round(s.pct * 100)}%;"></div></div>
+            <span class="score-fraction">${Math.round(s.pct * 100)}%</span>
+          </div>`).join('')}
+      </div>
+      <div class="bt-disclaimer" style="margin-top:14px;">El score combinado es el promedio ponderado de los scores individuales; la correlación se calcula sobre los retornos diarios reales de la ventana de velas de cada activo. No es asesoramiento financiero.</div>
+    `}`;
+}
+
+function wireBasketEvents() {
+  els.report.querySelectorAll('.basket-input').forEach(input => {
+    input.addEventListener('input', () => { basketState.inputs[Number(input.dataset.basketSlot)] = input.value.toUpperCase(); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('basket-run')?.click(); });
+  });
+  const addBtn = document.getElementById('basket-add-slot');
+  if (addBtn) addBtn.addEventListener('click', () => {
+    // Persistir lo tipeado antes de re-renderizar (el input handler ya lo hace,
+    // pero garantizamos el estado por si no hubo evento input).
+    els.report.querySelectorAll('.basket-input').forEach(inp => { basketState.inputs[Number(inp.dataset.basketSlot)] = inp.value.toUpperCase(); });
+    if (basketState.inputs.length < BASKET_MAX) basketState.inputs.push('');
+    renderReport();
+  });
+  const runBtn = document.getElementById('basket-run');
+  if (runBtn) runBtn.addEventListener('click', () => {
+    const tickers = Array.from(new Set(basketState.inputs.map(t => (t || '').trim().toUpperCase()).filter(Boolean)));
+    if (tickers.length < 2) { basketState.error = 'Ingresá al menos 2 tickers para armar la cesta.'; renderReport(); return; }
+    runBasket(tickers.slice(0, BASKET_MAX));
+  });
+  els.report.querySelectorAll('.basket-weight').forEach(inp => {
+    inp.addEventListener('input', () => {
+      basketState.weights[inp.dataset.basketWeight] = inp.value === '' ? 0 : Number(inp.value);
+      // Re-render diferido para no perder el foco mientras se tipea: solo
+      // recalcula al soltar el campo (change), no en cada tecla.
+    });
+    inp.addEventListener('change', () => renderReport());
+  });
+  els.report.querySelectorAll('.port-row[data-dash-ticker]').forEach(el => {
+    el.addEventListener('click', (e) => { if (e.target.closest('.basket-weight')) return; selectTicker(el.dataset.dashTicker); });
   });
 }
 
