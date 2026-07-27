@@ -2183,6 +2183,7 @@ const VIEW_PAGES = {
   settings: { html: settingsPageHTML, wire: wireSettingsEvents, load: () => {} },
   bonds: { html: bondsPageHTML, wire: wireBondsEvents, load: loadBondsData },
   academy: { html: academyPageHTML, wire: wireAcademyEvents, load: () => {} },
+  panorama: { html: panoramaPageHTML, wire: wirePanoramaEvents, load: () => { if (!dashState.started) loadDashboardData(); loadPanoramaData(); } },
 };
 
 function renderReport() {
@@ -3247,6 +3248,7 @@ function sortAndFilterTickers(tickers) {
 const SIDEBAR_NAV_GROUPS = [
   { label: 'Mercado', items: [
     { view: 'dashboard', label: 'Dashboard', icon: 'grid' },
+    { view: 'panorama', label: 'Panorama de Mercado', icon: 'flag' },
     { view: 'macro', label: 'Noticias & Macro', icon: 'globe' },
     { view: 'calendar', label: 'Calendario Económico', icon: 'calendar' },
   ] },
@@ -5985,6 +5987,130 @@ function wireBasketEvents() {
   });
   els.report.querySelectorAll('.port-row[data-dash-ticker]').forEach(el => {
     el.addEventListener('click', (e) => { if (e.target.closest('.basket-weight')) return; selectTicker(el.dataset.dashTicker); });
+  });
+}
+
+/* ───────────────────────── Panorama de Mercado ─────────────────────────
+ * El "primer vistazo" del día: índices (vía ETF-proxy que la app ya cotiza),
+ * panel de acciones argentinas, contexto macro (CCL/brecha, riesgo país, VIX,
+ * Fear & Greed), amplitud del mercado y movers del universo cargado. Todo
+ * con datos reales ya disponibles — sin API nueva ni datos inventados. */
+const PANORAMA_INDICES = [
+  { proxy: 'SPY', label: 'S&P 500', via: 'SPY' },
+  { proxy: 'QQQ', label: 'Nasdaq 100', via: 'QQQ' },
+  { proxy: 'DIA', label: 'Dow Jones', via: 'DIA' },
+  { proxy: 'IWM', label: 'Russell 2000', via: 'IWM' },
+  { proxy: 'EWZ', label: 'Brasil', via: 'EWZ' },
+  { proxy: 'ACWI', label: 'Mundo', via: 'ACWI' },
+];
+const panoramaState = { indices: {}, loading: false, started: false };
+
+async function loadPanoramaData() {
+  // load() se invoca en CADA render (ver renderReportImpl), así que este guard
+  // es imprescindible: sin él, el renderReport() de abajo re-dispararía load()
+  // en bucle infinito. Se carga una sola vez por sesión.
+  if (panoramaState.started) return;
+  panoramaState.started = true;
+  panoramaState.loading = true;
+  if (!state.asset && state.view === 'panorama') renderReport();
+  try {
+    if (!dashState.macro) { try { dashState.macro = await getMacro(); } catch (_) {} }
+    await Promise.all(PANORAMA_INDICES.map(async ({ proxy }) => {
+      try { panoramaState.indices[proxy] = await getQuote(proxy); } catch (_) { /* proxy que falle queda sin dato */ }
+    }));
+  } finally {
+    panoramaState.loading = false;
+    if (!state.asset && state.view === 'panorama') renderReport();
+  }
+}
+
+function panoramaPageHTML() {
+  const loaded = Object.entries(dashState.data).map(([ticker, d]) => ({ ticker, d }));
+  const macro = dashState.macro;
+  // Panel de acciones argentinas: promedio real de variación de las AR que
+  // estén cargadas. NO es el índice Merval oficial — se etiqueta como panel.
+  const arRows = loaded.filter(e => AR_TICKERS.has(e.ticker) && e.d.changePct != null);
+  const arAvg = arRows.length ? arRows.reduce((s, e) => s + e.d.changePct, 0) / arRows.length : null;
+  // Amplitud del mercado sobre el universo cargado.
+  const withChg = loaded.filter(e => e.d.changePct != null);
+  const up = withChg.filter(e => e.d.changePct > 0).length;
+  const down = withChg.filter(e => e.d.changePct < 0).length;
+  const flat = withChg.length - up - down;
+  const inBuy = loaded.filter(e => e.d.alert?.type === 'buy').length;
+  const avgScore = loaded.length ? Math.round(loaded.reduce((s, e) => s + (e.d.score ?? 0), 0) / loaded.length) : null;
+  const upPct = withChg.length ? Math.round((up / withChg.length) * 100) : 0;
+  // Movers del día.
+  const sorted = withChg.slice().sort((a, b) => b.d.changePct - a.d.changePct);
+  const gainers = sorted.slice(0, 5);
+  const losers = sorted.slice(-5).reverse();
+  const brecha = macro?.dolares?.oficial && macro?.dolares?.ccl ? ((macro.dolares.ccl / macro.dolares.oficial) - 1) * 100 : null;
+
+  const idxCard = ({ proxy, label, via }) => {
+    const q = panoramaState.indices[proxy];
+    const chg = q?.changePct;
+    return `<div class="card pano-idx-card" data-dash-ticker="${esc(proxy)}" title="Ver ${esc(via)}">
+      <div class="pano-idx-label">${esc(label)}</div>
+      <div class="pano-idx-price">${q?.usd != null ? fmtUsd(q.usd) : '—'}</div>
+      <div class="pano-idx-chg ${chg == null ? '' : chg >= 0 ? 'up' : 'down'}">${chg != null ? fmtPct(chg) : 'N/D'}</div>
+      <div class="pano-idx-via">vía ${esc(via)}</div>
+    </div>`;
+  };
+  const macroTile = (label, value, sub, cls = '') => `
+    <div class="card pano-macro-tile">
+      <div class="pano-macro-label">${esc(label)}</div>
+      <div class="pano-macro-value ${cls}">${value}</div>
+      ${sub ? `<div class="pano-macro-sub">${sub}</div>` : ''}
+    </div>`;
+
+  return `
+    ${sectionTitleHTML('Panorama de Mercado', 'flag')}
+    <div class="dash-intro">El pulso del mercado en un vistazo: índices, el panel argentino, el contexto macro local y la amplitud del universo que seguís. ${panoramaState.loading ? 'Actualizando…' : ''}</div>
+
+    ${sectionTitleHTML('Índices', 'trend')}
+    <div class="pano-idx-grid">
+      ${PANORAMA_INDICES.map(idxCard).join('')}
+      <div class="card pano-idx-card ${arAvg == null ? 'is-empty' : ''}">
+        <div class="pano-idx-label">🇦🇷 Acciones AR</div>
+        <div class="pano-idx-price">${arRows.length ? `${arRows.length} papeles` : '—'}</div>
+        <div class="pano-idx-chg ${arAvg == null ? '' : arAvg >= 0 ? 'up' : 'down'}">${arAvg != null ? fmtPct(arAvg) : 'N/D'}</div>
+        <div class="pano-idx-via">panel (no Merval oficial)</div>
+      </div>
+    </div>
+    <div class="bt-disclaimer" style="margin-bottom:22px;">Los índices se muestran vía su ETF de referencia (SPY→S&amp;P 500, QQQ→Nasdaq 100, DIA→Dow, etc.), que la plataforma ya cotiza en tiempo real. El "Panel AR" es el promedio de variación de las acciones argentinas cargadas — no es el índice Merval oficial.</div>
+
+    ${sectionTitleHTML('Contexto Macro Argentino', 'globe')}
+    ${!macro ? `<div class="card watch-empty">Cargando contexto macro…</div>` : `
+    <div class="pano-macro-grid">
+      ${macroTile('Dólar CCL', macro.dolares?.ccl != null ? fmtArs(macro.dolares.ccl) : 'N/D', macro.dolares?.oficial != null ? `oficial ${fmtArs(macro.dolares.oficial)}` : '')}
+      ${macroTile('Brecha CCL/oficial', brecha != null ? `${brecha.toFixed(1)}%` : 'N/D', 'cuánto más caro el CCL')}
+      ${macroTile('Riesgo País', macro.riesgoPaisArg != null ? `${macro.riesgoPaisArg}` : 'N/D', macro.riesgoPaisVariacion != null ? `var. ${macro.riesgoPaisVariacion}` : 'puntos básicos', macro.riesgoPaisArg != null && macro.riesgoPaisArg > 1000 ? 'down' : '')}
+      ${macroTile('VIX', macro.vix != null ? macro.vix.toFixed(1) : 'N/D', 'miedo del mercado (EE.UU.)', macro.vix != null && macro.vix > 25 ? 'down' : macro.vix != null && macro.vix < 15 ? 'up' : '')}
+      ${macro.fearGreed ? macroTile('Fear & Greed (cripto)', `${macro.fearGreed.value}`, esc(macro.fearGreed.label), macro.fearGreed.value >= 55 ? 'up' : macro.fearGreed.value <= 45 ? 'down' : '') : ''}
+      ${macroTile('Dólar Blue', macro.dolares?.blue != null ? fmtArs(macro.dolares.blue) : 'N/D', macro.dolares?.mep != null ? `MEP ${fmtArs(macro.dolares.mep)}` : '')}
+    </div>`}
+
+    ${sectionTitleHTML('Amplitud del Mercado', 'radar')}
+    ${!loaded.length ? `<div class="card watch-empty">Cargando activos del universo…</div>` : `
+    <div class="pano-macro-grid">
+      ${macroTile('Suben vs. bajan', `<span class="up">${up}</span> / <span class="down">${down}</span>${flat ? ` · ${flat}=` : ''}`, `${upPct}% en verde de ${withChg.length} activos`)}
+      ${macroTile('En zona de compra', `${inBuy}`, 'activos con alerta de entrada')}
+      ${macroTile('Score promedio', avgScore != null ? `${avgScore}` : 'N/D', 'del universo cargado', avgScore != null && avgScore >= 60 ? 'up' : avgScore != null && avgScore < 45 ? 'down' : '')}
+    </div>
+    <div class="pano-movers-grid">
+      <div class="card">
+        <div class="dash-radar-title">📈 Mejores del día</div>
+        ${gainers.map(e => `<div class="pano-mover-row" data-dash-ticker="${esc(e.ticker)}"><span class="pano-mover-tk">${esc(e.ticker)}</span><span class="pano-mover-name">${esc(e.d.name)}</span><span class="pano-mover-chg up">${fmtPct(e.d.changePct)}</span></div>`).join('')}
+      </div>
+      <div class="card">
+        <div class="dash-radar-title">📉 Peores del día</div>
+        ${losers.map(e => `<div class="pano-mover-row" data-dash-ticker="${esc(e.ticker)}"><span class="pano-mover-tk">${esc(e.ticker)}</span><span class="pano-mover-name">${esc(e.d.name)}</span><span class="pano-mover-chg down">${fmtPct(e.d.changePct)}</span></div>`).join('')}
+      </div>
+    </div>`}`;
+}
+
+function wirePanoramaEvents() {
+  els.report.querySelectorAll('[data-dash-ticker]').forEach(el => {
+    el.addEventListener('click', () => selectTicker(el.dataset.dashTicker));
   });
 }
 
