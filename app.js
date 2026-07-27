@@ -4,6 +4,7 @@ import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
+import { fmtUsd, fmtArs, fmtPct, fmtNum, esc, withAlpha, clampNum } from './format.js';
 
 const GREEN = 'oklch(0.76 0.18 152)', AMBER = 'oklch(0.75 0.15 70)', RED = 'oklch(0.70 0.21 23)', BLUE = 'oklch(0.72 0.15 250)', GOLD = 'oklch(0.82 0.14 85)';
 
@@ -933,15 +934,9 @@ async function loadChartTf(tf) {
   }
 }
 
-/* ───────────────────────── utilidades ───────────────────────── */
-const fmtUsd = (n) => n == null || isNaN(n) ? 'N/D' : (Math.abs(n) >= 1000 ? `US$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : `$${n.toFixed(2)}`);
-const fmtArs = (n) => n == null || isNaN(n) ? 'N/D' : `AR$${Math.round(n).toLocaleString('es-AR')}`;
-const fmtPct = (n, digits = 1) => n == null || isNaN(n) ? 'N/D' : `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`;
-const fmtNum = (n, digits = 2) => n == null || isNaN(n) ? 'N/D' : n.toFixed(digits);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-// Inserta un canal alpha en un oklch(...) sin parsear componentes — solo
-// para glows/sombras decorativas sobre colores ya definidos en el código.
-const withAlpha = (oklchStr, alpha) => oklchStr.replace(/\)\s*$/, ` / ${alpha})`);
+/* ───────────────────────── utilidades ─────────────────────────
+ * Los helpers puros de formato/número viven ahora en format.js (importados
+ * arriba). clampNum también salió allá. */
 
 /* ───────────────────────── iconografía (SVG inline, sin dependencias) ───────────────────────── */
 const ICON_ATTR = 'class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
@@ -2742,7 +2737,6 @@ function renderReportImpl() {
   }
 }
 
-function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 function horizonFor(t) {
   return t.adx > 22 ? '3–6 meses' : '6–12 meses';
