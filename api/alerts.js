@@ -15,7 +15,13 @@
  *   GET  ?action=check&secret=X   — dispara las alertas + resumen diario de cartera (llamado por un cron externo)
  *   GET  ?action=debug&secret=X   — presencia (nunca el valor) de cada env var, para diagnosticar setup
  */
-import universe from '../universe.json';
+// universe.json vía createRequire: el import estático de JSON bajo ESM
+// (package.json type:module) exige `with { type: 'json' }` y crashea sin él
+// (ERR_IMPORT_ATTRIBUTE_MISSING → FUNCTION_INVOCATION_FAILED). createRequire
+// lo evita y nft igual traza el require estático para bundlear el JSON.
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const universe = require('../universe.json');
 import { computeTechnical } from '../indicators.js';
 import { detectPriceAlert } from '../scoring.js';
 import {

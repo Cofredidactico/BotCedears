@@ -1,4 +1,12 @@
-import universe from '../universe.json';
+// Carga de universe.json compatible con ESM en cualquier versión de Node: el
+// import estático de JSON (import x from './y.json') exige el atributo
+// `with { type: 'json' }` bajo ESM (package.json type:module) y crashea sin él
+// (ERR_IMPORT_ATTRIBUTE_MISSING → FUNCTION_INVOCATION_FAILED en Vercel).
+// createRequire evita el atributo y Vercel/nft traza el require estático para
+// incluir el JSON en el bundle de la función.
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const universe = require('../universe.json');
 
 const FINNHUB = 'https://finnhub.io/api/v1';
 
