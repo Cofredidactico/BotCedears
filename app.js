@@ -2181,6 +2181,7 @@ const VIEW_PAGES = {
   compare: { html: comparePageHTML, wire: wireCompareEvents, load: () => {} },
   settings: { html: settingsPageHTML, wire: wireSettingsEvents, load: () => {} },
   bonds: { html: bondsPageHTML, wire: wireBondsEvents, load: loadBondsData },
+  academy: { html: academyPageHTML, wire: wireAcademyEvents, load: () => {} },
 };
 
 function renderReport() {
@@ -3233,6 +3234,9 @@ const SIDEBAR_NAV_GROUPS = [
     { view: 'compare', label: 'Comparador', icon: 'compare' },
     { view: 'backtest', label: 'Backtesting', icon: 'trend' },
     { view: 'trackrecord', label: 'Track Record del Motor', icon: 'award' },
+  ] },
+  { label: 'Aprender', items: [
+    { view: 'academy', label: 'Aprendé', icon: 'bulb' },
   ] },
   { label: 'Ajustes', items: [
     { view: 'settings', label: 'Configuración', icon: 'gear' },
@@ -5822,6 +5826,132 @@ function wireSettingsEvents() {
       showToast(`Perfil de riesgo: ${RISK_PROFILES[input.value].label}`, 'success');
       renderReport();
     });
+  });
+}
+
+/* ───────────────────────── Academia / Aprendé ─────────────────────────
+ * Centro de aprendizaje 100% client-side: glosario de los términos que usa
+ * la plataforma + guías cortas para el inversor argentino de CEDEARs. Todo
+ * el contenido es conceptual y honesto; nada de números impositivos que
+ * cambian año a año (se remite a un contador). Usa <details> nativos para
+ * expandir/colapsar — accesible y sin JS de estado. */
+const ACADEMY_GLOSSARY = [
+  ['CEDEAR', 'Certificado de Depósito Argentino: un instrumento que cotiza en BYMA (bolsa argentina) y representa una fracción de una acción extranjera (ej. Apple). Te da exposición al papel del exterior operando en pesos, sin necesidad de una cuenta afuera.'],
+  ['Ratio de conversión', 'Cuántos CEDEARs equivalen a una acción del subyacente. Un ratio 20:1 significa que necesitás 20 CEDEARs para representar 1 acción. BYMA re-ratea papeles cada tanto, por eso la plataforma corrige el ratio contra la cotización real en vivo.'],
+  ['CCL (Contado con Liqui)', 'El tipo de cambio implícito que surge de comparar el precio de un activo en pesos (acá) contra su precio en dólares (afuera). Es la referencia de dólar que usan los CEDEARs.'],
+  ['Ex-dividend (ex-date)', 'La fecha de corte para cobrar un dividendo: tenés que tener el activo ANTES de esa fecha. Si comprás en el ex-date o después, el dividendo lo cobra el vendedor. El tenedor de CEDEAR también cobra, ajustado por el ratio.'],
+  ['Dividend yield (TTM)', 'El dividendo pagado en los últimos 12 meses dividido el precio actual, en %. Es la "renta" anual aproximada. Un yield muy alto a veces es señal de riesgo (el precio cayó), no siempre de buena oportunidad.'],
+  ['Score compuesto', 'El puntaje 0-100 propio de la plataforma que resume tendencia, momentum, fundamentales, valuación, riesgo y liquidez en un solo número, con su etiqueta (Compra Fuerte → Venta). Es una lectura probabilística, no una orden.'],
+  ['RSI', 'Índice de Fuerza Relativa (0-100): mide si un activo está "sobrecomprado" (>70) o "sobrevendido" (<30) en el corto plazo. No es una señal de compra/venta por sí solo, es un termómetro de momentum.'],
+  ['ATR', 'Average True Range: cuánto se mueve en promedio un activo por día, en $. La plataforma lo usa para calcular stops y objetivos proporcionales a la volatilidad real de cada papel.'],
+  ['Zona de compra', 'Cuando la plataforma detecta que el precio está cerca de un soporte técnico relevante con condiciones favorables. No garantiza suba: marca un punto de entrada con mejor relación riesgo/beneficio.'],
+  ['Stop loss', 'El precio al que conviene salir para cortar una pérdida si la tesis falla. Definirlo ANTES de comprar es la base de la gestión de riesgo — evita que una pérdida chica se vuelva grande.'],
+  ['Drawdown', 'La caída desde el punto más alto hasta el más bajo de una inversión o cartera. Mide el "peor momento" que tuviste que aguantar — clave para saber si podés tolerar una estrategia.'],
+  ['Volatilidad', 'Cuánto oscila el precio. Más volatilidad = más riesgo y más oportunidad. La plataforma la usa en el riesgo de cartera y en el tamaño de posición sugerido.'],
+  ['PE / PEG', 'PE (Price/Earnings): cuántas veces la ganancia anual estás pagando por el papel. PEG lo ajusta por el crecimiento esperado. Menor suele ser "más barato", pero hay que compararlo dentro del mismo sector.'],
+  ['Beta', 'Cuánto se mueve un activo respecto del mercado. Beta 1 = se mueve igual; >1 = amplifica; <1 = amortigua. Útil para entender el riesgo sistemático de tu cartera.'],
+];
+const ACADEMY_GUIDES = [
+  {
+    icon: 'coins', title: '¿Qué es un CEDEAR y cómo funciona el ratio?',
+    body: `<p>Un <strong>CEDEAR</strong> te deja invertir en acciones del exterior (Apple, Coca-Cola, un ETF del S&amp;P 500) operando en pesos en la bolsa argentina. No comprás la acción directamente: comprás un certificado que la representa.</p>
+      <p>El <strong>ratio de conversión</strong> dice cuántos CEDEARs equivalen a 1 acción. Ejemplo con ratio 20:1: si Apple vale US$200, cada CEDEAR representa 1/20 de esa acción, es decir ~US$10 de valor subyacente (después ajustado por el CCL a pesos).</p>
+      <p>Como el CEDEAR está atado al dólar CCL, funciona además como una forma de <strong>dolarizar</strong> tus ahorros: si sube el CCL, el precio en pesos del CEDEAR sube aunque la acción afuera no se mueva.</p>
+      <p class="academy-tip">💡 En esta plataforma el ratio se <strong>autocorrige</strong> contra el precio real de BYMA, porque el ratio "de papel" a veces queda viejo cuando BYMA re-ratea.</p>`,
+    goto: { view: 'screener', label: 'Explorar CEDEARs en el Screener' },
+  },
+  {
+    icon: 'target', title: 'Cómo leer el score compuesto',
+    body: `<p>El <strong>score</strong> (0-100) combina seis dimensiones que la plataforma calcula con datos reales: <strong>tendencia, momentum, fundamentales, valuación, riesgo y liquidez</strong>. El resultado se resume en una etiqueta:</p>
+      <ul><li><strong>Compra Fuerte / Moderada</strong>: varias dimensiones alineadas a favor.</li><li><strong>Mantener</strong>: señales mixtas o neutras.</li><li><strong>Reducir / Venta</strong>: el balance se inclina en contra.</li></ul>
+      <p>Es una <strong>lectura probabilística</strong>, no una orden. Un score alto mejora las chances, pero nada garantiza el resultado. Mirá siempre el <em>desglose</em>: un score 70 por fundamentales sólidos es distinto de uno por un pico de momentum de corto plazo.</p>
+      <p class="academy-tip">💡 En la ficha de cada activo podés abrir el desglose y ver qué factor suma y cuál resta.</p>`,
+    goto: { view: 'compare', label: 'Comparar scores en el Comparador' },
+  },
+  {
+    icon: 'coins', title: 'Ex-dividend: cómo cobrar dividendos',
+    body: `<p>Para cobrar un dividendo tenés que tener el activo <strong>antes</strong> de la fecha <strong>ex-dividend</strong>. Si comprás justo en el ex-date o después, ese pago lo cobra quien te vendió.</p>
+      <p>El tenedor de un <strong>CEDEAR también cobra</strong> los dividendos del subyacente, ajustados por el ratio y acreditados por el agente (con la retención impositiva y comisión de custodia que corresponda).</p>
+      <p>La sección <strong>Dividendos</strong> te muestra el calendario de próximos ex-dividends (estimados según la cadencia histórica real de cada papel) y las <strong>Alertas de Cashflow</strong>: pagadores con buena renta que además están en zona de compra.</p>
+      <p class="academy-tip">💡 Un yield alto no es gratis: a veces refleja que el precio cayó. Fijate también en la consistencia y el crecimiento del dividendo.</p>`,
+    goto: { view: 'dividends', label: 'Ver Dividendos & Cashflow' },
+  },
+  {
+    icon: 'briefcase', title: 'Gestión de riesgo: stop, tamaño y diversificación',
+    body: `<p>Ganar a largo plazo depende menos de acertar cada trade y más de <strong>no perder de más</strong> cuando te equivocás. Tres pilares:</p>
+      <ul>
+        <li><strong>Stop loss</strong>: definí ANTES de entrar a qué precio salís si la tesis falla. La plataforma sugiere stops proporcionales al ATR (volatilidad real) de cada papel.</li>
+        <li><strong>Tamaño de posición</strong>: cuánto poner en cada activo según tu capital y tu perfil de riesgo (configurable en Ajustes). Ni tan chico que no mueva la aguja, ni tan grande que un solo error te lastime.</li>
+        <li><strong>Diversificación</strong>: no concentres todo en un sector o país. El Portfolio Advisor te marca concentración, correlación entre tenencias y contribución al riesgo.</li>
+      </ul>
+      <p class="academy-tip">💡 Regla clásica: arriesgar solo una fracción chica del capital por operación, para que ninguna pérdida sola te saque del juego.</p>`,
+    goto: { view: 'portfolio', label: 'Analizar mi cartera' },
+  },
+  {
+    icon: 'building', title: 'Impuestos del inversor argentino (panorama general)',
+    body: `<p>Un panorama <strong>conceptual</strong> — no asesoramiento, y sin números concretos porque cambian todos los años:</p>
+      <ul>
+        <li><strong>Impuesto a las Ganancias</strong>: la compra-venta de CEDEARs y la renta pueden estar alcanzadas según el instrumento y tu situación. Los tratamientos difieren entre acciones locales, CEDEARs y activos del exterior.</li>
+        <li><strong>Bienes Personales</strong>: las tenencias al 31/12 pueden entrar en la base, con diferencias según el tipo de activo y dónde está radicado.</li>
+        <li><strong>Dividendos</strong>: suelen llegar con retenciones ya aplicadas por el agente.</li>
+      </ul>
+      <p class="academy-warning">⚠️ Las alícuotas, mínimos y exenciones cambian año a año y dependen de tu caso particular. <strong>Consultá siempre a un contador</strong> antes de tomar decisiones por motivos impositivos. Esta guía es solo para que sepas qué conceptos existen.</p>`,
+  },
+  {
+    icon: 'grid', title: 'Recorrido rápido por la plataforma',
+    body: `<p>Dónde está cada cosa:</p>
+      <ul>
+        <li><strong>Dashboard</strong>: el pulso del día — oportunidades, zona de compra, movers, rupturas.</li>
+        <li><strong>Screener</strong>: filtrá todo el universo por score, señal, zona de compra, volumen y más.</li>
+        <li><strong>Trades Cortos / Gaps</strong>: setups de corto plazo (rebotes, pullbacks, squeezes, huecos) — alto riesgo.</li>
+        <li><strong>Dividendos</strong>: calendario, mejores pagadores y alertas de cashflow.</li>
+        <li><strong>Comparador</strong>: hasta 3 activos lado a lado, con el ganador de cada métrica.</li>
+        <li><strong>Portfolio Advisor</strong>: diversificación, riesgo, proyecciones y recomendación por posición.</li>
+        <li><strong>Backtesting / Track Record</strong>: qué tan confiables fueron históricamente las señales del motor.</li>
+      </ul>
+      <p class="academy-tip">💡 En cada activo tenés un asistente con IA que responde solo con los datos ya calculados por la plataforma — nunca inventa.</p>`,
+    goto: { view: 'dashboard', label: 'Ir al Dashboard' },
+  },
+];
+
+function academyPageHTML() {
+  return `
+    ${sectionTitleHTML('Aprendé', 'bulb')}
+    <div class="dash-intro">Todo lo que necesitás para entender la plataforma y para invertir en CEDEARs con criterio: un glosario de los términos que vas a ver por todos lados y guías cortas al grano. Contenido educativo — no es asesoramiento financiero.</div>
+
+    ${sectionTitleHTML('Guías', 'bulb')}
+    <div class="academy-guides">
+      ${ACADEMY_GUIDES.map(g => `
+        <details class="card academy-guide">
+          <summary class="academy-guide-head">
+            <span class="academy-guide-icon">${ICONS[g.icon] ?? ''}</span>
+            <span class="academy-guide-title">${esc(g.title)}</span>
+            <span class="academy-guide-chevron" aria-hidden="true">▾</span>
+          </summary>
+          <div class="academy-guide-body">
+            ${g.body}
+            ${g.goto ? `<div class="academy-guide-cta"><button class="port-add-btn academy-goto" data-goto-view="${esc(g.goto.view)}">${esc(g.goto.label)} ›</button></div>` : ''}
+          </div>
+        </details>`).join('')}
+    </div>
+
+    ${sectionTitleHTML('Glosario', 'news')}
+    <div class="academy-glossary">
+      ${ACADEMY_GLOSSARY.map(([term, def]) => `
+        <div class="card academy-term">
+          <div class="academy-term-name">${esc(term)}</div>
+          <div class="academy-term-def">${esc(def)}</div>
+        </div>`).join('')}
+    </div>
+
+    <div class="bt-disclaimer" style="margin-top:20px;">La Academia es material educativo general, no asesoramiento financiero ni impositivo. Cada inversión implica riesgo de pérdida; las decisiones son tuyas.</div>`;
+}
+
+function wireAcademyEvents() {
+  // Navegación a otras secciones desde las guías (el handler de data-goto-view
+  // del dashboard es local a esa vista, así que acá se cablea aparte).
+  els.report.querySelectorAll('[data-goto-view]').forEach(el => {
+    el.addEventListener('click', () => { state.view = el.dataset.gotoView; renderReport(); });
   });
 }
 
