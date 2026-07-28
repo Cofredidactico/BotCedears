@@ -79,12 +79,13 @@ function lsGetSafe(key, fallback) { try { return localStorage.getItem(key) || fa
 // de 8 req/min como antes.
 const DASHBOARD_UNIVERSE = [
   'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META', 'AMZN', 'ORCL', 'CRM', 'ADBE', 'CSCO', 'SHOP',
-  'AMD', 'TSM', 'INTC', 'QCOM', 'AVGO', 'MU',
-  'JPM', 'V', 'MA', 'BAC', 'GS', 'WFC', 'PYPL', 'COIN',
+  'AMD', 'TSM', 'INTC', 'QCOM', 'AVGO', 'MU', 'ARM', 'SMCI', 'MRVL', 'TXN', 'AMAT', 'LRCX', 'KLAC', 'ASML', 'SNDK', 'WDC',
+  'PLTR', 'SNOW', 'NET', 'CRWD', 'PANW', 'NOW', 'IBM', 'UBER', 'ABNB', 'BABA',
+  'JPM', 'V', 'MA', 'BAC', 'GS', 'WFC', 'PYPL', 'COIN', 'C', 'MS', 'AXP', 'HOOD', 'SOFI',
   'XOM', 'CVX', 'COP', 'SLB', 'VIST',
-  'JNJ', 'PFE', 'UNH', 'LLY', 'ABBV',
+  'JNJ', 'PFE', 'UNH', 'LLY', 'ABBV', 'MRK', 'TMO',
   'CAT', 'BA', 'GE', 'DE',
-  'KO', 'WMT', 'NKE', 'SBUX', 'PG', 'MCD',
+  'KO', 'WMT', 'NKE', 'SBUX', 'PG', 'MCD', 'HD', 'LOW', 'COST', 'PEP', 'LULU',
   'NFLX', 'DIS', 'T', 'VZ',
   'TSLA', 'F',
   'GOLD', 'VALE',
