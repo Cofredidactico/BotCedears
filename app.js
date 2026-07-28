@@ -164,6 +164,7 @@ const portState = {
   tab: 'hoy', // pestaña activa de la Radiografía de Cartera (arranca en el cockpit "Mi Día")
   stressShock: null, // shock de mercado elegido en el panel de estrés (o null)
   optMode: 'minvar', // criterio del optimizador de cartera
+  opsFilter: 'all', // filtro del Libro de Operaciones por ticker
 };
 const taxState = { cumplidor: lsGetSafe('icp_tax_cumplidor', '0') === '1' };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
@@ -6901,45 +6902,79 @@ function getPortOps() {
 }
 function logPortOp(op) {
   const list = getPortOps();
-  list.unshift({ ...op, ts: Date.now() });
+  list.unshift({ ...op, ts: Date.now(), id: op.id ?? (Date.now() + '-' + Math.random().toString(36).slice(2, 7)) });
   lsSetSafe(PORT_OPS_KEY, JSON.stringify(list.slice(0, PORT_OPS_MAX)));
 }
+function deletePortOp(id) {
+  const list = getPortOps().filter(o => String(o.id ?? o.ts) !== String(id));
+  lsSetSafe(PORT_OPS_KEY, JSON.stringify(list));
+}
 
-/** P&L realizado (ventas registradas) vs. no realizado (posiciones abiertas),
- *  separado por moneda — nunca se suman pesos con dólares. */
+/** Libro de Operaciones: guarda TODAS las compras y ventas registradas y
+ *  muestra el resultado TOTAL real (realizado por ventas + no realizado de las
+ *  posiciones abiertas) — "cuánto realmente vas ganando con el tiempo".
+ *  Separado por moneda: nunca se suman pesos con dólares. */
 function opsCardHTML(stats) {
   const ops = getPortOps();
+  const fmtCur = (cur, n) => cur === 'ARS' ? fmtArs(n) : fmtUsd(n);
   const realized = { USD: 0, ARS: 0 };
+  const invested = { USD: 0, ARS: 0 };   // capital comprado (compras registradas)
+  const recovered = { USD: 0, ARS: 0 };  // recuperado por ventas registradas
   let realizedCount = 0;
   for (const op of ops) {
-    if (op.type === 'sell' && op.realized != null) { realized[op.currency === 'ARS' ? 'ARS' : 'USD'] += op.realized; realizedCount++; }
+    const cur = op.currency === 'ARS' ? 'ARS' : 'USD';
+    const amount = op.price != null ? op.price * op.shares : 0;
+    if (op.type === 'sell') { if (op.realized != null) { realized[cur] += op.realized; realizedCount++; } recovered[cur] += amount; }
+    else invested[cur] += amount;
   }
-  const fmtCur = (cur, n) => cur === 'ARS' ? fmtArs(n) : fmtUsd(n);
-  const recent = ops.slice(0, 8);
+  const unreal = { USD: stats?.totalGainUsd ?? null, ARS: stats?.totalGainArs ?? null };
+  const openCost = { USD: stats?.totalCostUsd ?? null, ARS: stats?.totalCostArs ?? null };
+  // Resultado total real por moneda = realizado + no realizado.
+  const totalResult = {
+    USD: (realizedCount || unreal.USD != null) ? (realized.USD + (unreal.USD ?? 0)) : null,
+    ARS: (realized.ARS || unreal.ARS != null) ? (realized.ARS + (unreal.ARS ?? 0)) : null,
+  };
+  const chip = (cur, n, denom) => n == null ? '' : `<span class="ledger-total-chip ${n >= 0 ? 'up' : 'down'}">${n >= 0 ? '+' : ''}${pv(fmtCur(cur, n))}${denom ? ` <small>(${fmtPct((n / denom) * 100)})</small>` : ''}</span>`;
+
+  // Filtro por ticker + export
+  const tickers = [...new Set(ops.map(o => o.ticker))].sort();
+  const filter = portState.opsFilter && tickers.includes(portState.opsFilter) ? portState.opsFilter : 'all';
+  const shown = filter === 'all' ? ops : ops.filter(o => o.ticker === filter);
+
   return `
-    <div class="card port-notes-card">
-      <div class="dash-radar-title">Operaciones y P&amp;L realizado</div>
-      <div class="port-ops-summary">
-        <div class="risk-metric">
-          <div class="risk-metric-label">Realizado (ventas registradas)</div>
-          <div class="risk-metric-value">${realizedCount ? [realized.USD ? `<span class="${realized.USD >= 0 ? 'up' : 'down'}">${realized.USD >= 0 ? '+' : ''}${pv(fmtUsd(realized.USD))}</span>` : '', realized.ARS ? `<span class="${realized.ARS >= 0 ? 'up' : 'down'}">${realized.ARS >= 0 ? '+' : ''}${pv(fmtArs(realized.ARS))}</span>` : ''].filter(Boolean).join(' · ') : 'Sin ventas registradas'}</div>
+    <div class="card port-notes-card ledger-card">
+      <div class="dash-radar-title">Libro de Operaciones</div>
+      <div class="mc-intro">Todo lo que compraste y vendiste, guardado en este navegador. El <strong>resultado total</strong> combina lo que ya cerraste (ventas) con lo que llevás ganado en las posiciones abiertas — cuánto vas ganando de verdad con el tiempo.</div>
+      <div class="ledger-totals">
+        <div class="ledger-total main">
+          <div class="ledger-total-label">Resultado total real ${infoTip('Realizado (ganancia/pérdida de tus ventas) + no realizado (lo que llevás ganado en las posiciones abiertas). Entre paréntesis, el retorno % sobre el costo de las posiciones abiertas.')}</div>
+          <div class="ledger-total-value">${[chip('USD', totalResult.USD, openCost.USD && openCost.USD > 0 ? openCost.USD : null), chip('ARS', totalResult.ARS, openCost.ARS && openCost.ARS > 0 ? openCost.ARS : null)].filter(Boolean).join(' ') || '<span class="port-ops-detail">Cargá costo de compra o registrá ventas para ver tu resultado.</span>'}</div>
         </div>
-        <div class="risk-metric">
-          <div class="risk-metric-label">No realizado (posiciones abiertas)</div>
-          <div class="risk-metric-value">${[stats?.totalGainUsd != null ? `<span class="${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${pv(fmtUsd(stats.totalGainUsd))}</span>` : '', stats?.totalGainArs != null ? `<span class="${stats.totalGainArs >= 0 ? 'up' : 'down'}">${stats.totalGainArs >= 0 ? '+' : ''}${pv(fmtArs(stats.totalGainArs))}</span>` : ''].filter(Boolean).join(' · ') || 'N/D (cargá costo promedio)'}</div>
+        <div class="ledger-total-sub">
+          <div><span class="ledger-sub-label">Realizado (ventas)</span> ${[chip('USD', realizedCount ? realized.USD : null), chip('ARS', realized.ARS ? realized.ARS : null)].filter(Boolean).join(' ') || '<span class="port-ops-detail">—</span>'}</div>
+          <div><span class="ledger-sub-label">No realizado (abierto)</span> ${[chip('USD', unreal.USD), chip('ARS', unreal.ARS)].filter(Boolean).join(' ') || '<span class="port-ops-detail">—</span>'}</div>
         </div>
       </div>
-      ${recent.length ? `
-      <div class="port-ops-list">
-        ${recent.map(op => `
-          <div class="port-ops-row">
-            <span class="port-ops-type ${op.type === 'sell' ? 'sell' : 'buy'}">${op.type === 'sell' ? 'VENTA' : 'COMPRA'}</span>
-            <span class="port-reco-ticker">${esc(op.ticker)}</span>
-            <span class="port-ops-detail">${op.shares} × ${op.price != null ? pv(fmtCur(op.currency, op.price)) : 's/precio'}</span>
-            <span class="port-ops-realized ${op.realized != null ? (op.realized >= 0 ? 'up' : 'down') : ''}">${op.realized != null ? `${op.realized >= 0 ? '+' : ''}${pv(fmtCur(op.currency, op.realized))}` : ''}</span>
-            <span class="alert-history-time">${esc(relativeTime(op.ts))}</span>
-          </div>`).join('')}
-      </div>` : `<div class="port-note" style="padding-top:8px;">Registrá una venta con el botón ⤓ de cada fila (o agregá posiciones nuevas con costo) para construir tu historial de operaciones y separar ganancia realizada de no realizada. Solo se guarda en este navegador.</div>`}
+      ${!ops.length ? `<div class="port-note" style="padding-top:8px;">Todavía no registraste operaciones. Usá el botón ＋ (comprar más) o ⤓ (vender) en cada fila de la tabla de tenencias — o agregá una posición nueva con costo. Se guarda solo en este navegador.</div>` : `
+        <div class="ledger-controls">
+          <select class="watch-select" id="ledger-filter" aria-label="Filtrar operaciones por activo">
+            <option value="all" ${filter === 'all' ? 'selected' : ''}>Todos los activos (${ops.length})</option>
+            ${tickers.map(t => `<option value="${esc(t)}" ${filter === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+          </select>
+          <button class="port-csv-btn" id="ledger-export">Exportar CSV</button>
+        </div>
+        <div class="ledger-list">
+          ${shown.map(op => `
+            <div class="ledger-row">
+              <span class="port-ops-type ${op.type === 'sell' ? 'sell' : 'buy'}">${op.type === 'sell' ? 'VENTA' : 'COMPRA'}</span>
+              <span class="port-reco-ticker">${esc(op.ticker)}</span>
+              <span class="ledger-detail">${op.shares} × ${op.price != null ? pv(fmtCur(op.currency, op.price)) : 's/precio'}${op.price != null ? ` = ${pv(fmtCur(op.currency, op.price * op.shares))}` : ''}</span>
+              <span class="port-ops-realized ${op.realized != null ? (op.realized >= 0 ? 'up' : 'down') : ''}">${op.realized != null ? `${op.realized >= 0 ? '+' : ''}${pv(fmtCur(op.currency, op.realized))}` : ''}</span>
+              <span class="alert-history-time">${esc(relativeTime(op.ts))}</span>
+              <button class="ledger-del" data-ledger-del="${esc(String(op.id ?? op.ts))}" title="Borrar esta operación" aria-label="Borrar operación">×</button>
+            </div>`).join('')}
+        </div>
+      `}
     </div>`;
 }
 
@@ -9035,6 +9070,7 @@ function portfolioRowHTML(r) {
   const signalTd = `<td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>`;
   const recoTd = `<td>${reco ? `<span class="watch-signal" style="background:${recoTone.bg}; color:${recoTone.color};" title="${esc(reco.detail)}">${esc(reco.label)}</span>` : 'N/D'}</td>`;
   const actionsTd = `<td class="port-actions-cell">
+      <button class="port-buy" data-port-buy="${esc(r.ticker)}" title="Comprar más" aria-label="Registrar una compra adicional de ${esc(r.ticker)}">＋</button>
       <button class="port-sell" data-port-sell="${esc(r.ticker)}" title="Registrar venta" aria-label="Registrar venta de ${esc(r.ticker)}">⤓</button>
       <button class="port-edit" data-port-edit="${esc(r.ticker)}" title="Editar" aria-label="Editar tenencia de ${esc(r.ticker)}">✎</button>
       <button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button>
@@ -9097,7 +9133,7 @@ function wirePortfolioEvents() {
   });
   els.report.querySelectorAll('[data-port-ticker]').forEach(el => {
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.port-remove') || e.target.closest('.port-edit') || e.target.closest('.port-sell')) return;
+      if (e.target.closest('.port-remove') || e.target.closest('.port-edit') || e.target.closest('.port-sell') || e.target.closest('.port-buy')) return;
       selectTicker(el.dataset.portTicker);
     });
   });
@@ -9279,6 +9315,52 @@ function wirePortfolioEvents() {
 
   // Registrar venta: reduce (o cierra) la posición y loguea el P&L realizado
   // contra el costo promedio cargado. Solo en este navegador.
+  // Libro de Operaciones: filtro, export CSV y borrar operación.
+  const ledgerFilter = document.getElementById('ledger-filter');
+  if (ledgerFilter) ledgerFilter.addEventListener('change', () => { portState.opsFilter = ledgerFilter.value; renderReport(); });
+  document.getElementById('ledger-export')?.addEventListener('click', () => {
+    const ops = getPortOps();
+    const header = 'fecha,tipo,ticker,cantidad,precio,moneda,monto,realizado';
+    const lines = ops.map(o => [new Date(o.ts).toISOString().slice(0, 10), o.type, o.ticker, o.shares, o.price ?? '', o.currency ?? '', o.price != null ? (o.price * o.shares).toFixed(2) : '', o.realized ?? ''].join(','));
+    downloadTextFile('operaciones.csv', [header, ...lines].join('\n'), 'text/csv');
+    showToast('Libro de operaciones exportado', 'success');
+  });
+  els.report.querySelectorAll('[data-ledger-del]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deletePortOp(btn.dataset.ledgerDel);
+      showToast('Operación borrada del libro', 'info');
+      renderReport();
+    });
+  });
+
+  // Comprar más: suma unidades a una posición con precio promedio ponderado
+  // y registra la compra en el Libro de Operaciones. Solo en este navegador.
+  els.report.querySelectorAll('.port-buy').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ticker = btn.dataset.portBuy;
+      const h = getPortfolio().find(x => x.ticker === ticker);
+      if (!h) return;
+      const curLabel = h.costCurrency === 'ARS' ? 'AR$ por CEDEAR' : 'US$ por unidad';
+      const qtyStr = window.prompt(`¿Cuántas unidades más de ${ticker} compraste? (tenés ${h.shares})`);
+      if (qtyStr == null) return;
+      const qty = parseFloat(qtyStr);
+      if (!qty || qty <= 0) { showToast('Cantidad inválida — tiene que ser mayor a 0.', 'info'); return; }
+      const priceStr = window.prompt(`¿A qué precio compraste? (${curLabel})`);
+      if (priceStr == null) return;
+      const price = parseFloat(priceStr);
+      if (!price || price <= 0) { showToast('Precio inválido.', 'info'); return; }
+      // Precio promedio de compra PONDERADO: (costo viejo × cant. vieja +
+      // precio nuevo × cant. nueva) / cantidad total.
+      const newShares = h.shares + qty;
+      const newAvg = h.avgCost != null ? ((h.avgCost * h.shares) + (price * qty)) / newShares : price;
+      addHolding(ticker, newShares, newAvg, h.costCurrency, h.purchaseDate);
+      logPortOp({ type: 'buy', ticker, shares: qty, price, currency: h.costCurrency === 'ARS' ? 'ARS' : 'USD', realized: null });
+      showToast(`Compra de ${qty} ${ticker} registrada — nuevo PPC ${(h.costCurrency === 'ARS' ? fmtArs : fmtUsd)(newAvg)}`, 'success');
+      renderReport();
+    });
+  });
   els.report.querySelectorAll('.port-sell').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
