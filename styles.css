@@ -2883,3 +2883,12 @@ body::after {
   .ledger-row { grid-template-columns: 52px 1fr auto 20px; }
   .ledger-row .port-reco-ticker, .ledger-row .alert-history-time { display: none; }
 }
+
+/* ── Barrido de universo completo (Gaps/Shorts) + Top 10 del Día ── */
+.full-scan-row { margin: 0 0 18px; }
+.full-scan-btn { font-size: 13px; }
+.full-scan-done { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--up-text, oklch(0.8 0.14 152)); font-weight: 600; }
+.top10-controls { margin: 0 0 12px; }
+.top10-table .top10-rank { font-family: 'IBM Plex Mono', monospace; font-weight: 700; color: var(--text-mute); width: 34px; text-align: center; }
+.top10-table tbody tr:first-child .top10-rank { color: var(--gold-text, oklch(0.82 0.13 85)); }
+.top10-grade { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }

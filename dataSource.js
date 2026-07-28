@@ -88,6 +88,39 @@ export async function getMacroSnapshot() {
   return _macro;
 }
 
+/* ══════════ Cache de referencia auto-actualizado (precio USD + ratio) ══════
+ * Los refPriceUsd/ratio de universe.json son SEMILLA y se desactualizan con el
+ * tiempo (ej. SanDisk, Micron, o un ADR sin ratio como TX). Cada vez que llega
+ * un quote REAL (BYMA/Yahoo) recordamos el precio USD y el ratio verdaderos en
+ * localStorage; los fallbacks (mock, escalado de velas proxy, estimación de
+ * dividendos) usan ese valor real en lugar de la semilla vieja. Nunca se
+ * inventa nada: solo se guarda lo que el feed en vivo ya devolvió. */
+const REF_CACHE_KEY = 'icp_ref_cache';
+let _refCache = null;
+function refCacheAll() {
+  if (_refCache) return _refCache;
+  try { _refCache = JSON.parse(localStorage.getItem(REF_CACHE_KEY) || '{}') || {}; } catch { _refCache = {}; }
+  return _refCache;
+}
+let _refSaveTimer = null;
+function rememberRef(ticker, usd, ratio) {
+  if (!(typeof usd === 'number' && isFinite(usd) && usd > 0)) return;
+  const c = refCacheAll();
+  const prev = c[ticker] || {};
+  const nextRatio = (typeof ratio === 'number' && ratio > 0) ? ratio : prev.ratio;
+  if (prev.usd === usd && prev.ratio === nextRatio) return;
+  c[ticker] = { usd, ratio: nextRatio, ts: Date.now() };
+  try { clearTimeout(_refSaveTimer); _refSaveTimer = setTimeout(() => { try { localStorage.setItem(REF_CACHE_KEY, JSON.stringify(c)); } catch { /* storage lleno/no disponible */ } }, 400); } catch { /* sin timers */ }
+}
+/** Mejor referencia conocida: precio/ratio REALES cacheados > semilla del universo. */
+function refFor(asset, ticker) {
+  const c = refCacheAll()[ticker] || {};
+  return {
+    refPriceUsd: (typeof c.usd === 'number' && c.usd > 0) ? c.usd : (asset?.refPriceUsd ?? 100),
+    ratio: (typeof c.ratio === 'number' && c.ratio > 0) ? c.ratio : (asset?.ratio ?? null),
+  };
+}
+
 /* ═════════════════════════════ MOCK (fallback) ═══════════════════════════ */
 function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 function hsh(s) { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -95,14 +128,14 @@ function hsh(s) { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) {
 const Mock = {
   async getCCL() { return { value: 1247.5, changePct: 0.34, isReal: false }; },
   async getQuote(ticker) {
-    const u = (await getAsset(ticker)) || { refPriceUsd: 100, ratio: 10 };
+    const ref = refFor(await getAsset(ticker), ticker);
     const r = mulberry32(hsh(ticker) ^ 0x55);
-    const usd = u.refPriceUsd, changePct = (r() - 0.45) * 4;
+    const usd = ref.refPriceUsd, changePct = (r() - 0.45) * 4;
     const ccl = (await this.getCCL()).value;
-    return { usd, changePct, cedearArs: u.ratio ? usd / u.ratio * ccl : null, cedearSource: u.ratio ? 'estimated' : null, volumeArsM: Math.round(50 + r() * 1500), isReal: false };
+    return { usd, changePct, cedearArs: ref.ratio ? usd / ref.ratio * ccl : null, cedearSource: ref.ratio ? 'estimated' : null, volumeArsM: Math.round(50 + r() * 1500), isReal: false };
   },
   async getCandles(ticker, tf = '1day', n = 200) {
-    const u = (await getAsset(ticker)) || { refPriceUsd: 100 };
+    const ref = refFor(await getAsset(ticker), ticker);
     const seed = hsh(ticker) ^ hsh(tf), rnd = mulberry32(seed);
     const vol = 0.012 + rnd() * 0.022, drift = (rnd() - 0.45) * 0.006;
     const o = [], h = [], l = [], c = [], v = []; let price = 100;
@@ -131,7 +164,7 @@ const Mock = {
         l[n - 1] = Math.min(newOpen, newClose) - wick * gr();
       }
     }
-    const scf = u.refPriceUsd / c[c.length - 1];
+    const scf = ref.refPriceUsd / c[c.length - 1];
     for (const k of [o, h, l, c]) for (let i = 0; i < k.length; i++) k[i] *= scf;
     const t = [];
     for (let i = n - 1; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); t.push(d.toISOString().slice(0, 10)); }
@@ -203,8 +236,7 @@ const Mock = {
     const p = PROFILE[ticker];
     if (!p || p[1] === 0) return { items: [], frequency: null, ttm: 0, nextExDate: null, isReal: false };
     const [yld, perYear] = p;
-    const u = (await getAsset(ticker)) || { refPriceUsd: 100 };
-    const perPay = (u.refPriceUsd * yld / 100) / perYear;
+    const perPay = (refFor(await getAsset(ticker), ticker).refPriceUsd * yld / 100) / perYear;
     const intervalDays = Math.round(365 / perYear);
     const items = [];
     const today = new Date();
@@ -365,7 +397,11 @@ export async function getQuote(ticker) {
     try { return await Crypto.getQuote(ticker, asset.coingeckoId); }
     catch (e) { console.warn('[dataSource] cripto quote falló, usando mock:', e.message); return Mock.getQuote(ticker); }
   }
-  return withFallback('getQuote', [ticker], Mock.getQuote.bind(Mock));
+  const q = await withFallback('getQuote', [ticker], Mock.getQuote.bind(Mock));
+  // Auto-actualiza la referencia: si el quote es REAL, recuerda el precio USD y
+  // el ratio verdaderos para que los fallbacks dejen de usar la semilla vieja.
+  if (q && q.isReal && typeof q.usd === 'number' && q.usd > 0) rememberRef(ticker, q.usd, q.ratio);
+  return q;
 }
 
 export async function getCandles(ticker, tf = '1day', n = 200) {
