@@ -113,6 +113,7 @@ const DASH_WIDGETS = [
   { key: 'agenda', label: 'Qué Mirar Hoy', icon: 'target', accent: 'amber', full: false },
   { key: 'calendar', label: 'Calendario Económico', icon: 'calendar', accent: 'amber', full: false },
   { key: 'opportunities', label: 'Oportunidades del Día', icon: 'trend', accent: 'green', full: true },
+  { key: 'top10', label: 'Top 10 del Día', icon: 'trend', accent: 'green', full: true },
   { key: 'buyzone', label: 'En Zona de Compra Ahora', icon: 'target', accent: 'green', full: true },
   { key: 'breadth', label: 'Amplitud del Mercado', icon: 'radar', accent: 'blue', full: false },
   { key: 'movers', label: 'Destacados del Día', icon: 'trend', accent: 'blue', full: true },
@@ -3992,6 +3993,47 @@ function dashWidgetWrapper(w, ctx, i) {
 }
 
 /** Cuerpo (sin título — lo pone el wrapper) de cada widget del Dashboard. */
+/* Top 10 del Día: ranking por score compuesto sobre TODO lo cargado en
+ * dashState.data (curado por defecto; las 486 tras el barrido opt-in). Un
+ * atajo a lo mejor del universo sin pasar por el Screener. */
+function topTenWidgetBody() {
+  const all = Object.entries(dashState.data)
+    .filter(([t, d]) => d && !IDEA_EXCLUDE.has(t)) // fuera ETFs de índice amplio: no son una "idea" puntual
+    .map(([ticker, d]) => ({ ticker, d }))
+    .sort((a, b) => b.d.score - a.d.score);
+  const top = all.slice(0, 10);
+  const { total, done } = fullScanProgress();
+  const scopeNote = done
+    ? `Ranking sobre el <strong>universo completo (${total} activos)</strong>.`
+    : `Ranking sobre <strong>${all.length}</strong> activos ya cargados. Escaneá las ${total} para rankear todo el universo.`;
+  return `
+    <div class="dash-intro" style="margin-bottom:12px;">Las mejores oportunidades por score compuesto, de mayor a menor — un atajo a lo mejor sin recorrer el Screener a mano. ${scopeNote} Tocá cualquiera para el informe completo.</div>
+    <div class="top10-controls">${fullScanToggleHTML()}</div>
+    ${!top.length ? `<div class="card watch-empty">Cargando universo…</div>` : `
+      <div class="card bt-table-card">
+        <div class="bt-table-wrap">
+          <table class="bt-table top10-table">
+            <thead><tr><th>#</th><th>Ticker</th><th>Score</th><th>Zona</th><th>% día</th><th>Señal</th></tr></thead>
+            <tbody>
+              ${top.map(({ ticker, d }, i) => {
+                const sig = scoreLabelColor(d.scoreLabel);
+                const grade = d.alert?.type === 'buy' && d.alert?.grade ? d.alert.grade : null;
+                const gm = grade ? GRADE_META[grade] : null;
+                return `<tr class="port-row" data-dash-ticker="${esc(ticker)}">
+                  <td class="top10-rank">${i + 1}</td>
+                  <td class="bt-label-cell" style="font-weight:700;">${esc(ticker)} <span class="port-pnl-abs">${esc(d.name || '')}</span></td>
+                  <td><strong>${d.score}</strong></td>
+                  <td>${gm ? `<span class="top10-grade" style="background:${withAlpha(gm.color, 0.16)}; color:${gm.color};">Zona ${grade}</span>` : '<span class="bt-nd">—</span>'}</td>
+                  <td class="${d.changePct >= 0 ? 'bt-pos' : 'bt-neg'}">${fmtPct(d.changePct)}</td>
+                  <td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(d.scoreLabel)}</span></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`}`;
+}
+
 function dashWidgetBody(key, ctx) {
   const { loaded, opportunities, buyZone, loadingCount, heatmapRows, sectorRows, bySignal, gainers, losers } = ctx;
   switch (key) {
@@ -4003,6 +4045,7 @@ function dashWidgetBody(key, ctx) {
     case 'movers': return moversWidgetBody(loaded);
     case 'breakouts': return breakoutsWidgetBody(loaded);
     case 'volume': return volumeAnomalyWidgetBody(loaded);
+    case 'top10': return topTenWidgetBody();
     case 'opportunities': return `
       ${!opportunities.length ? `<div class="card watch-empty">Cargando universo curado…</div>` : `<div class="watch-grid">${opportunities.map(({ ticker, d }) => dashCardHTML(ticker, d)).join('')}</div>`}
       ${loadingCount > 0 ? `<div class="dash-loading-note">Cargando ${loadingCount} activo(s) más del universo curado…</div>` : ''}`;
@@ -4186,6 +4229,7 @@ function wireDashboardEvents() {
   els.report.querySelectorAll('[data-dash-ticker]').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.dashTicker));
   });
+  wireFullScanButton(); // Top 10 del Día → barrido del universo completo
   // Las tarjetas de "Oportunidades del Día"/"En Zona de Compra" (dashCardHTML)
   // también tienen la clase .watch-card pero usan data-dash-ticker, no
   // data-ticker — sin este filtro, el handler de abajo (pensado para las
@@ -4338,6 +4382,54 @@ async function loadScreenerUniverse() {
     if (!state.asset && state.view === 'screener') renderReport();
   }
 }
+// ── Barrido del universo completo compartido (Gaps, Trades Cortos, Top 10) ──
+// Carga las 486 en dashState.data (mismo store que lee toda la app) en lotes,
+// con la misma cadencia que el Screener. Opt-in: solo corre cuando el usuario
+// toca "escanear las 486" en alguno de esos apartados.
+const fullScan = { active: false, loading: false };
+function fullScanProgress() {
+  const total = universe.length;
+  let loaded = 0;
+  for (const a of universe) if (dashState.data[a.ticker]) loaded++;
+  return { loaded, total, done: loaded >= total };
+}
+async function loadFullUniverse() {
+  if (fullScan.loading) return;
+  fullScan.active = true; fullScan.loading = true;
+  if (!state.asset) renderReport();
+  try {
+    const macro = dashState.macro ?? await getMacro();
+    dashState.macro = macro;
+    const pending = universe.map(a => a.ticker).filter(t => !dashState.data[t] && !dashState.loading.has(t));
+    for (let i = 0; i < pending.length; i += SCREENER_BATCH_SIZE) {
+      if (!fullScan.active) break;
+      const batch = pending.slice(i, i + SCREENER_BATCH_SIZE);
+      await Promise.all(batch.map(async (ticker) => {
+        dashState.loading.add(ticker);
+        try { dashState.data[ticker] = await computeLightSignal(ticker, macro); }
+        catch (_) { /* se saltea el que falle, sin romper el barrido */ }
+        finally { dashState.loading.delete(ticker); }
+      }));
+      if (!state.asset) renderReport();
+      if (i + SCREENER_BATCH_SIZE < pending.length) await new Promise(res => setTimeout(res, SCREENER_BATCH_DELAY_MS));
+    }
+  } finally {
+    fullScan.loading = false;
+    if (!state.asset) renderReport();
+  }
+}
+// Botón/estado del barrido, reutilizable en cualquier apartado.
+function fullScanToggleHTML() {
+  const { loaded, total, done } = fullScanProgress();
+  if (fullScan.loading) return `<button class="port-csv-btn full-scan-btn" disabled>Escaneando universo… ${loaded}/${total}</button>`;
+  if (done) return `<span class="full-scan-done">✓ Analizando el universo completo (${total} activos)</span>`;
+  return `<button class="port-csv-btn full-scan-btn" data-full-scan>🔭 Escanear las ${total} — no solo el curado</button>`;
+}
+// Handler compartido: lo llama cada wire de los apartados con barrido.
+function wireFullScanButton() {
+  els.report.querySelector('[data-full-scan]')?.addEventListener('click', () => { fullScan.active = true; loadFullUniverse(); });
+}
+
 const SCREENER_QUICK_FILTERS = [
   { key: 'all', label: 'Todo el universo' },
   { key: 'argentina', label: '🇦🇷 Argentina' },
@@ -5240,6 +5332,7 @@ function shortTradesPageHTML() {
       </div>`;
     })()}
 
+    <div class="full-scan-row">${fullScanToggleHTML()}</div>
     <div class="short-controls">
       <div class="short-seg" role="group" aria-label="Dirección">
         ${seg('all', 'Todos')}${seg('long', '▲ Largos')}${seg('short', '▼ Cortos')}
@@ -5578,6 +5671,7 @@ function wireShortTradesEvents() {
       selectTicker(el.dataset.shortTicker);
     });
   });
+  wireFullScanButton();
 }
 
 /* ───────────────────────── radar de gaps de apertura ─────────────────────
@@ -5608,9 +5702,10 @@ function gapsPageHTML() {
   return `
     ${sectionTitleHTML('Radar de Gaps de Apertura', 'gap')}
     <div class="dash-intro">Activos del universo curado y tu Watchlist que abrieron con un <strong>hueco (gap)</strong> respecto al cierre anterior — la señal de que el mercado repreció el activo de un salto (balance, noticia, guidance). Se mide el tamaño del gap en % y en múltiplos de ATR (para saber si es grande <em>para ese activo</em>), si <strong>sostiene</strong> la apertura o ya se <strong>rellenó</strong> intradía. ${loadingCurated ? 'Cargando el universo…' : ''}</div>
-    <div class="cedear-note" style="margin-bottom:22px;">
+    <div class="cedear-note" style="margin-bottom:16px;">
       <strong>ℹ Cómo leerlo:</strong> un gap alcista que <strong>sostiene</strong> la apertura suele indicar fuerza real; uno que se <strong>rellena</strong> rápido (el precio vuelve al cierre previo) suele ser menos sostenible. El tamaño en <strong>ATR</strong> importa más que el %: un gap de +2% es enorme en un activo tranquilo y normal en uno volátil. No es una recomendación — es un tamiz de dónde está pasando algo hoy.
     </div>
+    <div class="full-scan-row">${fullScanToggleHTML()}</div>
     ${!total ? `<div class="card watch-empty">${loadingCurated ? 'Analizando huecos de apertura…' : 'No hay gaps de apertura relevantes en el universo en este momento — el mercado abrió sin huecos significativos.'}</div>` : `
       <div class="gap-cols">
         <div class="gap-col">
@@ -5662,6 +5757,7 @@ function wireGapsEvents() {
   els.report.querySelectorAll('[data-gap-ticker]').forEach(el => {
     el.addEventListener('click', () => selectTicker(el.dataset.gapTicker));
   });
+  wireFullScanButton();
 }
 
 /** Página de Comparador: hasta 3 tickers elegidos por el usuario, con score
