@@ -2962,3 +2962,12 @@ body::after {
 .admin-act.reject { background: transparent; border: 1px solid var(--border); color: var(--down-text, #f87171); }
 .admin-empty { font-size: 12.5px; color: var(--text-mute); padding: 8px 4px; }
 .auth-card.admin .auth-btn { margin-top: 18px; }
+
+/* ── Logo de marca (Vertex Signal) ── */
+.brand-logo { width: 36px; height: 36px; border-radius: 9px; object-fit: contain; flex-shrink: 0; }
+.auth-logo { width: 72px; height: 72px; object-fit: contain; margin: 0 auto 14px; display: block; }
+
+/* ── Login: selector de modo (Entrar / Solicitar acceso) ── */
+.auth-seg { display: flex; gap: 4px; background: var(--surface-2, rgba(255,255,255,0.04)); border: 1px solid var(--border); border-radius: 10px; padding: 4px; margin-bottom: 16px; }
+.auth-seg-btn { flex: 1; background: transparent; border: none; color: var(--text-mute); font-size: 13px; font-weight: 600; padding: 9px 10px; border-radius: 7px; cursor: pointer; }
+.auth-seg-btn.active { background: var(--accent, #7c5cff); color: #fff; }

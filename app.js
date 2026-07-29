@@ -176,7 +176,7 @@ function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch
 /* ───────────────────────── onboarding guiado ───────────────────────── */
 const ONBOARDING_STEPS = [
   {
-    title: 'Bienvenido a Investment Copilot AI',
+    title: 'Bienvenido a Vertex Signal',
     body: 'Una mesa de análisis con datos de mercado reales (Finnhub, Twelve Data, dolarapi, CoinGecko, BYMA) para acciones, CEDEARs, ETFs y cripto. No es un asesor con IA que "opina": cada número que ves sale de un cálculo trazable sobre datos reales.',
   },
   {
@@ -609,7 +609,7 @@ function notifyIfNewAlert(ticker, priceAlert) {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   const meta = ALERT_META[curr];
   const gradeTxt = priceAlert.grade ? `grado ${priceAlert.grade}${priceAlert.rr != null ? ` · R:R ${priceAlert.rr}` : ''}` : `confianza ${priceAlert.confidence}`;
-  new Notification(`${ticker}: ${meta.label} (${gradeTxt})`, { body: `Investment Copilot AI — ${priceAlert.reason || priceAlert.confirmations.join(', ')}`, tag: `icp-${ticker}` });
+  new Notification(`${ticker}: ${meta.label} (${gradeTxt})`, { body: `Vertex Signal — ${priceAlert.reason || priceAlert.confirmations.join(', ')}`, tag: `icp-${ticker}` });
 }
 
 /** Ruptura de estructura (BOS/CHoCH, ver marketStructure en indicators.js):

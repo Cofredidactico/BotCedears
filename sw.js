@@ -1,5 +1,5 @@
 /**
- * sw.js — Service worker para instalar Investment Copilot AI como app (PWA).
+ * sw.js — Service worker para instalar Vertex Signal como app (PWA).
  *
  * Estrategias, a propósito distintas por tipo de recurso:
  *  - /api/*  → SIEMPRE red directa, nunca se cachea acá. La frescura de los

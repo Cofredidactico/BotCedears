@@ -21,6 +21,7 @@ const SUPABASE_ESM = 'https://esm.sh/@supabase/supabase-js@2';
 let sb = null;         // cliente Supabase
 let currentUser = null;
 let currentProfile = null;
+let loginMode = 'entrar'; // 'entrar' (ya aprobado) | 'solicitar' (primera vez)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const isAdmin = () => currentUser && ADMINS.includes(String(currentUser.email || '').toLowerCase());
@@ -63,8 +64,10 @@ async function fetchProfile(id) {
 }
 
 /* ── acciones ── */
-async function sendMagicLink(email) {
-  return sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin + window.location.pathname } });
+async function sendMagicLink(email, allowCreate) {
+  // "Solicitar acceso" crea la cuenta (queda pendiente); "Entrar" NO crea cuenta
+  // nueva, así un mail sin acceso recibe un aviso claro en vez de registrarse solo.
+  return sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin + window.location.pathname, shouldCreateUser: !!allowCreate } });
 }
 async function signOut() { try { await sb.auth.signOut(); } catch { /* ignore */ } location.reload(); }
 async function listProfiles() {
@@ -86,18 +89,27 @@ function removeOverlay() { document.getElementById('auth-overlay')?.remove(); }
 
 function renderLogin() {
   const el = overlayEl();
+  const isReq = loginMode === 'solicitar';
   el.innerHTML = `
     <div class="auth-card">
-      <div class="auth-brand">Investment Copilot AI</div>
-      <div class="auth-title">Ingresá con tu email</div>
-      <div class="auth-sub">Te mandamos un <strong>link mágico</strong> a tu correo. Tocás el link y entrás — sin contraseñas.</div>
+      <img class="auth-logo" src="./icons/vertex-signal.png" alt="Vertex Signal" onerror="this.style.display='none'" />
+      <div class="auth-brand">Vertex Signal</div>
+      <div class="auth-seg" role="group" aria-label="Tipo de acceso">
+        <button type="button" class="auth-seg-btn ${!isReq ? 'active' : ''}" data-login-mode="entrar">Ya tengo acceso</button>
+        <button type="button" class="auth-seg-btn ${isReq ? 'active' : ''}" data-login-mode="solicitar">Solicitar acceso</button>
+      </div>
+      <div class="auth-title">${isReq ? 'Pedí acceso a la plataforma' : 'Entrá con tu email'}</div>
+      <div class="auth-sub">${isReq
+        ? 'Dejá tu email y te registramos. Un administrador va a <strong>aprobar</strong> tu cuenta y ahí ya vas a poder entrar. Te llega un link al correo para confirmar tu mail.'
+        : 'Poné tu email y te mandamos un <strong>link mágico</strong> — tocás el link y entrás, sin contraseñas.'}</div>
       <form id="auth-form">
         <input type="email" id="auth-email" class="auth-input" placeholder="tu@email.com" autocomplete="email" required />
-        <button type="submit" class="auth-btn" id="auth-send">Enviarme el link</button>
+        <button type="submit" class="auth-btn" id="auth-send">${isReq ? 'Solicitar ingreso' : 'Entrar'}</button>
       </form>
       <div class="auth-msg" id="auth-msg"></div>
-      <div class="auth-foot">Acceso por invitación: un administrador tiene que aprobar tu cuenta antes de que puedas usar la plataforma.</div>
+      <div class="auth-foot">${isReq ? '¿Ya te aprobaron? Usá <strong>“Ya tengo acceso”</strong>.' : '¿Primera vez? Tocá <strong>“Solicitar acceso”</strong> para pedir permiso.'}</div>
     </div>`;
+  el.querySelectorAll('[data-login-mode]').forEach(b => b.addEventListener('click', () => { loginMode = b.dataset.loginMode; renderLogin(); }));
   const form = el.querySelector('#auth-form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -106,9 +118,22 @@ function renderLogin() {
     const btn = el.querySelector('#auth-send');
     if (!email) return;
     btn.disabled = true; btn.textContent = 'Enviando…';
-    const { error } = await sendMagicLink(email);
-    if (error) { msg.className = 'auth-msg err'; msg.textContent = 'No se pudo enviar: ' + error.message; btn.disabled = false; btn.textContent = 'Enviarme el link'; }
-    else { msg.className = 'auth-msg ok'; msg.textContent = '¡Listo! Revisá tu correo (' + email + ') y tocá el link para entrar.'; btn.textContent = 'Link enviado'; }
+    const { error } = await sendMagicLink(email, isReq); // solo "solicitar" crea la cuenta
+    if (error) {
+      // En "Entrar", el error típico es que el mail no está registrado (shouldCreateUser:false).
+      const notReg = /not\s*(allow|exist)|signups?\s*not|otp_disabled|user.*not.*found/i.test(error.message || '');
+      msg.className = 'auth-msg err';
+      msg.textContent = (!isReq && notReg)
+        ? 'Ese email todavía no tiene acceso. Tocá “Solicitar acceso” para pedir permiso.'
+        : 'No se pudo enviar: ' + error.message;
+      btn.disabled = false; btn.textContent = isReq ? 'Solicitar ingreso' : 'Entrar';
+    } else {
+      msg.className = 'auth-msg ok';
+      msg.textContent = isReq
+        ? '¡Solicitud enviada! Revisá tu correo (' + email + ') y confirmá. Cuando un admin te apruebe, vas a poder entrar.'
+        : '¡Listo! Revisá tu correo (' + email + ') y tocá el link para entrar.';
+      btn.textContent = isReq ? 'Solicitud enviada' : 'Link enviado';
+    }
   });
 }
 
@@ -116,7 +141,8 @@ function renderPending() {
   const el = overlayEl();
   el.innerHTML = `
     <div class="auth-card">
-      <div class="auth-brand">Investment Copilot AI</div>
+      <img class="auth-logo" src="./icons/vertex-signal.png" alt="Vertex Signal" onerror="this.style.display='none'" />
+      <div class="auth-brand">Vertex Signal</div>
       <div class="auth-title">Tu cuenta está pendiente ⏳</div>
       <div class="auth-sub">Entraste como <strong>${esc(currentUser.email)}</strong>. Un administrador tiene que <strong>aprobar</strong> tu cuenta antes de que puedas usar la plataforma. Te avisará cuando esté lista.</div>
       <button class="auth-btn ghost" id="auth-logout">Cerrar sesión</button>

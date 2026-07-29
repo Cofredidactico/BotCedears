@@ -1,6 +1,6 @@
 {
-  "name": "Investment Copilot AI — Mesa de Análisis Institucional",
-  "short_name": "Investment Copilot",
+  "name": "Vertex Signal — Mesa de Análisis Institucional",
+  "short_name": "Vertex Signal",
   "description": "Análisis de acciones, CEDEARs, ETFs y cripto con datos reales: score compuesto, plan operativo, backtesting y más.",
   "start_url": "./index.html",
   "scope": "./",
