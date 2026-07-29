@@ -5,9 +5,9 @@
  *   • Si está configurado → muestra login; cada usuario nuevo queda "pendiente"
  *     hasta que un admin lo aprueba; el admin ve un panel para aprobar/rechazar.
  *
- * La cartera y demás datos siguen viviendo en el navegador (localStorage) por
- * ahora — este portón controla el ACCESO a la plataforma. Mover los datos a la
- * nube (sync entre dispositivos) es el paso siguiente, ya con esto en pie.
+ * Además de controlar el ACCESO, sincroniza la cartera y demás datos del usuario
+ * con la nube (tabla user_data): al entrar en cualquier dispositivo baja lo suyo,
+ * y cada cambio en localStorage se guarda solo. Ver initCloudSync() más abajo.
  *
  * Defensivo a propósito: cualquier fallo de red/CDN/Supabase NO debe romper la
  * app; en el peor caso se cae a "sin login" y la app sigue andando. */
@@ -48,7 +48,7 @@ async function refresh() {
     if (!currentUser) { currentProfile = null; renderLogin(); return; }
     currentProfile = await fetchProfile(currentUser.id);
     // El admin siempre entra (aunque su perfil aún no diga approved).
-    if (isAdmin() || currentProfile?.approved) { removeOverlay(); renderAccountChip(); }
+    if (isAdmin() || currentProfile?.approved) { removeOverlay(); renderAccountChip(); initCloudSync(); }
     else renderPending();
   } catch (err) {
     console.warn('[auth] refresh falló:', err?.message);
@@ -64,9 +64,20 @@ async function fetchProfile(id) {
 }
 
 /* ── acciones ── */
+// Login DIRECTO con contraseña: si el email+contraseña son correctos, entra al
+// instante (sin ir al correo). Es la forma segura de "entrar directo".
+async function signInPassword(email, password) {
+  return sb.auth.signInWithPassword({ email, password });
+}
+// Registro con contraseña (Solicitar acceso): crea la cuenta (queda pendiente).
+// Si en Supabase "Confirm email" está apagado, entra al toque; si está prendido,
+// primero confirma por correo. En ambos casos queda pendiente de aprobación.
+async function signUpPassword(email, password) {
+  return sb.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin + window.location.pathname } });
+}
+// Fallback sin contraseña (link mágico) — útil para cuentas viejas creadas por
+// link, o si alguien olvidó su contraseña.
 async function sendMagicLink(email, allowCreate) {
-  // "Solicitar acceso" crea la cuenta (queda pendiente); "Entrar" NO crea cuenta
-  // nueva, así un mail sin acceso recibe un aviso claro en vez de registrarse solo.
   return sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin + window.location.pathname, shouldCreateUser: !!allowCreate } });
 }
 async function signOut() { try { await sb.auth.signOut(); } catch { /* ignore */ } location.reload(); }
@@ -77,6 +88,51 @@ async function listProfiles() {
 async function setApproved(id, approved) {
   try { await sb.from('profiles').update({ approved }).eq('id', id); return true; }
   catch (err) { console.warn('[auth] no se pudo actualizar el usuario:', err?.message); return false; }
+}
+
+/* ══════════════════ Sync de datos del usuario en la nube ══════════════════
+ * Espeja las claves de datos del usuario (icp_* salvo las cachés) a una fila
+ * por usuario en la tabla user_data (JSON). Al entrar: la nube manda (o, si la
+ * nube está vacía y este navegador ya tenía datos, sube esos como base). Cada
+ * cambio en localStorage se guarda solo (debounce). Sin tocar los cientos de
+ * lugares donde la app escribe: interceptamos localStorage.setItem una vez. */
+let syncStarted = false, _saveTimer = null;
+const SYNC_DENY = (k) => k.startsWith('icp_cache_') || k === 'icp_ref_cache';
+const isSyncKey = (k) => typeof k === 'string' && k.startsWith('icp_') && !SYNC_DENY(k);
+function snapshotLocal() {
+  const out = {};
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (isSyncKey(k)) out[k] = localStorage.getItem(k); }
+  return out;
+}
+function applyToLocal(data) {
+  for (const [k, v] of Object.entries(data || {})) { if (isSyncKey(k) && typeof v === 'string') { try { localStorage.setItem(k, v); } catch { /* lleno */ } } }
+}
+async function loadCloud() {
+  try { const { data, error } = await sb.from('user_data').select('data').eq('id', currentUser.id).maybeSingle(); if (error) throw error; return data?.data ?? null; }
+  catch (err) { console.warn('[sync] no se pudo leer la nube:', err?.message); return null; }
+}
+async function saveCloud() {
+  try { const { error } = await sb.from('user_data').upsert({ id: currentUser.id, data: snapshotLocal(), updated_at: new Date().toISOString() }); if (error) throw error; }
+  catch (err) { console.warn('[sync] no se pudo guardar en la nube:', err?.message); }
+}
+function scheduleSave() { clearTimeout(_saveTimer); _saveTimer = setTimeout(saveCloud, 1500); }
+async function initCloudSync() {
+  if (syncStarted || !currentUser) return; syncStarted = true;
+  const cloud = await loadCloud();
+  const hasCloud = cloud && Object.keys(cloud).length > 0;
+  if (hasCloud) {
+    applyToLocal(cloud);
+    try { window.__vertexReload?.(); } catch { /* la app se re-renderiza sola en el próximo ciclo */ }
+  } else {
+    // Nube vacía: subimos lo que ya había en este navegador como base inicial.
+    const snap = snapshotLocal();
+    if (Object.keys(snap).length) await saveCloud();
+  }
+  // Auto-guardado: interceptamos setItem UNA vez (después de aplicar la nube,
+  // para no disparar un guardado redundante al escribir los datos entrantes).
+  const orig = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = (k, v) => { orig(k, v); if (isSyncKey(k)) scheduleSave(); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveCloud(); });
 }
 
 /* ── UI: overlay ── */
@@ -98,42 +154,62 @@ function renderLogin() {
         <button type="button" class="auth-seg-btn ${!isReq ? 'active' : ''}" data-login-mode="entrar">Ya tengo acceso</button>
         <button type="button" class="auth-seg-btn ${isReq ? 'active' : ''}" data-login-mode="solicitar">Solicitar acceso</button>
       </div>
-      <div class="auth-title">${isReq ? 'Pedí acceso a la plataforma' : 'Entrá con tu email'}</div>
+      <div class="auth-title">${isReq ? 'Creá tu acceso' : 'Entrá a tu cuenta'}</div>
       <div class="auth-sub">${isReq
-        ? 'Dejá tu email y te registramos. Un administrador va a <strong>aprobar</strong> tu cuenta y ahí ya vas a poder entrar. Te llega un link al correo para confirmar tu mail.'
-        : 'Poné tu email y te mandamos un <strong>link mágico</strong> — tocás el link y entrás, sin contraseñas.'}</div>
+        ? 'Elegí tu email y una contraseña. Un administrador va a <strong>aprobar</strong> tu cuenta y ahí ya vas a poder entrar.'
+        : 'Poné tu email y contraseña y entrás <strong>directo</strong>, sin ir al correo.'}</div>
       <form id="auth-form">
         <input type="email" id="auth-email" class="auth-input" placeholder="tu@email.com" autocomplete="email" required />
+        <input type="password" id="auth-pass" class="auth-input" placeholder="Contraseña${isReq ? ' (mín. 6 caracteres)' : ''}" autocomplete="${isReq ? 'new-password' : 'current-password'}" required />
         <button type="submit" class="auth-btn" id="auth-send">${isReq ? 'Solicitar ingreso' : 'Entrar'}</button>
       </form>
       <div class="auth-msg" id="auth-msg"></div>
+      ${!isReq ? `<button type="button" class="auth-link" id="auth-magic">¿Sin contraseña o la olvidaste? Entrar con link al correo</button>` : ''}
       <div class="auth-foot">${isReq ? '¿Ya te aprobaron? Usá <strong>“Ya tengo acceso”</strong>.' : '¿Primera vez? Tocá <strong>“Solicitar acceso”</strong> para pedir permiso.'}</div>
     </div>`;
   el.querySelectorAll('[data-login-mode]').forEach(b => b.addEventListener('click', () => { loginMode = b.dataset.loginMode; renderLogin(); }));
+
+  const emailEl = () => el.querySelector('#auth-email').value.trim();
+  const msgEl = () => el.querySelector('#auth-msg');
+  const setMsg = (cls, txt) => { const m = msgEl(); m.className = 'auth-msg ' + cls; m.innerHTML = txt; };
+
   const form = el.querySelector('#auth-form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = el.querySelector('#auth-email').value.trim();
-    const msg = el.querySelector('#auth-msg');
+    const email = emailEl();
+    const password = el.querySelector('#auth-pass').value;
     const btn = el.querySelector('#auth-send');
-    if (!email) return;
-    btn.disabled = true; btn.textContent = 'Enviando…';
-    const { error } = await sendMagicLink(email, isReq); // solo "solicitar" crea la cuenta
-    if (error) {
-      // En "Entrar", el error típico es que el mail no está registrado (shouldCreateUser:false).
-      const notReg = /not\s*(allow|exist)|signups?\s*not|otp_disabled|user.*not.*found/i.test(error.message || '');
-      msg.className = 'auth-msg err';
-      msg.textContent = (!isReq && notReg)
-        ? 'Ese email todavía no tiene acceso. Tocá “Solicitar acceso” para pedir permiso.'
-        : 'No se pudo enviar: ' + error.message;
-      btn.disabled = false; btn.textContent = isReq ? 'Solicitar ingreso' : 'Entrar';
+    if (!email || !password) return;
+    if (isReq && password.length < 6) { setMsg('err', 'La contraseña tiene que tener al menos 6 caracteres.'); return; }
+    btn.disabled = true; btn.textContent = isReq ? 'Creando…' : 'Entrando…';
+    if (isReq) {
+      const { error } = await signUpPassword(email, password);
+      if (error) {
+        const exists = /already|registered|exist/i.test(error.message || '');
+        setMsg('err', exists ? 'Ese email ya está registrado. Usá <strong>“Ya tengo acceso”</strong>.' : 'No se pudo registrar: ' + error.message);
+        btn.disabled = false; btn.textContent = 'Solicitar ingreso';
+      } else {
+        setMsg('ok', '¡Cuenta creada! Queda <strong>pendiente</strong> hasta que un administrador te apruebe. Después entrás con tu email y contraseña.');
+        btn.textContent = 'Solicitud enviada';
+      }
     } else {
-      msg.className = 'auth-msg ok';
-      msg.textContent = isReq
-        ? '¡Solicitud enviada! Revisá tu correo (' + email + ') y confirmá. Cuando un admin te apruebe, vas a poder entrar.'
-        : '¡Listo! Revisá tu correo (' + email + ') y tocá el link para entrar.';
-      btn.textContent = isReq ? 'Solicitud enviada' : 'Link enviado';
+      const { error } = await signInPassword(email, password);
+      // Éxito → onAuthStateChange dispara refresh() y se abre la app. No hace falta más.
+      if (error) {
+        setMsg('err', 'Email o contraseña incorrectos, o el email todavía no tiene acceso. ¿Primera vez? Tocá <strong>“Solicitar acceso”</strong>.');
+        btn.disabled = false; btn.textContent = 'Entrar';
+      }
     }
+  });
+
+  // Fallback: entrar con link mágico (cuentas viejas sin contraseña / olvido).
+  el.querySelector('#auth-magic')?.addEventListener('click', async () => {
+    const email = emailEl();
+    if (!email) { setMsg('err', 'Escribí tu email arriba primero.'); return; }
+    setMsg('', 'Enviando link…');
+    const { error } = await sendMagicLink(email, false);
+    if (error) setMsg('err', 'No se pudo enviar el link: ' + error.message);
+    else setMsg('ok', 'Te mandamos un link a ' + email + '. Tocalo para entrar y, si querés, después ponés una contraseña.');
   });
 }
 
@@ -157,9 +233,17 @@ function renderAccountChip() {
   chip.innerHTML = `
     <span class="auth-chip-email" title="${esc(currentUser.email)}">${esc(currentUser.email)}</span>
     ${isAdmin() ? `<button class="auth-chip-btn" id="auth-admin-open" title="Panel de administración">⚙ Admin</button>` : ''}
+    <button class="auth-chip-btn" id="auth-chip-pass" title="Definir o cambiar tu contraseña">🔑</button>
     <button class="auth-chip-btn" id="auth-chip-logout" title="Cerrar sesión">Salir</button>`;
   chip.querySelector('#auth-chip-logout').addEventListener('click', signOut);
   chip.querySelector('#auth-admin-open')?.addEventListener('click', openAdminPanel);
+  chip.querySelector('#auth-chip-pass').addEventListener('click', async () => {
+    const pw = window.prompt('Definí una contraseña para entrar directo la próxima vez (mín. 6 caracteres):');
+    if (pw == null) return;
+    if (pw.length < 6) { alert('La contraseña tiene que tener al menos 6 caracteres.'); return; }
+    const { error } = await sb.auth.updateUser({ password: pw });
+    alert(error ? ('No se pudo guardar: ' + error.message) : '¡Listo! Ya podés entrar con tu email y esta contraseña.');
+  });
 }
 
 async function openAdminPanel() {

@@ -73,6 +73,43 @@ create policy "admin actualiza todo" on public.profiles
 
 > Si más adelante querés otro admin, cambiá el mail en el SQL (y en `ADMIN_EMAILS` de `supabaseConfig.js`).
 
+## 3-bis) Tabla para guardar la cartera en la nube (nuevo)
+
+Esto es lo que hace que la cartera (y todos tus datos) queden **ligados a tu
+cuenta** y sincronicen entre dispositivos: entrás desde el celular o desde otra
+compu con el mismo mail y ves lo mismo. Cada usuario solo puede ver/editar lo
+suyo (RLS por `auth.uid()`).
+
+En el mismo **SQL Editor**, pegá esto y **Run** (sin las comillas ```):
+
+```sql
+-- Una fila por usuario con un JSON de todos sus datos (cartera, aportes, config…).
+create table if not exists public.user_data (
+  id         uuid references auth.users on delete cascade primary key,
+  data       jsonb       not null default '{}',
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_data enable row level security;
+
+-- Cada quien ve, crea y actualiza SOLO su propia fila.
+drop policy if exists "leer datos propios" on public.user_data;
+create policy "leer datos propios" on public.user_data
+  for select using (auth.uid() = id);
+
+drop policy if exists "crear datos propios" on public.user_data;
+create policy "crear datos propios" on public.user_data
+  for insert with check (auth.uid() = id);
+
+drop policy if exists "actualizar datos propios" on public.user_data;
+create policy "actualizar datos propios" on public.user_data
+  for update using (auth.uid() = id) with check (auth.uid() = id);
+```
+
+> No hace falta tocar nada más: `auth.js` baja tu fila al entrar y guarda sola
+> cada cambio. Si esta tabla no existiera, la app igual funciona (los datos se
+> quedan en el navegador) — pero sin sincronizar.
+
 ## 4) Pegar las 2 claves en la app
 
 1. En el panel: **Project Settings** (el engranaje) → **API**.
@@ -104,5 +141,6 @@ export const ADMIN_EMAILS = ['aleinver95@gmail.com'];
 
 ## Notas de seguridad
 
-- La **anon key es pública por diseño** — lo que protege los datos son las reglas RLS del paso 3, del lado del servidor.
-- Por ahora la **cartera sigue guardándose en el navegador** de cada usuario. Este portón controla **quién puede entrar** a la plataforma. El paso siguiente (cuando quieras) es mover la cartera a la nube para que sincronice entre dispositivos y quede ligada a cada cuenta — con esto ya montado, es directo.
+- La **anon key es pública por diseño** — lo que protege los datos son las reglas RLS de los pasos 3 y 3-bis, del lado del servidor. Aunque alguien tenga la anon key, solo puede leer/escribir **su propia** fila.
+- La **cartera y tus datos viven en la nube** (tabla `user_data`), atados a tu cuenta y sincronizados entre dispositivos. El navegador guarda una copia local para andar rápido/offline, pero la fuente es tu fila en Supabase.
+- **Nunca** subas la `service_role` key al frontend ni al repo: esa sí saltea RLS. La app solo usa la `anon`.
