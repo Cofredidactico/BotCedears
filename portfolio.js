@@ -5,7 +5,7 @@
  * de cada holding se resuelven en caliente contra dataSource.js.
  */
 const KEY = 'icp_portfolio';
-const MAX = 25;
+const MAX = 50;
 
 function read() {
   try {
@@ -16,7 +16,8 @@ function read() {
 }
 
 function write(list) {
-  try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* localStorage no disponible */ }
+  try { localStorage.setItem(KEY, JSON.stringify(list)); return true; }
+  catch { return false; /* almacenamiento lleno o no disponible */ }
 }
 
 export function getPortfolio() { return read(); }
