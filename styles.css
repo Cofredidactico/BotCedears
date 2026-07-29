@@ -2971,3 +2971,5 @@ body::after {
 .auth-seg { display: flex; gap: 4px; background: var(--surface-2, rgba(255,255,255,0.04)); border: 1px solid var(--border); border-radius: 10px; padding: 4px; margin-bottom: 16px; }
 .auth-seg-btn { flex: 1; background: transparent; border: none; color: var(--text-mute); font-size: 13px; font-weight: 600; padding: 9px 10px; border-radius: 7px; cursor: pointer; }
 .auth-seg-btn.active { background: var(--accent, #7c5cff); color: #fff; }
+.auth-link { background: none; border: none; color: var(--text-mute); font-size: 12px; text-decoration: underline; cursor: pointer; margin-top: 10px; padding: 0; }
+.auth-link:hover { color: var(--accent, #7c5cff); }
