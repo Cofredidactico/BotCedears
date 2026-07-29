@@ -2892,3 +2892,17 @@ body::after {
 .top10-table .top10-rank { font-family: 'IBM Plex Mono', monospace; font-weight: 700; color: var(--text-mute); width: 34px; text-align: center; }
 .top10-table tbody tr:first-child .top10-rank { color: var(--gold-text, oklch(0.82 0.13 85)); }
 .top10-grade { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+
+/* ── Estado real de la cuenta (aportado vs. valor actual) en "Tu resumen" ── */
+.pdx-inputs { display: flex; gap: 14px; flex-wrap: wrap; }
+.pdx-inputs .pdx-inp input { width: 128px; }
+.pdx-real { margin: 0 0 18px; padding: 16px 18px; border-radius: 14px; border: 1.5px solid var(--border-soft); background: var(--surface-2); }
+.pdx-real.up { border-color: oklch(0.72 0.17 152 / 0.45); background: linear-gradient(160deg, oklch(0.76 0.18 152 / 0.12), var(--surface-2) 70%); }
+.pdx-real.down { border-color: oklch(0.70 0.21 23 / 0.45); background: linear-gradient(160deg, oklch(0.70 0.21 23 / 0.10), var(--surface-2) 70%); }
+.pdx-real-main { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pdx-real-k { font-size: 13px; color: var(--text-mute); font-weight: 600; }
+.pdx-real-v { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 700; }
+.pdx-real.up .pdx-real-v { color: var(--up-text); }
+.pdx-real.down .pdx-real-v { color: var(--down-text); }
+.pdx-real-v small { font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; opacity: 0.9; }
+.pdx-real-sub { margin-top: 6px; font-size: 12px; color: var(--text-dim); line-height: 1.5; }
