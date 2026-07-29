@@ -48,8 +48,21 @@ function lsGet(key, ttl) {
   } catch { return undefined; }
 }
 function lsSet(key, value) {
-  try { localStorage.setItem(LS_PREFIX + key, JSON.stringify({ t: Date.now(), v: value })); }
-  catch { /* localStorage lleno o no disponible (modo privado, SSR, etc.) — no es crítico */ }
+  const payload = JSON.stringify({ t: Date.now(), v: value });
+  try { localStorage.setItem(LS_PREFIX + key, payload); return; }
+  catch { /* lleno: podamos la propia caché (nunca datos del usuario) y reintentamos */ }
+  try {
+    const entries = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(LS_PREFIX)) continue;
+      let t = 0; try { t = JSON.parse(localStorage.getItem(k))?.t || 0; } catch { /* corrupto: tratarlo como viejo */ }
+      entries.push({ k, t });
+    }
+    // Descartar la mitad más vieja de la caché para hacer lugar.
+    entries.sort((a, b) => a.t - b.t).slice(0, Math.max(1, Math.ceil(entries.length / 2))).forEach(e => localStorage.removeItem(e.k));
+    localStorage.setItem(LS_PREFIX + key, payload);
+  } catch { /* sigue sin entrar — no es crítico, queda solo en la caché en memoria */ }
 }
 
 const _cache = new Map();
