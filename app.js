@@ -8994,8 +8994,8 @@ function portfolioHTML() {
       <div class="port-form">
         <input list="port-ticker-list" id="port-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" aria-label="Ticker del activo" autocomplete="off" style="text-transform:uppercase;" value="${editingHolding ? esc(editingHolding.ticker) : ''}" ${editingHolding ? 'readonly' : ''} />
         <datalist id="port-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
-        <input type="number" id="port-shares" class="port-input" placeholder="Cantidad" aria-label="Cantidad de unidades" min="0" step="any" value="${editingHolding ? editingHolding.shares : ''}" />
-        <input type="number" id="port-cost" class="port-input" placeholder="Costo promedio (opcional)" aria-label="Costo promedio de compra (opcional)" min="0" step="any" value="${editingHolding?.avgCost ?? ''}" />
+        <input type="text" inputmode="decimal" id="port-shares" class="port-input" placeholder="Cantidad (ej. 10 o 3,5)" aria-label="Cantidad de unidades" autocomplete="off" value="${editingHolding ? editingHolding.shares : ''}" />
+        <input type="text" inputmode="decimal" id="port-cost" class="port-input" placeholder="Costo promedio (opcional)" aria-label="Costo promedio de compra (opcional)" autocomplete="off" value="${editingHolding?.avgCost ?? ''}" />
         <select id="port-currency" class="port-input" aria-label="Moneda del costo">
           <option value="USD" ${!editingHolding || editingHolding.costCurrency !== 'ARS' ? 'selected' : ''}>USD (acción/activo subyacente)</option>
           <option value="ARS" ${editingHolding?.costCurrency === 'ARS' ? 'selected' : ''}>ARS (CEDEAR en pesos)</option>
@@ -9311,19 +9311,44 @@ function wirePortfolioEvents() {
     const currencyEl = document.getElementById('port-currency');
     const dateEl = document.getElementById('port-date');
     const ticker = tickerEl.value.trim().toUpperCase();
-    const shares = parseFloat(sharesEl.value);
-    const cost = costEl.value ? parseFloat(costEl.value) : null;
+    // Tolerante a la coma decimal argentina (10,5) y a la notación US (10.5).
+    // Con ambos separadores, el último es el decimal; con solo coma, la coma es
+    // decimal; con solo punto, se respeta como decimal (comportamiento original).
+    const numFrom = (v) => {
+      let s = String(v ?? '').trim().replace(/[^\d.,]/g, '');
+      if (!s) return null;
+      const lc = s.lastIndexOf(','), ld = s.lastIndexOf('.');
+      if (lc > -1 && ld > -1) { const dec = lc > ld ? ',' : '.'; s = s.split(dec === ',' ? '.' : ',').join('').replace(dec, '.'); }
+      else if (lc > -1) { s = s.replace(/\./g, '').replace(',', '.'); }
+      const n = parseFloat(s);
+      return isNaN(n) ? null : n;
+    };
+    const shares = numFrom(sharesEl.value);
+    const cost = costEl.value ? numFrom(costEl.value) : null;
     const currency = currencyEl?.value === 'ARS' ? 'ARS' : 'USD';
     const purchaseDate = dateEl?.value || null;
-    if (!ticker || !shares || shares <= 0) return;
+    if (!ticker) { showToast('Escribí el ticker del activo (ej. AAPL).', 'info'); return; }
+    if (!shares || shares <= 0) { showToast('Poné una cantidad válida (mayor a 0).', 'info'); return; }
     const wasEditing = portState.editing != null;
+    const isNew = !getPortfolio().some(h => h.ticker === ticker);
+    // Tope de posiciones: avisar en vez de fallar en silencio.
+    if (isNew && !wasEditing && getPortfolio().length >= PORTFOLIO_MAX) {
+      showToast(`Llegaste al máximo de ${PORTFOLIO_MAX} posiciones. Quitá alguna para agregar otra.`, 'info');
+      return;
+    }
     // Registro de operaciones: solo el alta de una posición NUEVA con costo
     // se loguea como compra (una edición cambia el estado final, no dice qué
     // operación hubo en el medio — no se inventa).
-    if (!wasEditing && !getPortfolio().some(h => h.ticker === ticker) && cost != null) {
+    if (!wasEditing && isNew && cost != null) {
       logPortOp({ type: 'buy', ticker, shares, price: cost, currency, realized: null });
     }
     addHolding(ticker, shares, cost, currency, purchaseDate);
+    // Verificar que realmente se guardó (si el almacenamiento del navegador está
+    // lleno, la escritura falla en silencio — antes se mostraba "agregado" igual).
+    if (!getPortfolio().some(h => h.ticker === ticker)) {
+      showToast('No se pudo guardar — el almacenamiento del navegador puede estar lleno. Exportá tu cartera (CSV) y borrá operaciones viejas del Libro, o liberá espacio, y probá de nuevo.', 'info');
+      return;
+    }
     portState.editing = null;
     tickerEl.value = ''; sharesEl.value = ''; costEl.value = ''; if (dateEl) dateEl.value = '';
     showToast(wasEditing ? `${ticker} actualizado en tu Portfolio` : `${ticker} agregado a tu Portfolio`, 'success');
