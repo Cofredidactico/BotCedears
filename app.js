@@ -167,6 +167,7 @@ const portState = {
   stressShock: null, // shock de mercado elegido en el panel de estrés (o null)
   optMode: 'minvar', // criterio del optimizador de cartera
   opsFilter: 'all', // filtro del Libro de Operaciones por ticker
+  flowType: 'deposit', // tipo elegido en el formulario de Aportes y Retiros
 };
 const taxState = { cumplidor: lsGetSafe('icp_tax_cumplidor', '0') === '1' };
 function lsSetSafe(key, value) { try { localStorage.setItem(key, value); } catch { /* no disponible */ } }
@@ -7007,6 +7008,94 @@ function deletePortOp(id) {
   lsSetSafe(PORT_OPS_KEY, JSON.stringify(list));
 }
 
+/* ── Aportes y Retiros: flujo de fondos fechado (depósitos/extracciones) ──
+ *  Permite medir el aporte NETO real (aún si metiste y sacaste plata varias
+ *  veces) y el retorno del dinero (TIR / money-weighted), que sí tiene en
+ *  cuenta CUÁNDO entró y salió cada peso. Todo en pesos, solo en este navegador. */
+const PORT_FLOWS_KEY = 'icp_port_flows';
+const PORT_FLOWS_MAX = 300;
+function getPortFlows() {
+  try { const v = JSON.parse(localStorage.getItem(PORT_FLOWS_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function logPortFlow(flow) {
+  const list = getPortFlows();
+  list.push({ type: flow.type === 'withdrawal' ? 'withdrawal' : 'deposit', amount: flow.amount, date: flow.date, id: flow.id ?? (Date.now() + '-' + Math.random().toString(36).slice(2, 7)) });
+  list.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  lsSetSafe(PORT_FLOWS_KEY, JSON.stringify(list.slice(0, PORT_FLOWS_MAX)));
+}
+function deletePortFlow(id) {
+  lsSetSafe(PORT_FLOWS_KEY, JSON.stringify(getPortFlows().filter(f => String(f.id) !== String(id))));
+}
+function cashFlowsSummary() {
+  const flows = getPortFlows();
+  let deposits = 0, withdrawals = 0;
+  for (const f of flows) { if (f.type === 'withdrawal') withdrawals += (f.amount || 0); else deposits += (f.amount || 0); }
+  return { flows, deposits, withdrawals, net: deposits - withdrawals, count: flows.length };
+}
+/** TIR anualizada (money-weighted / XIRR): dado el flujo de aportes/retiros
+ *  fechados y el valor ACTUAL de la cuenta, resuelve la tasa que iguala el
+ *  valor presente. Óptica del inversor: aporte = sale plata (−), retiro = entra
+ *  (+), valor actual hoy = como si liquidaras (+). Bisección robusta. */
+function portfolioMWR(accountNowArs) {
+  const flows = getPortFlows().filter(f => f.date && f.amount > 0);
+  if (!flows.length || !(accountNowArs > 0)) return null;
+  const cf = flows.map(f => ({ date: f.date, amt: f.type === 'withdrawal' ? f.amount : -f.amount }));
+  cf.push({ date: new Date().toISOString().slice(0, 10), amt: accountNowArs });
+  const t0 = new Date(cf[0].date).getTime();
+  if (isNaN(t0)) return null;
+  const yrs = (d) => (new Date(d).getTime() - t0) / (365.25 * 24 * 3600 * 1000);
+  const npv = (r) => cf.reduce((s, x) => s + x.amt / Math.pow(1 + r, yrs(x.date)), 0);
+  let lo = -0.9999, hi = 100, flo = npv(lo), fhi = npv(hi);
+  if (!isFinite(flo) || !isFinite(fhi) || flo * fhi > 0) return null; // sin cruce de signo → no converge
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2, fm = npv(mid);
+    if (!isFinite(fm)) return null;
+    if (Math.abs(fm) < 1e-4) return mid;
+    if (flo * fm < 0) { hi = mid; } else { lo = mid; flo = fm; }
+  }
+  return (lo + hi) / 2;
+}
+
+function cashFlowsCardHTML(stats) {
+  const s = cashFlowsSummary();
+  const currentArs = stats.totalValueArs ?? null;
+  const realNow = portState.accountTotalArs != null ? portState.accountTotalArs : currentArs;
+  const mwr = portfolioMWR(realNow);
+  const recent = s.flows.slice().reverse().slice(0, 12); // más recientes primero
+  const today = new Date().toISOString().slice(0, 10);
+  return `
+    <div class="card port-notes-card flows-card">
+      <div class="dash-radar-title">Aportes y Retiros</div>
+      <div class="mc-intro">Registrá cuándo <strong>metiste</strong> (aporte) o <strong>sacaste</strong> (retiro) plata de la cuenta. Con eso, el "resultado real" de arriba usa tu <strong>aporte neto</strong> exacto —aún si moviste plata varias veces— y se calcula la <strong>TIR</strong> (retorno de tu dinero), que tiene en cuenta <em>cuándo</em> entró y salió cada peso.</div>
+      <div class="flows-form">
+        <div class="flows-seg" role="group" aria-label="Tipo de movimiento">
+          <button class="flows-seg-btn ${portState.flowType !== 'withdrawal' ? 'active' : ''}" data-flow-type="deposit">＋ Aporte</button>
+          <button class="flows-seg-btn ${portState.flowType === 'withdrawal' ? 'active' : ''}" data-flow-type="withdrawal">－ Retiro</button>
+        </div>
+        <input type="text" inputmode="decimal" id="flow-amount" class="port-input" placeholder="Monto AR$ (ej. 200.000)" aria-label="Monto del movimiento en pesos" autocomplete="off" />
+        <input type="date" id="flow-date" class="port-input" aria-label="Fecha del movimiento" max="${today}" value="${today}" />
+        <button class="port-add-btn" id="flow-add">Registrar</button>
+      </div>
+      <div class="flows-totals">
+        <div class="flows-total"><span class="flows-k">Aportado total</span><b>${s.deposits ? pv(fmtArs(s.deposits)) : '—'}</b></div>
+        <div class="flows-total"><span class="flows-k">Retirado total</span><b>${s.withdrawals ? pv(fmtArs(s.withdrawals)) : '—'}</b></div>
+        <div class="flows-total"><span class="flows-k">Aporte neto</span><b class="${s.net >= 0 ? 'up' : 'down'}">${s.count ? pv(fmtArs(s.net)) : '—'}</b></div>
+        <div class="flows-total flows-mwr"><span class="flows-k">Retorno de tu dinero · TIR anual ${infoTip('TIR / money-weighted: la tasa anual que iguala tus aportes y retiros fechados con el valor actual de la cuenta. A diferencia del % simple, premia o castiga según CUÁNDO metiste o sacaste plata. Necesita que cargues "Tenés hoy en la cuenta" arriba.')}</span><b class="${mwr == null ? '' : (mwr >= 0 ? 'up' : 'down')}">${mwr != null ? `${mwr >= 0 ? '+' : ''}${(mwr * 100).toFixed(1)}%` : 'N/D'}</b></div>
+      </div>
+      ${mwr == null && s.count ? `<div class="port-note" style="padding:2px 0 0;">Para ver la TIR, cargá <strong>“Tenés hoy en la cuenta”</strong> en el resumen de arriba.</div>` : ''}
+      ${!s.count ? `<div class="port-note" style="padding-top:8px;">Todavía no registraste movimientos. Cargá tus aportes y retiros con fecha para medir el aporte neto y el retorno real de tu dinero.</div>` : `
+        <div class="flows-list">
+          ${recent.map(f => `
+            <div class="flows-row">
+              <span class="flows-type ${f.type === 'withdrawal' ? 'out' : 'in'}">${f.type === 'withdrawal' ? 'RETIRO' : 'APORTE'}</span>
+              <span class="flows-amt ${f.type === 'withdrawal' ? 'down' : 'up'}">${f.type === 'withdrawal' ? '−' : '+'}${pv(fmtArs(f.amount))}</span>
+              <span class="flows-date">${esc(f.date || 's/fecha')}</span>
+              <button class="ledger-del" data-flow-del="${esc(String(f.id))}" title="Borrar movimiento" aria-label="Borrar movimiento">×</button>
+            </div>`).join('')}
+        </div>`}
+    </div>`;
+}
+
 /** Libro de Operaciones: guarda TODAS las compras y ventas registradas y
  *  muestra el resultado TOTAL real (realizado por ventas + no realizado de las
  *  posiciones abiertas) — "cuánto realmente vas ganando con el tiempo".
@@ -8457,7 +8546,10 @@ function portfolioDidacticSummary(stats) {
   }
   const investedNow = costBasis; // "Plata invertida" = costo de las compras
   const currentValue = stats.totalValueArs; // valor de mercado actual (Tenencias total)
-  const declared = portState.investedArs; // lo que el usuario depositó en la cuenta
+  // "Aportado": si hay movimientos cargados en Aportes y Retiros, se usa el
+  // NETO exacto (depósitos − retiros); si no, el monto único declarado a mano.
+  const flowsNet = cashFlowsSummary();
+  const declared = flowsNet.count ? flowsNet.net : portState.investedArs; // lo que pusiste desde el principio (neto)
   const available = (declared != null && costBasis != null) ? declared - costBasis : null; // efectivo sin invertir
   const gainArs = (currentValue != null && costBasis != null) ? currentValue - costBasis : null; // P&L sobre lo invertido
   const gainPct = (gainArs != null && costBasis > 0) ? (gainArs / costBasis) * 100 : null;
@@ -9015,6 +9107,7 @@ function portfolioHTML() {
 
     ${!holdings.length ? emptyStateHTML('briefcase', `Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}). Podés empezar cargando una a la vez arriba, o importar un CSV (columnas: ticker,shares,avgCost,costCurrency).`) : `
     ${portfolioDidacticHTML(stats)}
+    ${cashFlowsCardHTML(stats)}
     <div class="port-summary-grid">
       <div class="card port-summary-card">
         <div class="dash-radar-title">Valor total</div>
@@ -9485,6 +9578,29 @@ function wirePortfolioEvents() {
       showToast('Operación borrada del libro', 'info');
       renderReport();
     });
+  });
+
+  // Aportes y Retiros: elegir tipo, registrar movimiento fechado, borrar.
+  els.report.querySelectorAll('[data-flow-type]').forEach(btn => {
+    btn.addEventListener('click', () => { portState.flowType = btn.dataset.flowType === 'withdrawal' ? 'withdrawal' : 'deposit'; renderReport(); });
+  });
+  const flowAdd = document.getElementById('flow-add');
+  if (flowAdd) flowAdd.addEventListener('click', () => {
+    const amtEl = document.getElementById('flow-amount');
+    const dateEl = document.getElementById('flow-date');
+    // Monto en PESOS: el punto es separador de miles (1.000.000 = un millón),
+    // igual que los campos "Aportaste"/"Tenés hoy". Se toman solo los dígitos.
+    const amount = parseFloat(String(amtEl?.value ?? '').replace(/[^\d]/g, ''));
+    if (!amount || amount <= 0) { showToast('Poné un monto válido (mayor a 0).', 'info'); return; }
+    const date = dateEl?.value || new Date().toISOString().slice(0, 10);
+    logPortFlow({ type: portState.flowType, amount, date });
+    if (getPortFlows().length === 0) { showToast('No se pudo guardar — liberá espacio en el navegador y probá de nuevo.', 'info'); return; }
+    if (amtEl) amtEl.value = '';
+    showToast(`${portState.flowType === 'withdrawal' ? 'Retiro' : 'Aporte'} de ${fmtArs(amount)} registrado`, 'success');
+    renderReport();
+  });
+  els.report.querySelectorAll('[data-flow-del]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); deletePortFlow(btn.dataset.flowDel); showToast('Movimiento borrado', 'info'); renderReport(); });
   });
 
   // Comprar más: suma unidades a una posición con precio promedio ponderado
