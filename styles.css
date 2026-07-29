@@ -2906,3 +2906,26 @@ body::after {
 .pdx-real.down .pdx-real-v { color: var(--down-text); }
 .pdx-real-v small { font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; opacity: 0.9; }
 .pdx-real-sub { margin-top: 6px; font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+
+/* ── Aportes y Retiros (flujo de fondos + TIR) ── */
+.flows-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 4px 0 14px; }
+.flows-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.flows-seg-btn { background: transparent; border: none; color: var(--text-mute); font-size: 13px; font-weight: 600; padding: 8px 14px; cursor: pointer; }
+.flows-seg-btn.active { background: var(--surface-2); color: var(--text); }
+.flows-form .port-input { max-width: 190px; }
+.flows-totals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+.flows-total { padding: 11px 13px; background: var(--surface-2); border-radius: 10px; }
+.flows-total .flows-k { display: block; font-size: 10.5px; color: var(--text-mute); margin-bottom: 4px; }
+.flows-total b { font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 700; }
+.flows-total b.up { color: var(--up-text); } .flows-total b.down { color: var(--down-text); }
+.flows-mwr b { font-size: 18px; }
+.flows-list { max-height: 300px; overflow-y: auto; margin-top: 6px; }
+.flows-row { display: grid; grid-template-columns: 74px 1fr auto 24px; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+.flows-row:last-child { border-bottom: none; }
+.flows-type { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 7px; border-radius: 6px; text-align: center; }
+.flows-type.in { background: oklch(0.30 0.09 152); color: oklch(0.87 0.14 152); }
+.flows-type.out { background: oklch(0.30 0.10 45); color: oklch(0.86 0.13 45); }
+.flows-amt { font-family: 'IBM Plex Mono', monospace; font-weight: 600; }
+.flows-amt.up { color: var(--up-text); } .flows-amt.down { color: var(--down-text); }
+.flows-date { color: var(--text-mute); font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+@media (max-width: 640px) { .flows-totals { grid-template-columns: 1fr 1fr; } }
