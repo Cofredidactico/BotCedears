@@ -1,5 +1,5 @@
 /**
- * dataSource.js — Capa de datos única de Investment Copilot AI.
+ * dataSource.js — Capa de datos única de Vertex Signal.
  * ─────────────────────────────────────────────────────────────────────────────
  * Es la ÚNICA pieza que el front toca para obtener datos. El motor de
  * indicadores (indicators.js) y de score (scoring.js) NO saben de dónde
