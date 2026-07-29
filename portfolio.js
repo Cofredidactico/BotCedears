@@ -16,8 +16,22 @@ function read() {
 }
 
 function write(list) {
-  try { localStorage.setItem(KEY, JSON.stringify(list)); return true; }
-  catch { return false; /* almacenamiento lleno o no disponible */ }
+  const payload = JSON.stringify(list);
+  try { localStorage.setItem(KEY, payload); return true; }
+  catch {
+    // Almacenamiento lleno: la caché de cotizaciones/velas (icp_cache_*) es lo
+    // más pesado y 100% descartable (se regenera desde la API). La limpiamos y
+    // reintentamos una vez — los datos del usuario nunca deben quedar sin poder
+    // guardarse por culpa de la caché.
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('icp_cache_')) localStorage.removeItem(k);
+      }
+      localStorage.setItem(KEY, payload);
+      return true;
+    } catch { return false; /* sigue sin entrar o localStorage no disponible */ }
+  }
 }
 
 export function getPortfolio() { return read(); }
