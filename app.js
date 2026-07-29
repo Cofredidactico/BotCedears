@@ -11420,6 +11420,18 @@ async function loadDashboardData() {
 }
 
 /* ───────────────────────── init ───────────────────────── */
+// Gancho que usa auth.js tras bajar la cartera de la nube: re-renderiza lo
+// visible con los datos recién aplicados a localStorage, sin recargar la página.
+window.__vertexReload = () => {
+  try {
+    portState.data = {};
+    renderTopbar();
+    if (!state.asset) {
+      renderReport();
+      if (state.view === 'portfolio') loadPortfolioData();
+    }
+  } catch (e) { /* si algo aún no está listo, el próximo ciclo lo toma */ }
+};
 renderTopbar();
 renderReport();
 initSearch();

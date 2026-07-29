@@ -5,9 +5,9 @@
  *   • Si está configurado → muestra login; cada usuario nuevo queda "pendiente"
  *     hasta que un admin lo aprueba; el admin ve un panel para aprobar/rechazar.
  *
- * La cartera y demás datos siguen viviendo en el navegador (localStorage) por
- * ahora — este portón controla el ACCESO a la plataforma. Mover los datos a la
- * nube (sync entre dispositivos) es el paso siguiente, ya con esto en pie.
+ * Además de controlar el ACCESO, sincroniza la cartera y demás datos del usuario
+ * con la nube (tabla user_data): al entrar en cualquier dispositivo baja lo suyo,
+ * y cada cambio en localStorage se guarda solo. Ver initCloudSync() más abajo.
  *
  * Defensivo a propósito: cualquier fallo de red/CDN/Supabase NO debe romper la
  * app; en el peor caso se cae a "sin login" y la app sigue andando. */
@@ -48,7 +48,7 @@ async function refresh() {
     if (!currentUser) { currentProfile = null; renderLogin(); return; }
     currentProfile = await fetchProfile(currentUser.id);
     // El admin siempre entra (aunque su perfil aún no diga approved).
-    if (isAdmin() || currentProfile?.approved) { removeOverlay(); renderAccountChip(); }
+    if (isAdmin() || currentProfile?.approved) { removeOverlay(); renderAccountChip(); initCloudSync(); }
     else renderPending();
   } catch (err) {
     console.warn('[auth] refresh falló:', err?.message);
@@ -88,6 +88,51 @@ async function listProfiles() {
 async function setApproved(id, approved) {
   try { await sb.from('profiles').update({ approved }).eq('id', id); return true; }
   catch (err) { console.warn('[auth] no se pudo actualizar el usuario:', err?.message); return false; }
+}
+
+/* ══════════════════ Sync de datos del usuario en la nube ══════════════════
+ * Espeja las claves de datos del usuario (icp_* salvo las cachés) a una fila
+ * por usuario en la tabla user_data (JSON). Al entrar: la nube manda (o, si la
+ * nube está vacía y este navegador ya tenía datos, sube esos como base). Cada
+ * cambio en localStorage se guarda solo (debounce). Sin tocar los cientos de
+ * lugares donde la app escribe: interceptamos localStorage.setItem una vez. */
+let syncStarted = false, _saveTimer = null;
+const SYNC_DENY = (k) => k.startsWith('icp_cache_') || k === 'icp_ref_cache';
+const isSyncKey = (k) => typeof k === 'string' && k.startsWith('icp_') && !SYNC_DENY(k);
+function snapshotLocal() {
+  const out = {};
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (isSyncKey(k)) out[k] = localStorage.getItem(k); }
+  return out;
+}
+function applyToLocal(data) {
+  for (const [k, v] of Object.entries(data || {})) { if (isSyncKey(k) && typeof v === 'string') { try { localStorage.setItem(k, v); } catch { /* lleno */ } } }
+}
+async function loadCloud() {
+  try { const { data, error } = await sb.from('user_data').select('data').eq('id', currentUser.id).maybeSingle(); if (error) throw error; return data?.data ?? null; }
+  catch (err) { console.warn('[sync] no se pudo leer la nube:', err?.message); return null; }
+}
+async function saveCloud() {
+  try { const { error } = await sb.from('user_data').upsert({ id: currentUser.id, data: snapshotLocal(), updated_at: new Date().toISOString() }); if (error) throw error; }
+  catch (err) { console.warn('[sync] no se pudo guardar en la nube:', err?.message); }
+}
+function scheduleSave() { clearTimeout(_saveTimer); _saveTimer = setTimeout(saveCloud, 1500); }
+async function initCloudSync() {
+  if (syncStarted || !currentUser) return; syncStarted = true;
+  const cloud = await loadCloud();
+  const hasCloud = cloud && Object.keys(cloud).length > 0;
+  if (hasCloud) {
+    applyToLocal(cloud);
+    try { window.__vertexReload?.(); } catch { /* la app se re-renderiza sola en el próximo ciclo */ }
+  } else {
+    // Nube vacía: subimos lo que ya había en este navegador como base inicial.
+    const snap = snapshotLocal();
+    if (Object.keys(snap).length) await saveCloud();
+  }
+  // Auto-guardado: interceptamos setItem UNA vez (después de aplicar la nube,
+  // para no disparar un guardado redundante al escribir los datos entrantes).
+  const orig = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = (k, v) => { orig(k, v); if (isSyncKey(k)) scheduleSave(); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveCloud(); });
 }
 
 /* ── UI: overlay ── */
