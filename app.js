@@ -5,6 +5,7 @@ import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverl
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
 import { getPortfolio, addHolding, removeHolding, PORTFOLIO_MAX } from './portfolio.js';
 import { fmtUsd, fmtArs, fmtPct, fmtNum, esc, withAlpha, clampNum } from './format.js';
+import './auth.js'; // portón de acceso opcional (Supabase); inerte si no está configurado
 
 const GREEN = 'oklch(0.76 0.18 152)', AMBER = 'oklch(0.75 0.15 70)', RED = 'oklch(0.70 0.21 23)', BLUE = 'oklch(0.72 0.15 250)', GOLD = 'oklch(0.82 0.14 85)';
 
