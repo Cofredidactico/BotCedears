@@ -8461,6 +8461,15 @@ function portfolioDidacticSummary(stats) {
   const available = (declared != null && costBasis != null) ? declared - costBasis : null; // efectivo sin invertir
   const gainArs = (currentValue != null && costBasis != null) ? currentValue - costBasis : null; // P&L sobre lo invertido
   const gainPct = (gainArs != null && costBasis > 0) ? (gainArs / costBasis) * 100 : null;
+  // Estado REAL de la cuenta: el usuario puede declarar cuánto tiene HOY de
+  // verdad (accountTotalArs). Puede diferir del valor de mercado computado si
+  // ya tomó ganancias/pérdidas, tiene efectivo, o activos no cargados acá.
+  const accountNow = portState.accountTotalArs;                       // valor actual real declarado
+  const realNow = accountNow != null ? accountNow : currentValue;      // el valor "de verdad" hoy
+  const realResult = (declared != null && realNow != null) ? realNow - declared : null; // resultado sobre lo APORTADO
+  const realResultPct = (realResult != null && declared > 0) ? (realResult / declared) * 100 : null;
+  const availableReal = (accountNow != null && currentValue != null) ? accountNow - currentValue : available; // efectivo real disponible
+  const untracked = (accountNow != null && currentValue != null) ? accountNow - currentValue : null; // cuenta declarada − posiciones cargadas
   let dayArs = null, prevArs = 0, hasDay = false;
   for (const r of stats.rows) {
     if (r.valueArs != null && r.d?.changePct != null) {
@@ -8469,7 +8478,7 @@ function portfolioDidacticSummary(stats) {
     }
   }
   const dayPct = hasDay && prevArs > 0 ? (dayArs / prevArs) * 100 : null;
-  return { ccl, investedNow, currentValue, declared, costBasis, available, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct };
+  return { ccl, investedNow, currentValue, declared, costBasis, available, gainArs, gainPct, dayArs: hasDay ? dayArs : null, dayPct, accountNow, realNow, realResult, realResultPct, availableReal, untracked };
 }
 
 /* Rendimiento del basket por período (Hoy/Semana/Mes/Año/Total), a partir de la
@@ -8868,8 +8877,19 @@ function portfolioDidacticHTML(stats) {
     <div class="card pdx-card">
       <div class="pdx-head">
         <div class="pdx-title">💡 Tu resumen, en criollo</div>
-        <label class="pdx-invested">¿Cuánto pusiste en tu cartera?<span class="pdx-inp"><span>AR$</span><input type="text" id="pdx-invested-input" inputmode="numeric" autocomplete="off" placeholder="ej. 1.000.000" value="${portState.investedArs != null ? Math.round(portState.investedArs).toLocaleString('es-AR') : ''}" /></span></label>
+        <div class="pdx-inputs">
+          <label class="pdx-invested">Aportaste (lo que pusiste)<span class="pdx-inp"><span>AR$</span><input type="text" id="pdx-invested-input" inputmode="numeric" autocomplete="off" placeholder="ej. 1.000.000" value="${portState.investedArs != null ? Math.round(portState.investedArs).toLocaleString('es-AR') : ''}" /></span></label>
+          <label class="pdx-invested">Tenés hoy en la cuenta<span class="pdx-inp"><span>AR$</span><input type="text" id="pdx-account-input" inputmode="numeric" autocomplete="off" placeholder="ej. 1.250.000" value="${portState.accountTotalArs != null ? Math.round(portState.accountTotalArs).toLocaleString('es-AR') : ''}" /></span></label>
+        </div>
       </div>
+      ${s.realResult != null ? `
+      <div class="pdx-real ${s.realResult >= 0 ? 'up' : 'down'}">
+        <div class="pdx-real-main">
+          <div class="pdx-real-k">${s.realResult >= 0 ? '🟢' : '🔴'} Resultado real sobre lo que aportaste</div>
+          <div class="pdx-real-v">${s.realResult >= 0 ? '+' : ''}${pv(fmtArs(s.realResult))}${s.realResultPct != null ? ` <small>(${s.realResultPct >= 0 ? '+' : ''}${s.realResultPct.toFixed(1)}%)</small>` : ''}</div>
+        </div>
+        <div class="pdx-real-sub">${s.accountNow != null ? `Tenés hoy <b>${pv(fmtArs(s.realNow))}</b> sobre los <b>${pv(fmtArs(s.declared))}</b> que aportaste` : `Estimado con el valor de mercado de tus posiciones (<b>${pv(fmtArs(s.realNow))}</b>). Cargá "Tenés hoy en la cuenta" para el número real.`} — incluye ganancias/pérdidas ya tomadas, efectivo y comisiones.</div>
+      </div>` : ''}
       <div class="pdx-grid">
         <div class="pdx-tile">
           <div class="pdx-k">💰 Pusiste en tu cartera</div>
@@ -8883,8 +8903,8 @@ function portfolioDidacticHTML(stats) {
         </div>
         <div class="pdx-tile">
           <div class="pdx-k">🏦 Disponible para invertir</div>
-          <div class="pdx-v ${avClass}"${cu(s.available, 'ars')}>${s.available != null ? pv(fmtArs(s.available)) : '—'}</div>
-          <div class="pdx-sub ${avClass}">${s.available == null ? 'poné lo que pusiste y el costo de tus compras' : s.available < 0 ? 'invertiste más de lo declarado — revisá' : 'depositado y todavía sin comprar'}</div>
+          <div class="pdx-v ${(s.availableReal ?? 0) < 0 ? 'down' : (s.availableReal ? 'up' : '')}"${cu(s.availableReal, 'ars')}>${s.availableReal != null ? pv(fmtArs(s.availableReal)) : '—'}</div>
+          <div class="pdx-sub ${(s.availableReal ?? 0) < 0 ? 'down' : ''}">${s.availableReal == null ? 'cargá cuánto tenés hoy en la cuenta' : s.availableReal < 0 ? (s.accountNow != null ? 'tus posiciones valen más que el total declarado — revisá el monto' : 'invertiste más de lo declarado — revisá') : (s.accountNow != null ? 'efectivo real (valor de cuenta − tus posiciones)' : 'depositado y todavía sin comprar')}</div>
         </div>
         <div class="pdx-tile pdx-hl ${gc}">
           <div class="pdx-k">${s.gainArs == null ? '📊' : s.gainArs >= 0 ? '🟢' : '🔴'} ${gword}</div>
@@ -9247,6 +9267,17 @@ function wirePortfolioEvents() {
     };
     investedInput.addEventListener('change', commitInvested);
     investedInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitInvested(); } });
+  }
+  const pdxAccountInput = document.getElementById('pdx-account-input');
+  if (pdxAccountInput) {
+    const commitAccount = () => {
+      const raw = parseFloat(String(pdxAccountInput.value).replace(/[^\d]/g, ''));
+      portState.accountTotalArs = isNaN(raw) || raw <= 0 ? null : raw;
+      lsSetSafe('icp_port_account', portState.accountTotalArs != null ? String(portState.accountTotalArs) : '');
+      renderReport();
+    };
+    pdxAccountInput.addEventListener('change', commitAccount);
+    pdxAccountInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitAccount(); } });
   }
   els.report.querySelectorAll('.port-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
