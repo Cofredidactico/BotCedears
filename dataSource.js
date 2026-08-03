@@ -470,6 +470,34 @@ export async function getBonds() {
   return withFallback('getBonds', [], Mock.getBonds.bind(Mock));
 }
 
+/** Pre-market (antes de la apertura) del subyacente en EE.UU. para una lista de
+ *  tickers. La cripto no tiene pre-market (opera 24/7) → se omite. Devuelve un
+ *  mapa { TICKER: {state, pre, prePct, prevClose, regular} }. Defensivo: ante
+ *  cualquier fallo devuelve lo que se pudo juntar (o {}), nunca rompe. */
+export async function getPreMarket(tickers) {
+  if (MODE === 'mock' || !Array.isArray(tickers) || !tickers.length) return {};
+  const syms = [];
+  for (const t of [...new Set(tickers)]) {
+    const a = await getAsset(t);
+    if (a?.category === 'Cripto') continue; // 24/7, no aplica
+    syms.push(t);
+  }
+  const out = {};
+  const CHUNK = 40; // el endpoint tope-a 40 símbolos por request
+  for (let i = 0; i < syms.length; i += CHUNK) {
+    const chunk = syms.slice(i, i + CHUNK);
+    try {
+      // El pre-market va fusionado en /api/quote (sub-ruta ?premarket=1) para
+      // no pasar el límite de 12 serverless functions del plan gratis de Vercel.
+      const r = await fetch(`${API_BASE}/quote?premarket=1&symbols=${encodeURIComponent(chunk.join(','))}`);
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (j?.data) Object.assign(out, j.data);
+    } catch (e) { console.warn('[dataSource] premarket falló:', e.message); }
+  }
+  return out;
+}
+
 /** Combina el snapshot manual (macro.json) con la fuente en vivo (/api/macro:
  *  riesgo país + dólares + Fear&Greed siempre; VIX/DXY solo si Twelve Data
  *  los pudo servir). Si /api/macro falla entero, cae 100% al snapshot manual. */
