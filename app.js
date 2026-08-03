@@ -578,6 +578,7 @@ async function hydrateAlertReliability(ticker, alert, technical, price, plan) {
 
 let alertsEnabled = lsGetSafe('icp_alerts_enabled', '0') === '1';
 const lastAlertByTicker = {}; // ticker -> 'buy'|'sell'|'stop'|null, para notificar solo en la transición
+const lastSetupQualifyByTicker = {}; // ticker -> bool, para avisar cuando un setup pasa de "casi listo" a gatillado
 const lastStructureByTicker = {}; // ticker -> structure.short ('BOS alcista'|'BOS bajista'|'CHoCH'|'Rango'), para notificar solo en el cambio
 
 /* ───────────────────────── configuración (preferencias reales) ───────────────────────── */
@@ -635,6 +636,22 @@ function notifyIfNewAlert(ticker, priceAlert) {
  *  soporte/resistencia. Solo navegador por ahora: no está conectada al cron
  *  de Telegram (quedó fuera de este alcance para no abrir otro frente en la
  *  misma tanda). */
+/** Aviso de "setup de trade corto gatillado": cuando un activo pasa de NO
+ *  calificar a calificar un setup, se avisa una sola vez (en la transición).
+ *  Pensado para tu Watchlist — los activos que elegiste vigilar. */
+function notifySetupTrigger(ticker, setup) {
+  const nowQ = !!(setup && setup.qualifies);
+  const prev = lastSetupQualifyByTicker[ticker] ?? false;
+  lastSetupQualifyByTicker[ticker] = nowQ;
+  if (!alertsEnabled || !nowQ || prev) return; // solo en la transición no-califica → califica
+  const st = SHORT_STRATEGIES[setup.strategy];
+  const dirTxt = setup.direction === 'short' ? 'Corto ▼' : 'Largo ▲';
+  logAlertHistory(ticker, 'setup', setup.confidence, [`${st ? st.label : 'Setup'} ${dirTxt}`]);
+  showToast(`⚡ ${ticker}: setup ${st ? st.label + ' ' : ''}${dirTxt} gatilló (confianza ${setup.confidence})`, 'success', 5000);
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  new Notification(`${ticker}: setup de trade corto gatilló`, { body: `Vertex Signal — ${st ? st.label + ', ' : ''}${dirTxt}, confianza ${setup.confidence}`, tag: `icp-setup-${ticker}` });
+}
+
 function notifyStructureChange(ticker, structure) {
   const prevShort = lastStructureByTicker[ticker] ?? null;
   const changed = structureChanged(prevShort, structure);
@@ -1774,6 +1791,7 @@ async function runBacktest(ticker) {
   const factorSamples = {}; // factorKey -> { label, values: [pct histórico], returns: [retorno fwd real] }
   const alertBuckets = {}; // "type:confidence" -> { h -> [retorno fwd real] }
   const setupBuckets = {}; // "long"|"short" -> { h -> [retorno fwd real] } — Trades Cortos
+  const setupStratBuckets = {}; // estrategia -> { direction, byH: { h -> [retorno fwd real] } } — win rate por estrategia
   let sampleCount = 0;
   for (let i = BACKTEST_WARMUP; i <= n - maxHorizon - 1; i += BACKTEST_STEP) {
     const slice = {
@@ -1822,10 +1840,16 @@ async function runBacktest(ticker) {
     if (setup && setup.qualifies) {
       const key = setup.direction; // 'long' | 'short'
       if (!setupBuckets[key]) setupBuckets[key] = {};
+      // Además, bucket por ESTRATEGIA (para medir qué tipo de setup rinde mejor
+      // en este activo) — guarda la dirección para calcular el acierto.
+      const sk = setup.strategy;
+      (setupStratBuckets[sk] ??= { direction: setup.direction, byH: {} });
       for (const h of SHORT_SETUP_HORIZONS) {
         const fwd = candles.c[i + h];
         if (fwd == null) continue;
-        (setupBuckets[key][h] ??= []).push((fwd - priceNow) / priceNow);
+        const ret = (fwd - priceNow) / priceNow;
+        (setupBuckets[key][h] ??= []).push(ret);
+        (setupStratBuckets[sk].byH[h] ??= []).push(ret);
       }
     }
     sampleCount++;
@@ -1884,10 +1908,20 @@ async function runBacktest(ticker) {
     return { direction: dir, horizons, occurrences: horizons.reduce((max, x) => Math.max(max, x.n), 0) };
   }).filter(r => r.occurrences > 0);
 
+  // Acierto histórico POR ESTRATEGIA (a 3 ruedas): qué tipo de setup rindió
+  // mejor en este activo. Un largo acierta si sube; un corto, si baja.
+  const setupStratRows = Object.entries(setupStratBuckets).map(([strategy, o]) => {
+    const arr = o.byH[3] || o.byH[SHORT_SETUP_HORIZONS[0]] || [];
+    if (!arr.length) return null;
+    const wins = arr.filter(r => o.direction === 'long' ? r > 0 : r < 0).length;
+    const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+    return { strategy, direction: o.direction, n: arr.length, winRate: Math.round((wins / arr.length) * 100), avgPct: avg * 100 };
+  }).filter(Boolean);
+
   return {
     ticker, isReal: candles.isReal, insufficientData: false, candleCount: n, sampleCount,
     from: candles.t[BACKTEST_WARMUP], to: candles.t[n - 1], rows, factorCorrelations, factorHorizon: FACTOR_HORIZON,
-    alertRows, setupRows,
+    alertRows, setupRows, setupStratRows,
   };
 }
 
@@ -5202,15 +5236,46 @@ const shortState = {
  * Marcás un setup/rebote/pullback como "tomado" y se sigue en vivo: R actual,
  * progreso al objetivo, P&L y vigencia, usando el precio del momento. */
 const SHORT_TRADES_KEY = 'icp_short_trades';
+const SHORT_CLOSED_KEY = 'icp_short_closed';
+const SHORT_TRADES_MAX = 100;  // tope de trades en seguimiento simultáneo (subido de 40)
+const SHORT_CLOSED_MAX = 200;  // historial de trades cerrados que se guarda
 function getShortTrades() {
   try { const a = JSON.parse(localStorage.getItem(SHORT_TRADES_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
 }
-function saveShortTrades(list) { try { localStorage.setItem(SHORT_TRADES_KEY, JSON.stringify(list.slice(0, 40))); } catch { /* no-op */ } }
+function saveShortTrades(list) { try { localStorage.setItem(SHORT_TRADES_KEY, JSON.stringify(list.slice(0, SHORT_TRADES_MAX))); } catch { /* no-op */ } }
 function addShortTrade(t) {
   const list = getShortTrades();
   if (list.some(x => x.ticker === t.ticker && x.kind === t.kind)) return list; // no duplicar el mismo tipo por ticker
+  if (list.length >= SHORT_TRADES_MAX) { showToast(`Llegaste al máximo de ${SHORT_TRADES_MAX} trades en seguimiento — cerrá alguno para sumar otro.`, 'info'); return list; }
   list.unshift({ ...t, id: `${t.ticker}-${t.kind}-${Date.now()}`, date: new Date().toISOString().slice(0, 10) });
   saveShortTrades(list); return list;
+}
+
+/* ── Historial de trades cerrados (resultado real) ───────────────────────────
+ * Al cerrar un trade se registra el precio de salida y su R realizado, para
+ * armar estadísticas reales (win rate, R promedio, expectativa) y una curva de
+ * equity — el desempeño REAL del usuario, por estrategia. */
+function getClosedShortTrades() {
+  try { const a = JSON.parse(localStorage.getItem(SHORT_CLOSED_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+function saveClosedShortTrades(list) { try { localStorage.setItem(SHORT_CLOSED_KEY, JSON.stringify(list.slice(0, SHORT_CLOSED_MAX))); } catch { /* no-op */ } }
+function clearClosedShortTrades() { try { localStorage.removeItem(SHORT_CLOSED_KEY); } catch { /* no-op */ } }
+// Cierra un trade abierto con precio de salida: calcula R y % realizados y lo
+// mueve al historial. exitPrice null/NaN → se descarta sin registrar resultado.
+function closeShortTrade(id, exitPrice) {
+  const open = getShortTrades();
+  const t = open.find(x => x.id === id);
+  saveShortTrades(open.filter(x => x.id !== id)); // sale del seguimiento en cualquier caso
+  if (!t) return;
+  const px = parseFloat(exitPrice);
+  if (!(px > 0)) return; // sin precio válido: solo se saca del seguimiento, no se registra
+  const long = t.direction !== 'short';
+  const riskUnit = long ? t.entry - t.stop : t.stop - t.entry;
+  const realizedR = riskUnit > 0 ? (long ? px - t.entry : t.entry - px) / riskUnit : null;
+  const realizedPct = (long ? px - t.entry : t.entry - px) / t.entry * 100;
+  const closed = getClosedShortTrades();
+  closed.unshift({ ...t, exitPrice: px, realizedR, realizedPct, closeDate: new Date().toISOString().slice(0, 10) });
+  saveClosedShortTrades(closed);
 }
 function removeShortTrade(id) { const list = getShortTrades().filter(x => x.id !== id); saveShortTrades(list); return list; }
 function updateShortTradeNote(id, note) { const list = getShortTrades(); const t = list.find(x => x.id === id); if (t) { t.note = String(note || '').slice(0, 180); saveShortTrades(list); } return list; }
@@ -5257,9 +5322,9 @@ function earningsSoonBadge(ticker) {
   return `<span class="short-earn-badge" title="Reporta balance ${d === 0 ? 'hoy' : `en ${d} día(s)`} — un earnings cercano puede disparar movimientos que ningún indicador técnico anticipa. Cuidado.">⚠ Balance ${d === 0 ? 'hoy' : `en ${d}d`}</span>`;
 }
 // Botón "Tomar este trade" → guarda el trade en el seguimiento.
-function shortTakeBtn(ticker, kind, dir, entry, target, stop) {
+function shortTakeBtn(ticker, kind, dir, entry, target, stop, strat = '') {
   if (entry == null || target == null || stop == null) return '';
-  return `<button class="short-take" data-short-take="${esc(ticker)}" data-take-kind="${kind}" data-take-dir="${esc(dir)}" data-take-entry="${entry}" data-take-target="${target}" data-take-stop="${stop}">📌 Tomar este trade (seguimiento)</button>`;
+  return `<button class="short-take" data-short-take="${esc(ticker)}" data-take-kind="${kind}" data-take-dir="${esc(dir)}" data-take-entry="${entry}" data-take-target="${target}" data-take-stop="${stop}" data-take-strat="${esc(strat)}">📌 Tomar este trade (seguimiento)</button>`;
 }
 // Carga perezosa de earnings de los tickers visibles (para el aviso de balance cercano).
 async function loadShortEarnings() {
@@ -5370,6 +5435,89 @@ function shortTakenTradesHTML() {
       </div>
       ${trades.map(row).join('')}
       <div class="stk-foot">Seguimiento manual guardado en este navegador. El R actual, el P&amp;L y las estadísticas usan el último precio real. Cerralo cuando salgas de la operación. No es asesoramiento.</div>
+    </div>`;
+}
+
+/* Historial de trades cerrados: desempeño REAL del usuario (win rate, R
+ * promedio, profit factor, expectativa), curva de equity y desglose por
+ * estrategia — lo que separa a quien improvisa de quien mejora. */
+function shortEquitySparkline(vals) {
+  if (vals.length < 2) return '';
+  const w = 260, h = 54, pad = 3;
+  const min = Math.min(0, ...vals), max = Math.max(0, ...vals);
+  const span = (max - min) || 1;
+  const x = (i) => pad + (i / (vals.length - 1)) * (w - 2 * pad);
+  const y = (v) => h - pad - ((v - min) / span) * (h - 2 * pad);
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const zeroY = y(0).toFixed(1);
+  const last = vals[vals.length - 1];
+  const col = last >= 0 ? 'var(--up)' : 'var(--down)';
+  return `<svg class="short-eq-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <line x1="0" y1="${zeroY}" x2="${w}" y2="${zeroY}" stroke="var(--border, rgba(255,255,255,.15))" stroke-width="1" stroke-dasharray="3 3"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+function shortClosedHistoryHTML() {
+  const closed = getClosedShortTrades();
+  if (!closed.length) return '';
+  const rated = closed.filter(t => t.realizedR != null);
+  const n = rated.length;
+  const wins = rated.filter(t => t.realizedR > 0).length;
+  const winRate = n ? Math.round(wins / n * 100) : null;
+  const avgR = n ? rated.reduce((a, b) => a + b.realizedR, 0) / n : null;
+  const totalR = rated.reduce((a, b) => a + b.realizedR, 0);
+  const grossWin = rated.filter(t => t.realizedR > 0).reduce((a, b) => a + b.realizedR, 0);
+  const grossLoss = Math.abs(rated.filter(t => t.realizedR < 0).reduce((a, b) => a + b.realizedR, 0));
+  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? Infinity : null);
+  const best = n ? Math.max(...rated.map(t => t.realizedR)) : null;
+  const worst = n ? Math.min(...rated.map(t => t.realizedR)) : null;
+  // Curva de equity (R acumulado, orden cronológico).
+  const chrono = rated.slice().reverse();
+  let cum = 0; const eq = chrono.map(t => { cum += t.realizedR; return cum; });
+  // Por estrategia.
+  const byStrat = {};
+  for (const t of rated) { const k = t.strategy || t.kind || '—'; (byStrat[k] ??= []).push(t.realizedR); }
+  const stratRows = Object.entries(byStrat).map(([k, arr]) => {
+    const w = arr.filter(r => r > 0).length;
+    return { k, label: SHORT_STRATEGIES[k]?.label ?? (k === 'rebound' ? 'Rebote' : k === 'pullback' ? 'Pullback' : k), icon: SHORT_STRATEGIES[k]?.icon ?? '•', n: arr.length, winRate: Math.round(w / arr.length * 100), avgR: arr.reduce((a, b) => a + b, 0) / arr.length };
+  }).sort((a, b) => b.avgR - a.avgR);
+  const tile = (v, k, cls = '') => `<div class="stk-stat"><div class="stk-stat-v ${cls}">${v}</div><div class="stk-stat-k">${k}</div></div>`;
+  const recent = closed.slice(0, 12);
+  return `
+    ${sectionTitleHTML('📒 Historial de trades cerrados (tu desempeño real)', 'award', 'margin-top:34px;')}
+    <div class="dash-intro">El resultado REAL de los trades que cerraste, medido en <strong>R</strong> (múltiplos de lo que arriesgabas hasta el stop). Win rate, R promedio, expectativa y <strong>qué estrategia te funciona a vos</strong>. Guardado en este navegador.</div>
+    <div class="card stk-card">
+      <div class="stk-stats">
+        ${tile(n, 'cerrados')}
+        ${tile(winRate != null ? winRate + '%' : '—', 'aciertos', winRate != null ? (winRate >= 50 ? 'up' : 'down') : '')}
+        ${tile(avgR != null ? `${avgR >= 0 ? '+' : ''}${avgR.toFixed(2)}R` : '—', 'R promedio (expectativa)', avgR != null ? (avgR >= 0 ? 'up' : 'down') : '')}
+        ${tile(profitFactor == null ? '—' : profitFactor === Infinity ? '∞' : profitFactor.toFixed(2), 'profit factor', profitFactor != null && profitFactor >= 1 ? 'up' : profitFactor != null ? 'down' : '')}
+        ${tile(totalR != null ? `${totalR >= 0 ? '+' : ''}${totalR.toFixed(1)}R` : '—', 'R total', totalR >= 0 ? 'up' : 'down')}
+      </div>
+      ${eq.length >= 2 ? `<div class="short-eq"><div class="short-eq-head">Curva de equity (R acumulado) · mejor ${best >= 0 ? '+' : ''}${best.toFixed(2)}R · peor ${worst.toFixed(2)}R</div>${shortEquitySparkline(eq)}</div>` : ''}
+      ${stratRows.length ? `
+      <div class="short-strat-stats">
+        <div class="short-strat-stats-head">Por estrategia</div>
+        <table class="bt-table">
+          <thead><tr><th>Estrategia</th><th>Trades</th><th>Acierto</th><th>R prom.</th></tr></thead>
+          <tbody>
+            ${stratRows.map(r => `<tr><td>${r.icon} ${esc(r.label)}</td><td>${r.n}</td><td class="${r.winRate >= 50 ? 'bt-pos' : 'bt-neg'}">${r.winRate}%</td><td class="${r.avgR >= 0 ? 'bt-pos' : 'bt-neg'}">${r.avgR >= 0 ? '+' : ''}${r.avgR.toFixed(2)}R</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+      <div class="short-closed-list">
+        ${recent.map(t => {
+          const dm = shortDirMeta(t.direction);
+          const stLabel = SHORT_STRATEGIES[t.strategy]?.label ?? (t.strategy === 'rebound' ? 'Rebote' : t.strategy === 'pullback' ? 'Pullback' : (t.strategy || ''));
+          return `<div class="short-closed-row">
+            <span class="scl-tk" data-short-ticker="${esc(t.ticker)}">${esc(t.ticker)}</span>
+            <span class="scl-meta">${dm.arrow} ${stLabel ? esc(stLabel) : dm.label} · ${esc(t.closeDate)}</span>
+            <span class="scl-r ${t.realizedR != null && t.realizedR >= 0 ? 'up' : 'down'}">${t.realizedR != null ? `${t.realizedR >= 0 ? '+' : ''}${t.realizedR.toFixed(2)}R` : '—'}</span>
+            <span class="scl-pct ${t.realizedPct >= 0 ? 'up' : 'down'}">${t.realizedPct >= 0 ? '+' : ''}${t.realizedPct.toFixed(1)}%</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="stk-foot">${closed.length} trade(s) en el historial. <button class="short-clear-hist" id="short-clear-hist">Borrar historial</button></div>
     </div>`;
 }
 
@@ -5493,6 +5641,8 @@ function shortTradesPageHTML() {
 
     ${shortTakenTradesHTML()}
 
+    ${shortClosedHistoryHTML()}
+
     ${(() => {
       const bull = longN + totalRebounds + totalPullbacks, bear = shortN;
       const bias = bull > bear * 1.3 ? { t: 'sesgo comprador', cls: 'up' } : bear > bull * 1.3 ? { t: 'sesgo vendedor', cls: 'down' } : { t: 'sesgo mixto', cls: 'flat' };
@@ -5606,7 +5756,7 @@ function pullbackCardHTML(ticker, d) {
           <span title="Continuaciones de corto plazo: si no retoma en ~3 ruedas, revisá">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
         </div>
         ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
-        ${shortTakeBtn(ticker, 'pullback', 'long', s.entry, s.target, s.stop)}
+        ${shortTakeBtn(ticker, 'pullback', 'long', s.entry, s.target, s.stop, 'pullback')}
       </div>
     </div>`;
 }
@@ -5691,7 +5841,7 @@ function reboundCardHTML(ticker, d) {
           <span title="Los rebotes son de muy corto plazo: si no se activa en ~2 ruedas, conviene salir">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
         </div>
         ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
-        ${shortTakeBtn(ticker, 'rebound', 'long', s.entry, s.target, s.stop)}
+        ${shortTakeBtn(ticker, 'rebound', 'long', s.entry, s.target, s.stop, 'rebound')}
       </div>
     </div>`;
 }
@@ -5795,9 +5945,9 @@ function shortTradeCardHTML(ticker, d) {
         ${shortSizingHTML(sizing, s)}
         ${shortPartialPlanHTML(s)}
         ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
-        ${shortTakeBtn(ticker, 'setup', s.direction, s.entry, s.target1, s.stop)}
+        ${shortTakeBtn(ticker, 'setup', s.direction, s.entry, s.target1, s.stop, s.strategy)}
         <div class="short-reliab" data-reliab-slot="${esc(ticker)}">
-          ${cached ? shortReliabBodyHTML(cached, s.direction, s.rr) : cachedErr ? `<div class="short-reliab-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>` : `<button class="short-reliab-btn" data-reliab-ticker="${esc(ticker)}">📊 Medir confiabilidad + edge del setup</button>`}
+          ${cached ? shortReliabBodyHTML(cached, s.direction, s.rr, s.strategy) : cachedErr ? `<div class="short-reliab-note">No se pudo medir la confiabilidad histórica (sin suficientes velas reales de ${esc(ticker)} por ahora).</div>` : `<button class="short-reliab-btn" data-reliab-ticker="${esc(ticker)}">📊 Medir confiabilidad + edge del setup</button>`}
         </div>
       </div>
     </div>`;
@@ -5816,7 +5966,7 @@ function shortSizingHTML(sizing, s) {
 }
 
 // Confiabilidad histórica del setup: reusa el backtester walk-forward cacheado.
-function shortReliabBodyHTML(res, direction, rr = null) {
+function shortReliabBodyHTML(res, direction, rr = null, strategy = null) {
   if (res.insufficientData) return `<div class="short-reliab-note">Sin historial suficiente (${res.candleCount}/${res.needed} velas) para medir la confiabilidad en ${esc(res.ticker)}.</div>`;
   const row = (res.setupRows ?? []).find(r => r.direction === direction);
   if (!row) return `<div class="short-reliab-note">El motor no disparó suficientes setups ${direction === 'short' ? 'bajistas' : 'alcistas'} en el histórico de ${esc(res.ticker)} para medir su precisión.</div>`;
@@ -5843,10 +5993,19 @@ function shortReliabBodyHTML(res, direction, rr = null) {
       <span class="short-edge-txt"><b>Valor esperado por trade</b> · ${verdict}<br>win-rate ${pick.winRate}% × R:R ${rr.toFixed(1)} − las fallidas</span>
     </div>`;
   }
+  // Acierto histórico de ESTA estrategia puntual en este activo (si hay datos).
+  let stratHTML = '';
+  const stratRow = strategy && (res.setupStratRows || []).find(r => r.strategy === strategy);
+  if (stratRow && stratRow.n) {
+    const st = SHORT_STRATEGIES[strategy];
+    const favor = stratRow.direction === 'long' ? stratRow.avgPct >= 0 : stratRow.avgPct <= 0;
+    stratHTML = `<div class="short-strat-reliab"><span class="short-strat-reliab-badge">${st ? st.icon + ' ' + esc(st.label) : esc(strategy)}</span> como estrategia acertó <b class="${stratRow.winRate >= 50 ? 'up' : 'down'}">${stratRow.winRate}%</b> a 3 ruedas en ${esc(res.ticker)} (${stratRow.n} caso${stratRow.n === 1 ? '' : 's'}, retorno medio <b class="${favor ? 'up' : 'down'}">${fmtSignedPct(stratRow.avgPct)}</b>)${stratRow.n < 10 ? ' — muestra chica' : ''}.</div>`;
+  }
   return `
     <div class="short-reliab-head">Confiabilidad histórica + edge del setup ${direction === 'short' ? 'bajista' : 'alcista'} en ${esc(res.ticker)}</div>
     <div class="short-reliab-tiles">${tiles.map(t => `<div class="short-reliab-tile reliab-tone-${t.tone}"><div class="short-reliab-v">${esc(t.v)}</div><div class="short-reliab-k">${esc(t.k)}</div></div>`).join('')}</div>
     ${edgeHTML}
+    ${stratHTML}
     <div class="short-reliab-row">${row.horizons.filter(h => h.n).map(h => `<span>${h.h}r: <b class="${(direction === 'long' ? h.avgPct >= 0 : h.avgPct <= 0) ? 'up' : 'down'}">${h.winRate}%</b> · ${fmtSignedPct(h.avgPct)}</span>`).join('')}</div>
     ${small ? `<div class="short-reliab-note">Muestra chica: estadística orientativa, no concluyente.</div>` : ''}`;
 }
@@ -5868,6 +6027,10 @@ function wireShortTradesEvents() {
     inp.addEventListener('change', (e) => { e.stopPropagation(); updateShortTradeNote(inp.dataset.stkNote, inp.value); });
     inp.addEventListener('click', (e) => e.stopPropagation());
   });
+  document.getElementById('short-clear-hist')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (window.confirm('¿Borrar todo el historial de trades cerrados? No se puede deshacer.')) { clearClosedShortTrades(); rerender(); }
+  });
   // Tomar un trade → seguimiento; cerrar seguimiento.
   els.report.querySelectorAll('[data-short-take]').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -5875,13 +6038,28 @@ function wireShortTradesEvents() {
       addShortTrade({
         ticker: btn.dataset.shortTake, kind: btn.dataset.takeKind, direction: btn.dataset.takeDir,
         entry: parseFloat(btn.dataset.takeEntry), target: parseFloat(btn.dataset.takeTarget), stop: parseFloat(btn.dataset.takeStop),
+        strategy: btn.dataset.takeStrat || btn.dataset.takeKind,
       });
       showToast(`${btn.dataset.shortTake} agregado a tu seguimiento de trades cortos`, 'success');
       rerender();
     });
   });
+  // Cerrar un trade: pide el precio de salida para registrar el resultado real
+  // (R y % realizados) en el historial. Vacío = usa el precio actual; Cancelar
+  // aborta (no lo cierra).
   els.report.querySelectorAll('[data-short-close]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); removeShortTrade(btn.dataset.shortClose); rerender(); });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.shortClose;
+      const t = getShortTrades().find(x => x.id === id);
+      const live = t ? (dashState.data[t.ticker]?.price ?? watchState.data[t.ticker]?.price ?? null) : null;
+      const ans = window.prompt(`Cerrar ${t?.ticker ?? ''}: ¿a qué precio (USD) saliste?\n(Enter vacío = precio actual${live != null ? ' ' + fmtUsd(live) : ''}; Cancelar = no cerrar)`, live != null ? String(round2(live)) : '');
+      if (ans === null) return; // cancelar
+      const exit = ans.trim() === '' ? live : parseFloat(ans.replace(',', '.'));
+      closeShortTrade(id, exit);
+      showToast(exit > 0 ? `Trade de ${t?.ticker ?? ''} cerrado y registrado en tu historial.` : `Trade de ${t?.ticker ?? ''} quitado del seguimiento.`, 'success');
+      rerender();
+    });
   });
   loadShortEarnings(); // carga perezosa de balances de los tickers visibles (para el aviso)
   els.report.querySelectorAll('[data-short-dir]').forEach(el => {
@@ -11684,6 +11862,7 @@ async function loadWatchlistData() {
       const signal = await computeLightSignal(ticker, macro);
       notifyIfNewAlert(ticker, signal.alert);
       notifyStructureChange(ticker, signal.structure);
+      notifySetupTrigger(ticker, signal.setup);
       watchState.data[ticker] = signal;
     } catch (e) {
       console.warn('[watchlist] no se pudo cargar', ticker, e.message);

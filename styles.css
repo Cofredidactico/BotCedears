@@ -3035,3 +3035,24 @@ body::after {
 .stk-note { margin-top:8px; }
 .stk-note-input { width:100%; box-sizing:border-box; font-size:12.5px; padding:6px 9px; border-radius:8px; border:1px solid var(--border, rgba(255,255,255,.1)); background:var(--surface, rgba(255,255,255,.02)); color:var(--text); font-family:inherit; }
 .stk-note-input:focus { outline:none; border-color:color-mix(in oklab, var(--accent, #7c5cff) 55%, transparent); }
+
+/* ── Trade Cortos pro: historial, equity, stats por estrategia ── */
+.short-eq { margin:12px 0; }
+.short-eq-head { font-size:11.5px; color:var(--text-mute); margin-bottom:6px; }
+.short-eq-svg { width:100%; height:54px; display:block; }
+.short-strat-stats { margin:14px 0 6px; }
+.short-strat-stats-head { font-size:12px; font-weight:600; color:var(--text-mute); margin-bottom:6px; }
+.short-strat-stats table { width:100%; }
+.short-strat-stats th:not(:first-child), .short-strat-stats td:not(:first-child) { text-align:right; }
+.short-closed-list { display:flex; flex-direction:column; gap:1px; margin-top:12px; }
+.short-closed-row { display:grid; grid-template-columns:1fr auto auto auto; gap:10px; align-items:center; padding:7px 4px; border-top:1px solid var(--border, rgba(255,255,255,.06)); font-size:12.5px; }
+.short-closed-row .scl-tk { font-weight:700; cursor:pointer; }
+.short-closed-row .scl-tk:hover { color:var(--accent, #7c5cff); }
+.short-closed-row .scl-meta { color:var(--text-mute); font-size:11.5px; }
+.short-closed-row .scl-r, .short-closed-row .scl-pct { font-variant-numeric:tabular-nums; font-weight:600; text-align:right; }
+.short-closed-row .up { color:var(--up); } .short-closed-row .down { color:var(--down); }
+.short-clear-hist { background:none; border:1px solid var(--border, rgba(255,255,255,.15)); color:var(--text-mute); font-size:11px; padding:3px 9px; border-radius:7px; cursor:pointer; margin-left:6px; }
+.short-clear-hist:hover { color:var(--down); border-color:color-mix(in oklab, var(--down) 45%, transparent); }
+.short-strat-reliab { margin-top:8px; font-size:12.5px; line-height:1.5; color:var(--text-mute); }
+.short-strat-reliab-badge { display:inline-flex; align-items:center; gap:3px; font-weight:600; padding:1px 7px; border-radius:7px; background:var(--surface-2, rgba(255,255,255,.05)); border:1px solid var(--border, rgba(255,255,255,.09)); color:var(--text); }
+.short-strat-reliab .up { color:var(--up); } .short-strat-reliab .down { color:var(--down); }
