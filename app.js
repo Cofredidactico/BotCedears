@@ -99,6 +99,19 @@ const DASHBOARD_UNIVERSE = [
 // en NYSE/Nasdaq) y activos relacionados con cripto (CEDEARs de empresas
 // bitcoin-céntricas + ETFs spot + exchanges/brokers con exposición directa).
 const AR_TICKERS = new Set(['GGAL', 'BMA', 'SUPV', 'BBAR', 'YPF', 'PAM', 'CEPU', 'VIST', 'EDN', 'LOMA', 'TGS', 'TEO', 'CRESY', 'IRS', 'AGRO', 'CAAP', 'DESP', 'GLOB', 'BIOX', 'MELI', 'TS', 'TX', 'ARCO', 'SATL']);
+
+// "Comprable desde brokers argentinos" = tiene CEDEAR local (o es un ADR/ETF con
+// CEDEAR), NO cripto. Sirve para el filtro de Trades Cortos de quien opera solo
+// en pesos y no tiene cuenta comitente en dólares. Se arma una sola vez cuando
+// el universo ya está cargado.
+let _argBuyableSet = null;
+function isArgBuyable(ticker) {
+  if (!universe.length) return true; // universo aún no cargado: no filtrar
+  if (!_argBuyableSet || _argBuyableSet.size === 0) {
+    _argBuyableSet = new Set(universe.filter(a => a.category !== 'Cripto' && (a.ratio != null || a.category === 'CEDEAR')).map(a => a.ticker));
+  }
+  return _argBuyableSet.has(ticker);
+}
 const CRYPTO_RELATED = new Set(['BTC', 'ETH', 'MSTR', 'RIOT', 'HUT', 'IREN', 'COIN', 'IBIT', 'ETHA', 'BMNR']);
 const dashState = { data: {}, loading: new Set(), started: false, macro: null, ccl: null,
   // Pre-market (antes de la apertura): mapa TICKER -> {state, pre, prePct, prevClose, regular},
@@ -5177,6 +5190,9 @@ const shortState = {
   earnings: {},     // ticker -> próximo balance (carga perezosa para el aviso de earnings cercano)
   earningsLoading: false,
   hideEarnings: false, // ocultar setups con balance ≤5 días
+  // Por defecto ON: solo activos comprables desde brokers argentinos (CEDEARs) —
+  // pensado para quien opera en pesos y no tiene cuenta en dólares.
+  onlyArg: lsGetSafe('icp_short_only_arg', '1') === '1',
 };
 
 /* ── Seguimiento de trades cortos tomados (localStorage) ─────────────────────
@@ -5329,6 +5345,7 @@ function shortTradesPageHTML() {
     if (shortState.direction !== 'all' && s.direction !== shortState.direction) return false;
     if (shortState.minConf !== 'all' && (SHORT_CONF_RANK[s.confidence] ?? 0) < (SHORT_CONF_RANK[shortState.minConf] ?? 0)) return false;
     if (shortState.minRR > 0 && !(s.rr != null && s.rr >= shortState.minRR)) return false;
+    if (shortState.onlyArg && !isArgBuyable(ticker)) return false;
     if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
     if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
     if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
@@ -5355,6 +5372,7 @@ function shortTradesPageHTML() {
   const totalRebounds = rebounds.length;
   rebounds = rebounds.filter(({ ticker, d }) => {
     if (shortState.minConf !== 'all' && (SHORT_CONF_RANK[d.rebound.confidence] ?? 0) < (SHORT_CONF_RANK[shortState.minConf] ?? 0)) return false;
+    if (shortState.onlyArg && !isArgBuyable(ticker)) return false;
     if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
     if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
     if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
@@ -5364,6 +5382,7 @@ function shortTradesPageHTML() {
 
   // ── Pullbacks en tendencia (continuación) ──
   const catOk = (ticker, d) => {
+    if (shortState.onlyArg && !isArgBuyable(ticker)) return false;
     if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
     if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
     if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
@@ -5424,6 +5443,7 @@ function shortTradesPageHTML() {
       <label class="short-ctrl"><span>Ordenar</span><select id="short-sort" class="watch-select">${opt('score', shortState.sort, 'Score')}${opt('rr', shortState.sort, 'Riesgo/Beneficio')}${opt('move', shortState.sort, 'Rango esperado')}</select></label>
       <label class="short-ctrl"><span>Riesgo/​trade</span><select id="short-risk" class="watch-select">${opt('0.5', String(shortState.riskPct), '0,5% cuenta')}${opt('1', String(shortState.riskPct), '1% cuenta')}${opt('2', String(shortState.riskPct), '2% cuenta')}</select></label>
       <label class="short-ctrl short-ctrl-check"><input type="checkbox" id="short-hide-earn" ${shortState.hideEarnings ? 'checked' : ''} /> <span>Ocultar con balance ≤5d</span></label>
+      <label class="short-ctrl short-ctrl-check" title="Muestra solo activos con CEDEAR en Argentina (comprables en pesos desde brokers locales). Excluye acciones sin CEDEAR y cripto."><input type="checkbox" id="short-only-arg" ${shortState.onlyArg ? 'checked' : ''} /> <span>🇦🇷 Solo comprables en Argentina</span></label>
     </div>
     <div class="short-count">${rows.length} de ${totalQualifying} setup(s)${shortState.direction !== 'all' || shortState.minConf !== 'all' || shortState.minRR > 0 || shortState.category !== 'all' ? ' con los filtros actuales' : ''}</div>
 
@@ -5703,6 +5723,7 @@ function wireShortTradesEvents() {
   document.getElementById('short-sort')?.addEventListener('change', e => { shortState.sort = e.target.value; rerender(); });
   document.getElementById('short-risk')?.addEventListener('change', e => { shortState.riskPct = Number(e.target.value); rerender(); });
   document.getElementById('short-hide-earn')?.addEventListener('change', e => { shortState.hideEarnings = e.target.checked; rerender(); });
+  document.getElementById('short-only-arg')?.addEventListener('change', e => { shortState.onlyArg = e.target.checked; lsSetSafe('icp_short_only_arg', e.target.checked ? '1' : '0'); rerender(); });
   // Tomar un trade → seguimiento; cerrar seguimiento.
   els.report.querySelectorAll('[data-short-take]').forEach(btn => {
     btn.addEventListener('click', (e) => {
