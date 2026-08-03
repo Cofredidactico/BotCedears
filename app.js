@@ -1,4 +1,4 @@
-import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, getRecommendations, isLive } from './dataSource.js';
+import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, getRecommendations, getPreMarket, isLive } from './dataSource.js';
 import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged, macd, rsi, ema } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
@@ -100,7 +100,10 @@ const DASHBOARD_UNIVERSE = [
 // bitcoin-céntricas + ETFs spot + exchanges/brokers con exposición directa).
 const AR_TICKERS = new Set(['GGAL', 'BMA', 'SUPV', 'BBAR', 'YPF', 'PAM', 'CEPU', 'VIST', 'EDN', 'LOMA', 'TGS', 'TEO', 'CRESY', 'IRS', 'AGRO', 'CAAP', 'DESP', 'GLOB', 'BIOX', 'MELI', 'TS', 'TX', 'ARCO', 'SATL']);
 const CRYPTO_RELATED = new Set(['BTC', 'ETH', 'MSTR', 'RIOT', 'HUT', 'IREN', 'COIN', 'IBIT', 'ETHA', 'BMNR']);
-const dashState = { data: {}, loading: new Set(), started: false, macro: null, ccl: null };
+const dashState = { data: {}, loading: new Set(), started: false, macro: null, ccl: null,
+  // Pre-market (antes de la apertura): mapa TICKER -> {state, pre, prePct, prevClose, regular},
+  // el estado general del mercado US, y cuándo se cargó por última vez.
+  premarket: {}, premarketState: null, premarketAt: 0, premarketLoading: false };
 // Subconjunto del universo del dashboard para el widget "Mercado Hoy" del
 // sidebar — reusa dashState.data, no dispara requests propios.
 const SIDEBAR_MARKET_TICKERS = ['SPY', 'QQQ', 'MELI', 'GGAL', 'BTC'];
@@ -115,6 +118,7 @@ const DASH_WIDGETS = [
   { key: 'calendar', label: 'Calendario Económico', icon: 'calendar', accent: 'amber', full: false },
   { key: 'opportunities', label: 'Oportunidades del Día', icon: 'trend', accent: 'green', full: true },
   { key: 'top10', label: 'Top 10 del Día', icon: 'trend', accent: 'green', full: true },
+  { key: 'premarket', label: 'Antes de la Apertura', icon: 'gap', accent: 'amber', full: true },
   { key: 'buyzone', label: 'En Zona de Compra Ahora', icon: 'target', accent: 'green', full: true },
   { key: 'breadth', label: 'Amplitud del Mercado', icon: 'radar', accent: 'blue', full: false },
   { key: 'movers', label: 'Destacados del Día', icon: 'trend', accent: 'blue', full: true },
@@ -1166,6 +1170,7 @@ async function loadReport(ticker) {
     state.loading = false;
     if (asset.sector) loadPeerRadar(asset.sector, macro); // no bloquea el render del reporte
     loadSeasonality(asset.ticker); // ídem: pide historial extendido aparte, no bloquea el render inicial
+    if (!isCripto) loadReportPreMarket(asset.ticker); // badge "PRE" en la ficha (Yahoo), no bloquea
   } catch (e) {
     console.error('[app] error cargando reporte', e);
     state.loading = false;
@@ -1173,6 +1178,19 @@ async function loadReport(ticker) {
   }
   renderTopbar();
   renderReport();
+}
+
+// Pre-market del activo abierto en la ficha (subyacente US). No bloquea el
+// render inicial: llega después y repinta con el badge "PRE" si corresponde.
+async function loadReportPreMarket(ticker) {
+  try {
+    const map = await getPreMarket([ticker]);
+    const p = map?.[ticker];
+    if (!p) return;
+    dashState.premarket[ticker] = p;
+    if (p.state) { dashState.premarketState = p.state; dashState.premarketAt = Date.now(); }
+    if (state.report && state.asset?.ticker === ticker) { state.report.premarket = p; renderReport(); }
+  } catch { /* la ficha ya se ve sin el badge; no es crítico */ }
 }
 
 /* ───────────────────────── asistente IA: contexto grounded ───────────────────────── */
@@ -2384,6 +2402,16 @@ function renderReportImpl() {
   const execPriceSecondary = showArsPrimary
     ? `<div class="exec-price-secondary">${fmtUsd(quote.usd)} USD (subyacente)</div>`
     : quote.cedearArs != null ? `<div class="exec-price-secondary">CEDEAR ${fmtArs(quote.cedearArs)}</div>` : '';
+  // Badge de pre-market: precio del subyacente en EE.UU. antes de la apertura
+  // (lo llena loadReportPreMarket en r.premarket). Solo en horario de pre-market.
+  const pm = r.premarket;
+  const preMarketBadge = (pm && (pm.state === 'PRE' || pm.state === 'PREPRE') && pm.pre != null && pm.prePct != null)
+    ? `<div class="exec-pre-badge ${pm.prePct >= 0 ? 'up' : 'down'}" title="Precio del subyacente en EE.UU. antes de la apertura (Nueva York) — anticipa cómo puede abrir el CEDEAR en BYMA. Es una referencia, no un precio firme.">
+         <span class="exec-pre-tag">PRE</span>
+         <span class="exec-pre-px">${fmtUsd(pm.pre)}</span>
+         <span class="exec-pre-chg">${pm.prePct >= 0 ? '▲' : '▼'} ${fmtPct(pm.prePct)}</span>
+       </div>`
+    : '';
   const subScoreKeys = ['fundamentals', 'trend', 'momentum', 'valuation', 'risk'];
   const subScoreLabels = { fundamentals: 'Fundamental', trend: 'Técnico', momentum: 'Momentum', valuation: 'Valoración', risk: 'Riesgo' };
   const subScores = subScoreKeys.map(k => scoreBreakdown.find(sb => sb.key === k)).filter(Boolean);
@@ -2424,6 +2452,7 @@ function renderReportImpl() {
           <div class="exec-price">${execPricePrimary}</div>
           ${execPriceSecondary}
           <div class="exec-trend" style="background:${trendBg}; color:${trendColor};">${esc(trendLabel)}</div>
+          ${preMarketBadge}
         </div>
         <div class="exec-stats">
           <div><div class="exec-stat-label">Confianza</div><div class="exec-stat-value">${esc(confidence)}</div></div>
@@ -4036,9 +4065,59 @@ function topTenWidgetBody() {
       </div>`}`;
 }
 
+/** "Antes de la apertura": movimientos de pre-market del subyacente en EE.UU.,
+ *  ordenados por el salto más fuerte (a favor o en contra) vs el cierre anterior.
+ *  Es el papel en Nueva York — anticipa cómo puede abrir el CEDEAR en BYMA. */
+function preMarketWidgetBody() {
+  const stateLabel = premarketStateLabel();
+  const intro = `<div class="dash-intro" style="margin-bottom:12px;">Precio del subyacente en EE.UU. <strong>antes de la apertura</strong> (Nueva York) — anticipa cómo puede abrir el CEDEAR en BYMA. Es un mercado fino y volátil: tomalo como referencia, no como precio firme.</div>`;
+
+  if (!isPreMarketNow()) {
+    return `${intro}
+      <div class="card watch-empty">
+        <div class="pm-closed">
+          <div class="pm-closed-state">${ICONS.gap} ${stateLabel ? esc(stateLabel) : 'Fuera de horario de pre-market'}</div>
+          <div class="pm-closed-note">El pre-market de EE.UU. va de <strong>4:00 a 9:30 (hora de Nueva York)</strong> — de madrugada a la mañana en Argentina. Volvé en ese horario para ver los saltos antes de que abra el mercado.</div>
+        </div>
+      </div>`;
+  }
+
+  const rows = Object.entries(dashState.premarket)
+    .filter(([, p]) => p && (p.state === 'PRE' || p.state === 'PREPRE') && p.pre != null && p.prePct != null)
+    .map(([ticker, p]) => ({ ticker, p, d: dashState.data[ticker] }))
+    .filter(r => Math.abs(r.p.prePct) >= 0.3) // "gran salto": ignora el ruido chico
+    .sort((a, b) => b.p.prePct - a.p.prePct);
+
+  if (!rows.length) {
+    return `${intro}<div class="card watch-empty">Todavía no hay saltos de pre-market significativos${dashState.premarketLoading ? ' — cargando…' : ''}. Se muestran los movimientos de ±0,3% o más vs el cierre anterior.</div>`;
+  }
+  const top = rows.slice(0, 20);
+  return `${intro}
+    <div class="pm-clock">${ICONS.gap}<span>${esc(stateLabel || 'Pre-market abierto')}</span> · ${rows.length} papel(es) con salto</div>
+    <div class="card bt-table-card">
+      <div class="bt-table-wrap">
+        <table class="bt-table pm-table">
+          <thead><tr><th>Ticker</th><th>Pre-market (USD)</th><th>Cierre ant.</th><th>Salto</th></tr></thead>
+          <tbody>
+            ${top.map(({ ticker, p, d }) => {
+              const up = p.prePct >= 0;
+              return `<tr class="port-row" data-dash-ticker="${esc(ticker)}">
+                <td class="bt-label-cell" style="font-weight:700;">${esc(ticker)} <span class="port-pnl-abs">${esc(d?.name || '')}</span></td>
+                <td>${fmtUsd(p.pre)}</td>
+                <td class="bt-nd">${fmtUsd(p.prevClose)}</td>
+                <td class="${up ? 'bt-pos' : 'bt-neg'}" style="font-weight:700;">${up ? '▲' : '▼'} ${fmtPct(p.prePct)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 function dashWidgetBody(key, ctx) {
   const { loaded, opportunities, buyZone, loadingCount, heatmapRows, sectorRows, bySignal, gainers, losers } = ctx;
   switch (key) {
+    case 'premarket': return preMarketWidgetBody();
     case 'idea': return ideaWidgetBody(loaded);
     case 'digest': return dailyDigestWidgetBody(ctx);
     case 'calendar': return economicCalendarWidgetBody();
@@ -9065,6 +9144,32 @@ function portfolioAttributionHTML(stats) {
     </div>`;
 }
 
+/** Tarjeta de pre-market de las tenencias — solo en horario de pre-market y si
+ *  hay al menos un papel con dato. Ordena por el salto más fuerte (± da igual). */
+function portfolioPreMarketCardHTML(holdings) {
+  if (!isPreMarketNow()) return '';
+  const rows = holdings
+    .map(h => ({ h, p: dashState.premarket[h.ticker] }))
+    .filter(r => r.p && (r.p.state === 'PRE' || r.p.state === 'PREPRE') && r.p.pre != null && r.p.prePct != null)
+    .sort((a, b) => Math.abs(b.p.prePct) - Math.abs(a.p.prePct));
+  if (!rows.length) return '';
+  return `
+    <div class="card pm-port-card">
+      <div class="dash-radar-title">${ICONS.gap} Pre-market de tus tenencias</div>
+      <div class="port-mini-note">Precio del subyacente en EE.UU. antes de la apertura (Nueva York) — anticipa cómo abren tus CEDEARs en BYMA. ${esc(premarketStateLabel() || '')}.</div>
+      <div class="pm-port-list">
+        ${rows.map(({ h, p }) => {
+          const up = p.prePct >= 0;
+          return `<div class="pm-port-row port-row" data-port-ticker="${esc(h.ticker)}">
+            <span class="pm-port-tk">${esc(h.ticker)}</span>
+            <span class="pm-port-px">${fmtUsd(p.pre)}</span>
+            <span class="pm-port-chg ${up ? 'bt-pos' : 'bt-neg'}">${up ? '▲' : '▼'} ${fmtPct(p.prePct)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
 function portfolioHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
@@ -9108,6 +9213,7 @@ function portfolioHTML() {
 
     ${!holdings.length ? emptyStateHTML('briefcase', `Todavía no cargaste tenencias (máx. ${PORTFOLIO_MAX}). Podés empezar cargando una a la vez arriba, o importar un CSV (columnas: ticker,shares,avgCost,costCurrency).`) : `
     ${portfolioDidacticHTML(stats)}
+    ${portfolioPreMarketCardHTML(holdings)}
     ${cashFlowsCardHTML(stats)}
     <div class="port-summary-grid">
       <div class="card port-summary-card">
@@ -9663,6 +9769,9 @@ function wirePortfolioEvents() {
 // llamar a renderReport(), que vuelve a llamar a esta función, en loop.
 async function loadPortfolioData() {
   const holdings = getPortfolio();
+  // Pre-market de las tenencias (además del universo del dashboard): así el
+  // apartado de pre-market de la cartera funciona aunque entres directo acá.
+  if (holdings.length) loadPreMarketData(holdings.map(h => h.ticker));
   // Universo curado como fuente de ideas nuevas para el motor de "Compras con
   // la liquidez" (además de tus tenencias): se carga en segundo plano si la
   // página de Portfolio se abrió sin pasar antes por el Dashboard.
@@ -11393,8 +11502,49 @@ async function loadWatchlistData() {
 const DASHBOARD_BATCH_SIZE = 20;
 const DASHBOARD_BATCH_DELAY_MS = 1500;
 
+/* ───────────────────────── pre-market ─────────────────────────
+ * Precio "antes de la apertura" del subyacente en EE.UU. (Yahoo). Es el papel
+ * en Nueva York, no el CEDEAR en BYMA — pero anticipa cómo va a abrir el CEDEAR.
+ * Solo tiene sentido en horario de pre-market (madrugada/mañana en Argentina). */
+const PREMARKET_STATE_ES = {
+  PRE: 'Pre-market abierto', PREPRE: 'Antes del pre-market', REGULAR: 'Mercado abierto',
+  POST: 'After-hours (post cierre)', POSTPOST: 'Mercado cerrado', CLOSED: 'Mercado cerrado',
+};
+const isPreMarketNow = () => dashState.premarketState === 'PRE' || dashState.premarketState === 'PREPRE';
+function premarketStateLabel() { return PREMARKET_STATE_ES[dashState.premarketState] || (dashState.premarketState ? 'Mercado cerrado' : null); }
+
+function refreshPreMarketViews() { try { if (!state.loading) renderReport(); } catch { /* noop */ } }
+
+// Carga el pre-market para el conjunto relevante. Para no golpear Yahoo fuera de
+// horario, sondea SPY primero: si el mercado NO está en pre-market, guarda el
+// estado y evita el barrido grande. Refresca a lo sumo cada 45s.
+async function loadPreMarketData(extraTickers = []) {
+  if (dashState.premarketLoading) return;
+  const fresh = Date.now() - dashState.premarketAt < 45 * 1000;
+  if (fresh && Object.keys(dashState.premarket).length) return;
+  dashState.premarketLoading = true;
+  try {
+    const probe = await getPreMarket(['SPY']);
+    if (probe?.SPY) { Object.assign(dashState.premarket, probe); dashState.premarketState = probe.SPY.state ?? dashState.premarketState; }
+    dashState.premarketAt = Date.now();
+    if (!isPreMarketNow()) { refreshPreMarketViews(); return; }
+    // Es horario de pre-market: barre curado + tenencias + watchlist + extras.
+    const set = new Set([...DASHBOARD_UNIVERSE, ...getPortfolio().map(h => h.ticker), ...getWatchlist(), ...(extraTickers || [])]);
+    const map = await getPreMarket([...set]);
+    Object.assign(dashState.premarket, map);
+    if (map.SPY?.state) dashState.premarketState = map.SPY.state;
+    dashState.premarketAt = Date.now();
+  } catch (e) {
+    console.warn('[premarket] no se pudo cargar:', e.message);
+  } finally {
+    dashState.premarketLoading = false;
+    refreshPreMarketViews();
+  }
+}
+
 async function loadDashboardData() {
   dashState.started = true;
+  loadPreMarketData();
   const macro = await getMacro();
   dashState.macro = macro; // riesgo país para el Panel Argentina
   if (!dashState.ccl) {
@@ -11470,3 +11620,8 @@ setInterval(loadWatchlistData, 180 * 1000);
 setInterval(() => { if (!state.asset) loadDashboardData(); }, 180 * 1000);
 setInterval(() => { if (!state.asset && state.view === 'portfolio') { portState.data = {}; loadPortfolioData(); } }, 180 * 1000);
 setInterval(() => { if (!state.asset && state.view === 'macro') loadMacroNewsData(); }, 180 * 1000);
+// Pre-market: en horario de pre-market cambia rápido, así que se refresca cada
+// ~60s cuando estás en el Dashboard o en la cartera. loadPreMarketData ya se
+// autolimita (no rebarre si está fresco) y no hace el barrido grande fuera de
+// horario, así que este ciclo es barato el resto del día.
+setInterval(() => { if (!state.asset && (state.view === 'dashboard' || state.view === 'portfolio')) loadPreMarketData(); }, 60 * 1000);

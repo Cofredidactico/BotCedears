@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const universe = require('../universe.json');
 
 const FINNHUB = 'https://finnhub.io/api/v1';
+const YF = 'https://query1.finance.yahoo.com/v8/finance/chart';
 
 // Algunos sitios filtran requests sin un User-Agent de navegador desde IPs de
 // datacenter (como las de Vercel) — se manda uno genérico por las dudas.
@@ -59,6 +60,11 @@ async function getRealArsPriceMap() {
 }
 
 export default async function handler(req, res) {
+  // Sub-ruta de pre-market: /api/quote?premarket=1&symbols=A,B,C. Se fusionó acá
+  // (en vez de una función aparte) para no pasar el límite de 12 serverless
+  // functions del plan gratuito de Vercel. Ver handlePreMarket más abajo.
+  if (req.query.premarket || req.query.symbols) return handlePreMarket(req, res);
+
   const symbol = String(req.query.symbol || '').toUpperCase();
 
   const asset = universe.find(a => a.ticker === symbol);
@@ -113,6 +119,79 @@ export default async function handler(req, res) {
 
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
     return res.status(200).json({ usd, changePct, cedearArs, cedearSource, ratio, ratioSource, cclImplied, cclRef, volumeArsM: 0 });
+  } catch (e) {
+    return res.status(502).json({ error: 'upstream', detail: String(e) });
+  }
+}
+
+/* ─────────────────────── pre-market (antes de la apertura) ───────────────────────
+ * Precio del subyacente en EE.UU. antes de que abra el mercado, para uno o
+ * varios símbolos. Fuente: Yahoo Finance chart con includePrePost=true (gratis,
+ * sin API key, la misma vía que /api/dividends). El precio de pre-market se
+ * calcula desde las velas de 1 minuto de la sesión previa a la apertura; el
+ * estado del mercado se deriva de las franjas horarias del día (Yahoo no manda
+ * marketState en el chart). Solo se devuelve `pre` en horario PRE/PREPRE. */
+const PM_MAX_SYMBOLS = 40; // tope por request para no pasarse del timeout de la función
+const PM_CONCURRENCY = 8;  // Yahoo es 1 símbolo por request → se piden de a tandas
+
+async function pmOneSymbol(symbol) {
+  try {
+    const url = `${YF}/${encodeURIComponent(symbol)}?interval=1m&range=1d&includePrePost=true`;
+    const r = await fetch(url, { headers: { 'User-Agent': BROWSER_UA } });
+    if (!r.ok) throw new Error('yahoo ' + r.status);
+    const d = await r.json();
+    const res = d?.chart?.result?.[0];
+    if (!res) throw new Error('sin datos');
+    const meta = res.meta || {};
+    const prevClose = meta.chartPreviousClose ?? meta.previousClose ?? null;
+    const regular = meta.regularMarketPrice ?? null;
+    const ctp = meta.currentTradingPeriod || {};
+    const preStart = ctp.pre?.start, regStart = ctp.regular?.start, regEnd = ctp.regular?.end;
+    const nowS = Date.now() / 1000;
+
+    let state = meta.marketState || null;
+    if (!state) {
+      if (regStart && preStart && nowS >= preStart && nowS < regStart) state = 'PRE';
+      else if (preStart && nowS < preStart) state = 'PREPRE';
+      else if (regStart && regEnd && nowS >= regStart && nowS < regEnd) state = 'REGULAR';
+      else if (regEnd && nowS >= regEnd) state = 'POST';
+      else state = 'CLOSED';
+    }
+
+    let pre = null;
+    const isPre = state === 'PRE' || state === 'PREPRE';
+    if (isPre && preStart && regStart) {
+      const ts = res.timestamp || [];
+      const closes = res.indicators?.quote?.[0]?.close || [];
+      for (let i = ts.length - 1; i >= 0; i--) {
+        if (ts[i] >= preStart && ts[i] < regStart && closes[i] != null) { pre = closes[i]; break; }
+      }
+    }
+    const prePct = (pre != null && prevClose > 0) ? (pre / prevClose - 1) * 100 : null;
+    return { state, pre, prePct, prevClose, regular };
+  } catch (_) {
+    return { state: null, pre: null, prePct: null, prevClose: null, regular: null };
+  }
+}
+
+async function pmMapPool(items, worker, concurrency) {
+  const out = {};
+  let idx = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (idx < items.length) { const i = idx++; out[items[i]] = await worker(items[i]); }
+  });
+  await Promise.all(runners);
+  return out;
+}
+
+async function handlePreMarket(req, res) {
+  const raw = String(req.query.symbols || req.query.symbol || '').toUpperCase();
+  const symbols = [...new Set(raw.split(',').map(s => s.trim()).filter(Boolean))].slice(0, PM_MAX_SYMBOLS);
+  if (!symbols.length) return res.status(400).json({ error: 'falta symbols' });
+  try {
+    const map = await pmMapPool(symbols, pmOneSymbol, PM_CONCURRENCY);
+    res.setHeader('Cache-Control', 's-maxage=20, stale-while-revalidate=40');
+    return res.status(200).json({ data: map });
   } catch (e) {
     return res.status(502).json({ error: 'upstream', detail: String(e) });
   }
