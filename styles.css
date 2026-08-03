@@ -3005,3 +3005,33 @@ body::after {
 .pm-port-tk { font-weight: 700; }
 .pm-port-px { font-variant-numeric: tabular-nums; color: var(--text-mute); }
 .pm-port-chg { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+/* ── Trade Cortos: actualización grande (estrategia, plan, regimen, stats) ── */
+.short-strat-badge { display:inline-flex; align-items:center; gap:3px; font-size:11px; font-weight:600; padding:2px 8px; border-radius:8px; background:var(--surface-2, rgba(255,255,255,.05)); border:1px solid var(--border, rgba(255,255,255,.09)); color:var(--text); cursor:help; }
+.short-pre-chip { display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:7px; letter-spacing:.02em; border:1px solid color-mix(in oklab, var(--up) 40%, transparent); background:color-mix(in oklab, var(--up) 12%, transparent); color:var(--up); cursor:help; }
+.short-pre-chip.down { border-color:color-mix(in oklab, var(--down) 40%, transparent); background:color-mix(in oklab, var(--down) 12%, transparent); color:var(--down); }
+.short-plan-cell small { font-weight:500; opacity:.7; font-size:.82em; }
+.short-partials { margin-top:10px; font-size:12.5px; line-height:1.5; color:var(--text-mute); background:var(--surface-2, rgba(255,255,255,.03)); border:1px dashed var(--border, rgba(255,255,255,.1)); border-radius:9px; padding:9px 11px; }
+.short-partials b { color:var(--text); }
+
+/* Semáforo de régimen de mercado */
+.short-regime { display:flex; align-items:flex-start; gap:12px; padding:12px 14px; border-radius:12px; margin-bottom:18px; border:1px solid var(--border, rgba(255,255,255,.1)); background:var(--surface-2, rgba(255,255,255,.03)); }
+.short-regime.up { border-color:color-mix(in oklab, var(--up) 45%, transparent); background:color-mix(in oklab, var(--up) 8%, transparent); }
+.short-regime.down { border-color:color-mix(in oklab, var(--down) 45%, transparent); background:color-mix(in oklab, var(--down) 8%, transparent); }
+.short-regime-lamp { font-size:22px; line-height:1.1; }
+.short-regime-title { font-size:14px; font-weight:600; }
+.short-regime-note { font-size:12.5px; color:var(--text-mute); line-height:1.5; margin-top:2px; }
+
+/* Tabla compacta de setups */
+.short-compact-table td, .short-compact-table th { white-space:nowrap; }
+.short-compact-table tbody tr { cursor:pointer; }
+
+/* Stats de trades tomados + journal */
+.stk-stats { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.stk-stat { flex:1 1 auto; min-width:74px; text-align:center; padding:8px 6px; border-radius:9px; background:var(--surface-2, rgba(255,255,255,.03)); border:1px solid var(--border, rgba(255,255,255,.07)); }
+.stk-stat-v { font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; }
+.stk-stat-v.up { color:var(--up); } .stk-stat-v.down { color:var(--down); }
+.stk-stat-k { font-size:10.5px; color:var(--text-mute); margin-top:2px; }
+.stk-note { margin-top:8px; }
+.stk-note-input { width:100%; box-sizing:border-box; font-size:12.5px; padding:6px 9px; border-radius:8px; border:1px solid var(--border, rgba(255,255,255,.1)); background:var(--surface, rgba(255,255,255,.02)); color:var(--text); font-family:inherit; }
+.stk-note-input:focus { outline:none; border-color:color-mix(in oklab, var(--accent, #7c5cff) 55%, transparent); }

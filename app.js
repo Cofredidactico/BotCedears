@@ -5193,6 +5193,9 @@ const shortState = {
   // Por defecto ON: solo activos comprables desde brokers argentinos (CEDEARs) —
   // pensado para quien opera en pesos y no tiene cuenta en dólares.
   onlyArg: lsGetSafe('icp_short_only_arg', '1') === '1',
+  strategy: 'all',     // filtro por tipo de estrategia (squeeze/breakout/…)
+  minLiquidity: 0,     // liquidez mínima del subyacente en USD/día (0 = sin filtro)
+  compact: lsGetSafe('icp_short_compact', '0') === '1', // vista tabla compacta
 };
 
 /* ── Seguimiento de trades cortos tomados (localStorage) ─────────────────────
@@ -5210,6 +5213,7 @@ function addShortTrade(t) {
   saveShortTrades(list); return list;
 }
 function removeShortTrade(id) { const list = getShortTrades().filter(x => x.id !== id); saveShortTrades(list); return list; }
+function updateShortTradeNote(id, note) { const list = getShortTrades(); const t = list.find(x => x.id === id); if (t) { t.note = String(note || '').slice(0, 180); saveShortTrades(list); } return list; }
 
 // Position sizing: cuántas unidades comprar/vender arriesgando `riskPct` del
 // total de cuenta (Configuración/Portfolio) hasta el stop. Para CEDEARs se
@@ -5274,6 +5278,28 @@ async function loadShortEarnings() {
   }
 }
 
+/* Régimen de mercado: usa la tendencia del S&P 500 (SPY, ya cargado en el
+ * universo) para decir si el contexto favorece largos, cortos o ninguno. Operar
+ * a favor del régimen sube la probabilidad; un semáforo evita ir contra la
+ * corriente del mercado entero. */
+function shortMarketRegime() {
+  const spy = dashState.data['SPY'];
+  if (!spy?.closes || spy.closes.length < 60) return null;
+  const c = spy.closes;
+  const price = c[c.length - 1];
+  const sma = (p) => { const s = c.slice(-p); return s.reduce((a, b) => a + b, 0) / s.length; };
+  const above20 = price > sma(20), above50 = price > sma(50);
+  const rising = price > c[c.length - 6];
+  if (above20 && above50 && rising) return { label: 'Favorable a LARGOS', icon: '🟢', cls: 'up', note: 'El S&P 500 está por encima de sus medias (20 y 50) y subiendo — los setups largos operan con viento a favor. Priorizá largos.' };
+  if (!above20 && !above50 && !rising) return { label: 'Favorable a CORTOS', icon: '🔴', cls: 'down', note: 'El S&P 500 está por debajo de sus medias y cayendo — cuidado con los largos; el contexto acompaña a los cortos. Priorizá cortos o esperá afuera.' };
+  return { label: 'Neutral / mixto', icon: '🟡', cls: 'flat', note: 'El mercado no tiene una dirección clara. Reducí el tamaño, sé selectivo y exigí setups de mayor confianza.' };
+}
+function shortMarketRegimeHTML() {
+  const r = shortMarketRegime();
+  if (!r) return '';
+  return `<div class="short-regime ${r.cls}"><span class="short-regime-lamp">${r.icon}</span><div><div class="short-regime-title">Régimen de mercado: <b>${esc(r.label)}</b></div><div class="short-regime-note">${esc(r.note)}</div></div></div>`;
+}
+
 /* Seguimiento de trades cortos tomados: R actual, P&L y progreso al objetivo en
  * vivo, usando el último precio del universo/watchlist. */
 function shortTakenTradesHTML() {
@@ -5311,13 +5337,39 @@ function shortTakenTradesHTML() {
         <span>Obj <b class="up">${fmtUsd(t.target)}</b> · Stop <b class="down">${fmtUsd(t.stop)}</b></span>
       </div>
       ${progress != null ? `<div class="stk-bar"><i style="width:${Math.max(0, Math.min(100, progress))}%; background:${progress >= 0 ? 'var(--up)' : 'var(--down)'};"></i></div>` : ''}
+      <div class="stk-note"><input class="stk-note-input" data-stk-note="${esc(t.id)}" value="${esc(t.note || '')}" placeholder="📝 Nota: motivo de entrada, cómo viene, plan…" aria-label="Nota del trade ${esc(t.ticker)}" maxlength="180" /></div>
     </div>`;
   };
+  // ── Estadísticas en vivo de tus trades tomados (R, ganadores, aciertos) ──
+  const withR = trades.map(t => {
+    const d = dashState.data[t.ticker] || watchState.data[t.ticker];
+    const price = d?.price ?? null;
+    const long = t.direction !== 'short';
+    const riskUnit = long ? t.entry - t.stop : t.stop - t.entry;
+    const rNow = (price != null && riskUnit > 0) ? (long ? price - t.entry : t.entry - price) / riskUnit : null;
+    const hitTarget = price != null && (long ? price >= t.target : price <= t.target);
+    const hitStop = price != null && (long ? price <= t.stop : price >= t.stop);
+    return { rNow, hitTarget, hitStop };
+  });
+  const rated = withR.filter(x => x.rNow != null);
+  const avgR = rated.length ? rated.reduce((a, b) => a + b.rNow, 0) / rated.length : null;
+  const winners = rated.filter(x => x.rNow > 0).length;
+  const winRate = rated.length ? Math.round((winners / rated.length) * 100) : null;
+  const targetsHit = withR.filter(x => x.hitTarget).length;
+  const stopsHit = withR.filter(x => x.hitStop).length;
+  const statTile = (v, k, cls = '') => `<div class="stk-stat"><div class="stk-stat-v ${cls}">${v}</div><div class="stk-stat-k">${k}</div></div>`;
   return `
     ${sectionTitleHTML('📌 Tus trades cortos en curso', 'bookmark')}
     <div class="card stk-card">
+      <div class="stk-stats">
+        ${statTile(trades.length, 'abiertos')}
+        ${statTile(winRate != null ? winRate + '%' : '—', 'en verde', winRate != null ? (winRate >= 50 ? 'up' : 'down') : '')}
+        ${statTile(avgR != null ? `${avgR >= 0 ? '+' : ''}${avgR.toFixed(2)}R` : '—', 'R promedio', avgR != null ? (avgR >= 0 ? 'up' : 'down') : '')}
+        ${statTile(`🎯 ${targetsHit}`, 'en objetivo', targetsHit ? 'up' : '')}
+        ${statTile(`🛑 ${stopsHit}`, 'en stop', stopsHit ? 'down' : '')}
+      </div>
       ${trades.map(row).join('')}
-      <div class="stk-foot">Seguimiento manual guardado en este navegador. El R actual y el P&amp;L usan el último precio real. Cerralo cuando salgas de la operación. No es asesoramiento.</div>
+      <div class="stk-foot">Seguimiento manual guardado en este navegador. El R actual, el P&amp;L y las estadísticas usan el último precio real. Cerralo cuando salgas de la operación. No es asesoramiento.</div>
     </div>`;
 }
 
@@ -5346,6 +5398,8 @@ function shortTradesPageHTML() {
     if (shortState.minConf !== 'all' && (SHORT_CONF_RANK[s.confidence] ?? 0) < (SHORT_CONF_RANK[shortState.minConf] ?? 0)) return false;
     if (shortState.minRR > 0 && !(s.rr != null && s.rr >= shortState.minRR)) return false;
     if (shortState.onlyArg && !isArgBuyable(ticker)) return false;
+    if (shortState.strategy !== 'all' && s.strategy !== shortState.strategy) return false;
+    if (shortState.minLiquidity > 0 && !(d.liquidityUsd != null && d.liquidityUsd >= shortState.minLiquidity)) return false;
     if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
     if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
     if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
@@ -5373,6 +5427,7 @@ function shortTradesPageHTML() {
   rebounds = rebounds.filter(({ ticker, d }) => {
     if (shortState.minConf !== 'all' && (SHORT_CONF_RANK[d.rebound.confidence] ?? 0) < (SHORT_CONF_RANK[shortState.minConf] ?? 0)) return false;
     if (shortState.onlyArg && !isArgBuyable(ticker)) return false;
+    if (shortState.minLiquidity > 0 && !(d.liquidityUsd != null && d.liquidityUsd >= shortState.minLiquidity)) return false;
     if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
     if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
     if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
@@ -5383,6 +5438,7 @@ function shortTradesPageHTML() {
   // ── Pullbacks en tendencia (continuación) ──
   const catOk = (ticker, d) => {
     if (shortState.onlyArg && !isArgBuyable(ticker)) return false;
+    if (shortState.minLiquidity > 0 && !(d.liquidityUsd != null && d.liquidityUsd >= shortState.minLiquidity)) return false;
     if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
     if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
     if (shortState.hideEarnings && earningsSoonDays(ticker) != null) return false;
@@ -5403,6 +5459,25 @@ function shortTradesPageHTML() {
   const totalSqueezes = squeezes.length;
   squeezes = squeezes.filter(({ ticker, d }) => catOk(ticker, d) && confOk(d.squeezeWatch.confidence)).sort((a, b) => b.d.squeezeWatch.score - a.d.squeezeWatch.score);
 
+  // ── "Casi listos": setups con gatillo primario pero todavía bajo el umbral
+  // de calificación (vigilancia — a punto de gatillar). Mismos filtros de acceso.
+  const nearSeen = new Set();
+  let nearRows = [];
+  for (const map of [dashState.data, watchState.data]) for (const [ticker, d] of Object.entries(map)) {
+    if (!d || nearSeen.has(ticker) || !d.setup?.nearReady) continue;
+    nearSeen.add(ticker); nearRows.push({ ticker, d });
+  }
+  nearRows = nearRows.filter(({ ticker, d }) => {
+    const s = d.setup;
+    if (shortState.direction !== 'all' && s.direction !== shortState.direction) return false;
+    if (shortState.onlyArg && !isArgBuyable(ticker)) return false;
+    if (shortState.strategy !== 'all' && s.strategy !== shortState.strategy) return false;
+    if (shortState.minLiquidity > 0 && !(d.liquidityUsd != null && d.liquidityUsd >= shortState.minLiquidity)) return false;
+    if (shortState.category === 'arg' && !AR_TICKERS.has(ticker)) return false;
+    if (shortState.category === 'cedear' && (AR_TICKERS.has(ticker) || d.category !== 'CEDEAR')) return false;
+    return true;
+  }).sort((a, b) => b.d.setup.score - a.d.setup.score).slice(0, 12);
+
   const loadingCurated = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
   const opt = (val, cur, txt) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${txt}</option>`;
   const seg = (val, txt) => `<button class="short-seg-btn ${shortState.direction === val ? 'active' : ''}" data-short-dir="${val}">${txt}</button>`;
@@ -5413,6 +5488,8 @@ function shortTradesPageHTML() {
     <div class="cedear-note" style="margin-bottom:18px; border-color:oklch(0.55 0.15 23 / 0.4);">
       <strong>⚠ Riesgo alto:</strong> el trading de corto plazo es especulativo. Esto es un <strong>tamiz técnico</strong>, no una recomendación ni una garantía — muchos setups fallan. Operá siempre con stop, arriesgá solo lo que puedas perder, y recordá que un balance (earnings) cercano puede disparar movimientos que ningún indicador anticipa.
     </div>
+
+    ${shortMarketRegimeHTML()}
 
     ${shortTakenTradesHTML()}
 
@@ -5439,18 +5516,26 @@ function shortTradesPageHTML() {
       </div>
       <label class="short-ctrl"><span>Confianza</span><select id="short-conf" class="watch-select">${opt('all', shortState.minConf, 'Todas')}${opt('media', shortState.minConf, 'Media+')}${opt('alta', shortState.minConf, 'Alta+')}${opt('muy alta', shortState.minConf, 'Muy alta')}</select></label>
       <label class="short-ctrl"><span>R:R mínimo</span><select id="short-rr" class="watch-select">${opt('0', String(shortState.minRR), 'Cualquiera')}${opt('1', String(shortState.minRR), '≥ 1:1')}${opt('1.5', String(shortState.minRR), '≥ 1.5:1')}${opt('2', String(shortState.minRR), '≥ 2:1')}</select></label>
+      <label class="short-ctrl"><span>Estrategia</span><select id="short-strat" class="watch-select">${opt('all', shortState.strategy, 'Todas')}${Object.entries(SHORT_STRATEGIES).map(([k, v]) => opt(k, shortState.strategy, `${v.icon} ${v.label}`)).join('')}</select></label>
+      <label class="short-ctrl"><span>Liquidez mín.</span><select id="short-liq" class="watch-select">${opt('0', String(shortState.minLiquidity), 'Cualquiera')}${opt('5000000', String(shortState.minLiquidity), '≥ US$5M/día')}${opt('20000000', String(shortState.minLiquidity), '≥ US$20M/día')}${opt('50000000', String(shortState.minLiquidity), '≥ US$50M/día')}</select></label>
       <label class="short-ctrl"><span>Categoría</span><select id="short-cat" class="watch-select">${opt('all', shortState.category, 'Todas')}${opt('arg', shortState.category, '🇦🇷 Argentina')}${opt('cedear', shortState.category, 'CEDEAR')}</select></label>
       <label class="short-ctrl"><span>Ordenar</span><select id="short-sort" class="watch-select">${opt('score', shortState.sort, 'Score')}${opt('rr', shortState.sort, 'Riesgo/Beneficio')}${opt('move', shortState.sort, 'Rango esperado')}</select></label>
       <label class="short-ctrl"><span>Riesgo/​trade</span><select id="short-risk" class="watch-select">${opt('0.5', String(shortState.riskPct), '0,5% cuenta')}${opt('1', String(shortState.riskPct), '1% cuenta')}${opt('2', String(shortState.riskPct), '2% cuenta')}</select></label>
       <label class="short-ctrl short-ctrl-check"><input type="checkbox" id="short-hide-earn" ${shortState.hideEarnings ? 'checked' : ''} /> <span>Ocultar con balance ≤5d</span></label>
       <label class="short-ctrl short-ctrl-check" title="Muestra solo activos con CEDEAR en Argentina (comprables en pesos desde brokers locales). Excluye acciones sin CEDEAR y cripto."><input type="checkbox" id="short-only-arg" ${shortState.onlyArg ? 'checked' : ''} /> <span>🇦🇷 Solo comprables en Argentina</span></label>
+      <label class="short-ctrl short-ctrl-check" title="Vista de tabla compacta para escanear muchos setups de un vistazo."><input type="checkbox" id="short-compact" ${shortState.compact ? 'checked' : ''} /> <span>▤ Vista compacta</span></label>
     </div>
     <div class="short-count">${rows.length} de ${totalQualifying} setup(s)${shortState.direction !== 'all' || shortState.minConf !== 'all' || shortState.minRR > 0 || shortState.category !== 'all' ? ' con los filtros actuales' : ''}</div>
 
-    ${!rows.length ? `<div class="card watch-empty">${loadingCurated ? 'Analizando setups de corto plazo…' : totalQualifying ? 'Ningún setup pasa los filtros actuales — probá aflojarlos.' : 'No hay setups de corto plazo de alta confianza en este momento. El mercado no siempre ofrece entradas claras — volvé más tarde.'}</div>` : `
+    ${!rows.length ? `<div class="card watch-empty">${loadingCurated ? 'Analizando setups de corto plazo…' : totalQualifying ? 'Ningún setup pasa los filtros actuales — probá aflojarlos.' : 'No hay setups de corto plazo de alta confianza en este momento. El mercado no siempre ofrece entradas claras — volvé más tarde.'}</div>` : shortState.compact ? shortSetupsTableHTML(rows) : `
     <div class="short-grid">
       ${rows.map(({ ticker, d }) => shortTradeCardHTML(ticker, d)).join('')}
     </div>`}
+
+    ${nearRows.length ? `
+    ${sectionTitleHTML('👀 Casi listos (a punto de gatillar)', 'radar', 'margin-top:34px;')}
+    <div class="dash-intro">Setups con una señal primaria pero que <strong>todavía no llegan al umbral de calificación</strong> — vigilancia: si suman una confirmación más, saltan a la lista de arriba. Útil para tenerlos en el radar antes de que se activen.</div>
+    ${shortSetupsTableHTML(nearRows, true)}` : ''}
 
     ${sectionTitleHTML('🔄 Rebotes de 1-2 días (sobreventa)', 'zap', 'margin-top:34px;')}
     <div class="dash-intro">Activos <strong>sobrevendidos de corto plazo</strong> (acciones y CEDEARs) con chances de un <strong>rebote técnico de 1-2 ruedas</strong> hacia su media. Se detectan combinando varios indicadores: RSI en sobreventa, banda inferior de Bollinger, estiramiento debajo de la EMA20, vela de reversión, divergencia alcista, volumen de capitulación y rebote sobre soporte. Es un juego de <strong>mean-reversion</strong> (comprar la caída para el rebote), no una tendencia nueva — objetivo corto y stop ajustado.</div>
@@ -5611,6 +5696,56 @@ function reboundCardHTML(ticker, d) {
     </div>`;
 }
 
+// Vista compacta: tabla para escanear muchos setups de un vistazo. Cada fila
+// abre la ficha del activo (mismo data-short-ticker que las cards).
+function shortSetupsTableHTML(rows, near = false) {
+  return `<div class="card bt-table-card"><div class="bt-table-wrap">
+    <table class="bt-table short-compact-table">
+      <thead><tr><th>Ticker</th><th>Dir</th><th>Estrategia</th><th>Score</th><th>Entrada</th><th>Stop</th><th>Obj 1</th><th>R:R</th></tr></thead>
+      <tbody>
+        ${rows.map(({ ticker, d }) => {
+          const s = d.setup;
+          const dm = shortDirMeta(s.direction);
+          const st = SHORT_STRATEGIES[s.strategy];
+          return `<tr class="port-row" data-short-ticker="${esc(ticker)}">
+            <td class="bt-label-cell" style="font-weight:700;">${esc(ticker)} <span class="port-pnl-abs">${esc(d.name || '')}</span></td>
+            <td style="color:${dm.color};">${dm.arrow} ${dm.label}</td>
+            <td>${st ? `${st.icon} ${esc(st.label)}` : '—'}</td>
+            <td><b>${s.score}</b></td>
+            <td>${fmtUsd(s.entry)}</td>
+            <td class="bt-neg">${fmtUsd(s.stop)}</td>
+            <td class="bt-pos">${fmtUsd(s.target1)}</td>
+            <td>${s.rr != null ? s.rr.toFixed(1) + ':1' : '—'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div></div>`;
+}
+
+// Badge de la estrategia del setup (con explicación en el tooltip).
+function shortStrategyBadge(key) {
+  const st = SHORT_STRATEGIES[key];
+  if (!st) return '';
+  return `<span class="short-strat-badge" title="${esc(st.explain)}">${st.icon} ${esc(st.label)}</span>`;
+}
+// Chip de pre-market del subyacente (si estamos en horario y hay gap).
+function shortPreMarketChip(ticker) {
+  const p = dashState.premarket?.[ticker];
+  if (!p || !(p.state === 'PRE' || p.state === 'PREPRE') || p.pre == null || p.prePct == null) return '';
+  const up = p.prePct >= 0;
+  return `<span class="short-pre-chip ${up ? 'up' : 'down'}" title="Pre-market del subyacente en EE.UU. (antes de la apertura de Nueva York) — anticipa cómo abre el CEDEAR.">PRE ${up ? '▲' : '▼'} ${fmtPct(p.prePct)}</span>`;
+}
+// Plan de salida escalonado (parciales + break-even + trailing).
+function shortPartialPlanHTML(s) {
+  return `<div class="short-partials"><b>📤 Plan de salida:</b> tomá <b>50%</b> en Objetivo 1 y movés el stop a <b>break-even</b> (tu entrada, ${fmtUsd(s.entry)}); <b>30%</b> en Objetivo 2; dejás <b>20%</b> corriendo hasta Objetivo 3 con stop de arrastre. Si toca el stop antes, salís completo.</div>`;
+}
+function shortLiquidityLabel(usd) {
+  if (usd == null) return null;
+  if (usd >= 1e9) return `US$${(usd / 1e9).toFixed(1)}B/día`;
+  if (usd >= 1e6) return `US$${(usd / 1e6).toFixed(0)}M/día`;
+  return `US$${Math.round(usd / 1e3)}k/día`;
+}
+
 function shortTradeCardHTML(ticker, d) {
   const s = d.setup;
   const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
@@ -5629,22 +5764,22 @@ function shortTradeCardHTML(ticker, d) {
           <div class="short-name">${esc(d.name ?? '')}</div>
         </div>
         <div class="short-head-right">
-          <span class="short-dir-badge" style="color:${dm.color}; background:${dm.bg};">${dm.arrow} ${dm.label}</span>${earningsSoonBadge(ticker)}
+          <span class="short-dir-badge" style="color:${dm.color}; background:${dm.bg};">${dm.arrow} ${dm.label}</span>${shortStrategyBadge(s.strategy)}${shortPreMarketChip(ticker)}${earningsSoonBadge(ticker)}
           <div class="short-conf" style="color:${conf};">
             <div class="short-conf-score">${s.score}</div>
             <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
           </div>
         </div>
       </div>
-      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}</div>
+      <div class="short-price"><span class="short-price-usd">${fmtUsd(d.price)}</span> <span class="${d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(d.changePct)} hoy</span>${d.cedearArs != null ? ` · <span class="port-pnl-abs">CEDEAR ${fmtArs(d.cedearArs)}</span>` : ''}${d.liquidityUsd != null ? ` · <span class="port-pnl-abs" title="Volumen medio del subyacente (20 ruedas × precio). Proxy de liquidez para operar el CEDEAR sin problemas.">💧 ${shortLiquidityLabel(d.liquidityUsd)}</span>` : ''}</div>
       ${s.narrative ? `<div class="short-narrative ${s.direction === 'short' ? 'down' : 'up'}">${s.narrative}</div>` : ''}
       <div class="short-plan">
         <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
-        <div class="short-plan-cell"><span>Stop</span><b class="down">${fmtUsd(s.stop)}</b></div>
+        <div class="short-plan-cell"><span>Stop <small>(−${s.stopDistPct != null ? s.stopDistPct.toFixed(1) : '?'}%)</small></span><b class="down">${fmtUsd(s.stop)}</b></div>
         <div class="short-plan-cell"><span>Objetivo 1</span><b class="up">${fmtUsd(s.target1)}</b></div>
         <div class="short-plan-cell"><span>Objetivo 2</span><b class="up">${fmtUsd(s.target2)}</b></div>
+        <div class="short-plan-cell"><span>Objetivo 3</span><b class="up">${s.target3 != null ? fmtUsd(s.target3) : '—'}</b></div>
         <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
-        <div class="short-plan-cell"><span>Rango diario típ.</span><b>±${s.expectedMovePct.toFixed(1)}%</b></div>
       </div>
       <button class="short-more-btn" data-short-more aria-expanded="false">Ver detalle <span class="short-more-caret">▾</span></button>
       <div class="short-more" hidden>
@@ -5658,6 +5793,7 @@ function shortTradeCardHTML(ticker, d) {
           <span title="Los setups de corto plazo caducan: si no se activa el objetivo en ~${s.timeStopDays} ruedas, conviene salir">⏱ Vigencia: <b>~${s.timeStopDays} ruedas</b></span>
         </div>
         ${shortSizingHTML(sizing, s)}
+        ${shortPartialPlanHTML(s)}
         ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
         ${shortTakeBtn(ticker, 'setup', s.direction, s.entry, s.target1, s.stop)}
         <div class="short-reliab" data-reliab-slot="${esc(ticker)}">
@@ -5724,6 +5860,14 @@ function wireShortTradesEvents() {
   document.getElementById('short-risk')?.addEventListener('change', e => { shortState.riskPct = Number(e.target.value); rerender(); });
   document.getElementById('short-hide-earn')?.addEventListener('change', e => { shortState.hideEarnings = e.target.checked; rerender(); });
   document.getElementById('short-only-arg')?.addEventListener('change', e => { shortState.onlyArg = e.target.checked; lsSetSafe('icp_short_only_arg', e.target.checked ? '1' : '0'); rerender(); });
+  document.getElementById('short-strat')?.addEventListener('change', e => { shortState.strategy = e.target.value; rerender(); });
+  document.getElementById('short-liq')?.addEventListener('change', e => { shortState.minLiquidity = Number(e.target.value); rerender(); });
+  document.getElementById('short-compact')?.addEventListener('change', e => { shortState.compact = e.target.checked; lsSetSafe('icp_short_compact', e.target.checked ? '1' : '0'); rerender(); });
+  // Nota del journal por trade tomado (se guarda al salir del campo, sin re-render).
+  els.report.querySelectorAll('[data-stk-note]').forEach(inp => {
+    inp.addEventListener('change', (e) => { e.stopPropagation(); updateShortTradeNote(inp.dataset.stkNote, inp.value); });
+    inp.addEventListener('click', (e) => e.stopPropagation());
+  });
   // Tomar un trade → seguimiento; cerrar seguimiento.
   els.report.querySelectorAll('[data-short-take]').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -11044,8 +11188,14 @@ async function computeLightSignal(ticker, macro) {
   const pullback = pullbackSetup(technical, candles); // retroceso a favor de tendencia (continuación)
   const squeeze = squeezeSetup(technical, candles); // "por explotar": compresión de volatilidad
   const gap = computeGap(candles, technical); // radar de gaps de apertura, sin pedidos extra
+  // Liquidez aproximada del subyacente (volumen medio 20 ruedas × precio, USD) —
+  // proxy razonable de si el CEDEAR se puede operar sin problemas en BYMA.
+  const vArr = candles.v || [];
+  const volN = vArr.slice(-21, -1).filter(x => x > 0);
+  const avgVol = volN.length ? volN.reduce((a, b) => a + b, 0) / volN.length : 0;
   return {
     name: asset?.name ?? ticker, sector: asset?.sector ?? null, category: asset?.category ?? null,
+    liquidityUsd: avgVol > 0 && quote.usd > 0 ? avgVol * quote.usd : null,
     price: quote.usd, changePct: quote.changePct,
     cedearArs: quote.cedearArs ?? null, // precio del CEDEAR en pesos — null para cripto, que no tiene CEDEAR
     cedearSource: quote.cedearSource ?? null, // 'live' (precio real BYMA) | 'estimated' (vía CCL) | null
@@ -11165,6 +11315,7 @@ function directionalSetup(technical, candles, dir) {
   const stop = long ? Math.max(swingLow - 0.2 * atr, price - 1.5 * atr) : Math.min(swingHigh + 0.2 * atr, price + 1.5 * atr);
   const target1 = long ? price + 1.5 * atr : price - 1.5 * atr;
   const target2 = long ? price + 2.5 * atr : price - 2.5 * atr;
+  const target3 = long ? price + 4 * atr : price - 4 * atr; // objetivo extendido (runner)
   const risk = Math.abs(price - stop), reward = Math.abs(target1 - price);
   const rr = risk > 0 ? reward / risk : null;
   // Gatillo de entrada: confirmación al superar el extremo de la última rueda.
@@ -11172,7 +11323,9 @@ function directionalSetup(technical, candles, dir) {
 
   return {
     direction: dir, score, triggers, risks,
-    entry: price, stop, target1, target2, rr,
+    entry: price, stop, target1, target2, target3, rr, atr,
+    stopDistPct: (risk / price) * 100, // distancia al stop en %
+    volRatio: volRatio != null ? volRatio : null, // volumen de la última rueda vs. promedio 20
     entryTrigger, invalidation: stop,
     expectedMovePct: (atr / price) * 100,
   };
@@ -11341,6 +11494,28 @@ function squeezeSetup(technical, candles) {
   };
 }
 
+// Estrategias con nombre propio: cada setup se clasifica por su gatillo primario
+// dominante, para que sepas QUÉ estás operando (y filtrar por tipo).
+const SHORT_STRATEGIES = {
+  squeeze:  { label: 'Squeeze', icon: '🎯', explain: 'La volatilidad estuvo comprimida (Bollinger dentro de Keltner) y recién se liberó. Suele arrancar un movimiento direccional fuerte — se opera el arranque.' },
+  breakout: { label: 'Ruptura', icon: '🚀', explain: 'El precio rompió el máximo/mínimo de las últimas 20 ruedas, idealmente con volumen. Se opera la continuación del quiebre.' },
+  reversal: { label: 'Reversión', icon: '🔄', explain: 'RSI girando desde un extremo y/o divergencia contra el precio. Se busca el giro tras un exceso — objetivo corto y stop ajustado.' },
+  momentum: { label: 'Momentum', icon: '⚡', explain: 'Cruce fresco de MACD a favor: el impulso acaba de cambiar de lado. Entrada temprana al nuevo tramo.' },
+  pullback: { label: 'Pullback', icon: '↩️', explain: 'Dentro de una tendencia, el precio corrigió a una media (EMA) y la retomó. Entrada a favor de la tendencia con riesgo ajustado.' },
+  trend:    { label: 'Tendencia', icon: '📈', explain: 'Tendencia fuerte y alineada (ADX + EMAs ordenadas). Se acompaña la dirección dominante mientras dure.' },
+};
+function classifyShortStrategy(setup) {
+  const labels = (setup.triggers || []).map(t => t.label);
+  const has = (re) => labels.some(l => re.test(l));
+  if (has(/Squeeze/i)) return 'squeeze';
+  if (has(/Ruptura de (máximos|mínimos)/i)) return 'breakout';
+  if (has(/Divergencia|RSI girando/i)) return 'reversal';
+  if (has(/Cruce (alcista|bajista) de MACD/i)) return 'momentum';
+  if (has(/Recuperó la EMA20|Perdió la EMA20/i)) return 'pullback';
+  if (has(/Tendencia .* fuerte/i)) return 'trend';
+  return 'momentum';
+}
+
 function shortTermSetup(technical, candles) {
   const c = candles.c;
   const n = c.length;
@@ -11355,10 +11530,15 @@ function shortTermSetup(technical, candles) {
 
   const hasPrimary = best.triggers.some(t => t.primary);
   const qualifies = hasPrimary && best.score >= 45;
+  // "Casi listo": tiene un gatillo primario pero todavía no llega al umbral de
+  // calificación — para la sección de vigilancia (a punto de gatillar).
+  const nearReady = !qualifies && hasPrimary && best.score >= 34;
 
   return {
     ...best,
     qualifies,
+    nearReady,
+    strategy: classifyShortStrategy(best),
     narrative: setupNarrative(technical, candles, best),
     timeStopDays: 3, // los setups de corto plazo caducan: si no se activa en ~3 ruedas, se descarta
     confidence: best.score >= 75 ? 'muy alta' : best.score >= 60 ? 'alta' : best.score >= 45 ? 'media' : 'baja',
