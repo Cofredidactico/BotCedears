@@ -370,26 +370,70 @@ const Live = {
 };
 
 /* ═══════════════════════ CoinGecko directo (cripto, sin key) ═══════════════ */
+// Kraken usa "XBT" para Bitcoin; el resto suele coincidir con el ticker + USD.
+const KRAKEN_PAIR = { BTC: 'XBTUSD', ETH: 'ETHUSD' };
+
 const Crypto = {
   async getQuote(ticker, coingeckoId) {
     return cached('cgq:' + ticker, QUOTE_TTL_MS, async () => {
-      const r = await fetch(`${COINGECKO}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true`);
-      if (!r.ok) throw new Error('coingecko quote ' + r.status);
+      // Cadena de fuentes: si CoinGecko está saturado (rate limit, muy común en
+      // el free tier), NO se cae al precio semilla del universo (que dejaba a
+      // BTC "clavado" en US$60.000). Kraken da precio + apertura del día (→ %
+      // 24h); Coinbase, solo el precio spot. Todas gratis y con CORS.
+      // 1) CoinGecko — precio + cambio 24h en una sola llamada.
+      try {
+        const r = await fetch(`${COINGECKO}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true`);
+        if (r.ok) {
+          const d = await r.json();
+          const e = d[coingeckoId];
+          if (e && e.usd > 0) return { usd: e.usd, changePct: e.usd_24h_change ?? 0, cedearArs: null, volumeArsM: null, isReal: true };
+        }
+      } catch (_) { /* sigo con el próximo proveedor */ }
+      // 2) Kraken — último precio (c[0]) y apertura del día (o) → cambio 24h.
+      try {
+        const pair = KRAKEN_PAIR[ticker] || (ticker + 'USD');
+        const r = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${encodeURIComponent(pair)}`);
+        if (r.ok) {
+          const d = await r.json();
+          const k = Object.values(d?.result || {})[0];
+          const last = parseFloat(k?.c?.[0]);
+          const open = parseFloat(k?.o);
+          if (last > 0) return { usd: last, changePct: open > 0 ? (last / open - 1) * 100 : 0, cedearArs: null, volumeArsM: null, isReal: true };
+        }
+      } catch (_) { /* sigo con el último proveedor */ }
+      // 3) Coinbase — precio spot (sin cambio 24h).
+      const r = await fetch(`https://api.coinbase.com/v2/prices/${ticker}-USD/spot`);
+      if (!r.ok) throw new Error('cripto: todas las fuentes fallaron (última: coinbase ' + r.status + ')');
       const d = await r.json();
-      const entry = d[coingeckoId];
-      if (!entry) throw new Error('coingecko: id desconocido');
-      return { usd: entry.usd, changePct: entry.usd_24h_change ?? 0, cedearArs: null, volumeArsM: null, isReal: true };
+      const amt = parseFloat(d?.data?.amount);
+      if (!(amt > 0)) throw new Error('cripto: sin precio válido');
+      return { usd: amt, changePct: 0, cedearArs: null, volumeArsM: null, isReal: true };
     });
   },
   async getCandles(ticker, coingeckoId, days = 180) {
     return cached('cgc:' + ticker, CANDLES_TTL_MS_DAILY, async () => {
-      const r = await fetch(`${COINGECKO}/coins/${coingeckoId}/ohlc?vs_currency=usd&days=${days}`);
-      if (!r.ok) throw new Error('coingecko ohlc ' + r.status);
-      const rows = await r.json(); // [ [time,o,h,l,c], ... ]
+      // 1) CoinGecko OHLC (sin volumen en el free tier).
+      try {
+        const r = await fetch(`${COINGECKO}/coins/${coingeckoId}/ohlc?vs_currency=usd&days=${days}`);
+        if (r.ok) {
+          const rows = await r.json(); // [ [time,o,h,l,c], ... ]
+          if (Array.isArray(rows) && rows.length) {
+            const o = [], h = [], l = [], c = [], v = [], t = [];
+            for (const row of rows) { o.push(row[1]); h.push(row[2]); l.push(row[3]); c.push(row[4]); v.push(0); t.push(new Date(row[0]).toISOString().slice(0, 10)); }
+            return { o, h, l, c, v, t, isReal: true };
+          }
+        }
+      } catch (_) { /* sigo con Kraken */ }
+      // 2) Kraken OHLC diario (además trae volumen real) — respaldo cuando
+      // CoinGecko está saturado, para no caer a velas simuladas.
+      const pair = KRAKEN_PAIR[ticker] || (ticker + 'USD');
+      const r = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${encodeURIComponent(pair)}&interval=1440`);
+      if (!r.ok) throw new Error('kraken ohlc ' + r.status);
+      const d = await r.json();
+      const rows = Object.values(d?.result || {}).find(Array.isArray); // [ [time,o,h,l,c,vwap,vol,count], ... ]
+      if (!rows || !rows.length) throw new Error('kraken ohlc: sin datos');
       const o = [], h = [], l = [], c = [], v = [], t = [];
-      for (const row of rows) { o.push(row[1]); h.push(row[2]); l.push(row[3]); c.push(row[4]); v.push(0); t.push(new Date(row[0]).toISOString().slice(0, 10)); }
-      // CoinGecko OHLC gratuito no trae volumen — se documenta como no disponible,
-      // liquidez/OBV/VWAP quedan en N/D para cripto en vez de inventarse.
+      for (const row of rows) { o.push(+row[1]); h.push(+row[2]); l.push(+row[3]); c.push(+row[4]); v.push(+row[6]); t.push(new Date(row[0] * 1000).toISOString().slice(0, 10)); }
       return { o, h, l, c, v, t, isReal: true };
     });
   },
