@@ -3056,3 +3056,11 @@ body::after {
 .short-strat-reliab { margin-top:8px; font-size:12.5px; line-height:1.5; color:var(--text-mute); }
 .short-strat-reliab-badge { display:inline-flex; align-items:center; gap:3px; font-weight:600; padding:1px 7px; border-radius:7px; background:var(--surface-2, rgba(255,255,255,.05)); border:1px solid var(--border, rgba(255,255,255,.09)); color:var(--text); }
 .short-strat-reliab .up { color:var(--up); } .short-strat-reliab .down { color:var(--down); }
+
+/* ── Portfolio: patrimonio real + exposición ── */
+.pmh-svg { width:100%; height:120px; display:block; margin:6px 0 4px; }
+.pmh-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.pmh-chip { flex:1 1 auto; min-width:88px; text-align:center; padding:8px 8px; border-radius:9px; background:var(--surface-2, rgba(255,255,255,.03)); border:1px solid var(--border, rgba(255,255,255,.07)); }
+.pmh-chip-l { display:block; font-size:10.5px; color:var(--text-mute); }
+.pmh-chip-v { display:block; font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:1px; }
+.pmh-chip-v.up { color:var(--up); } .pmh-chip-v.down { color:var(--down); }

@@ -7449,6 +7449,30 @@ function logPortFlow(flow) {
 function deletePortFlow(id) {
   lsSetSafe(PORT_FLOWS_KEY, JSON.stringify(getPortFlows().filter(f => String(f.id) !== String(id))));
 }
+
+/* ── Historial de patrimonio REAL (snapshot diario) ──────────────────────────
+ * A diferencia de la "curva de valor" (que reconstruye el pasado con los precios
+ * actuales asumiendo las mismas tenencias de siempre), esto guarda el valor
+ * REAL de tu cartera cada día — capturando altas/bajas de posiciones y aportes.
+ * Se registra una vez por día al abrir Portfolio; sincroniza a la nube como
+ * cualquier icp_* (menos las cachés). Es la película real de tu progreso. */
+const PORT_HISTORY_KEY = 'icp_port_history';
+const PORT_HISTORY_MAX = 800; // ~3 años de ruedas
+function getPortHistory() {
+  try { const v = JSON.parse(localStorage.getItem(PORT_HISTORY_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+// Registra/actualiza el snapshot de HOY (idempotente por fecha: si ya hay uno
+// hoy, lo pisa con el valor más fresco). Sin valor válido, no hace nada.
+function recordPortSnapshot(valueUsd, valueArs) {
+  if (!(valueUsd > 0) && !(valueArs > 0)) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const list = getPortHistory();
+  const last = list[list.length - 1];
+  const entry = { date: today, valueUsd: valueUsd > 0 ? Math.round(valueUsd) : null, valueArs: valueArs > 0 ? Math.round(valueArs) : null };
+  if (last && last.date === today) list[list.length - 1] = entry;
+  else list.push(entry);
+  try { localStorage.setItem(PORT_HISTORY_KEY, JSON.stringify(list.slice(-PORT_HISTORY_MAX))); } catch { /* no-op */ }
+}
 function cashFlowsSummary() {
   const flows = getPortFlows();
   let deposits = 0, withdrawals = 0;
@@ -9513,9 +9537,119 @@ function portfolioPreMarketCardHTML(holdings) {
     </div>`;
 }
 
+/* ── #1 Historial de patrimonio REAL ── */
+function portfolioHistorySVG(pts, flows) {
+  const w = 560, h = 120, pad = 6;
+  const vals = pts.map(p => p.v);
+  const min = Math.min(...vals), max = Math.max(...vals), span = (max - min) || 1;
+  const t0 = new Date(pts[0].date + 'T00:00:00').getTime();
+  const t1 = new Date(pts[pts.length - 1].date + 'T00:00:00').getTime();
+  const tspan = (t1 - t0) || 1;
+  const x = (date) => pad + ((new Date(date + 'T00:00:00').getTime() - t0) / tspan) * (w - 2 * pad);
+  const y = (v) => h - pad - ((v - min) / span) * (h - 2 * pad);
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.date).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ');
+  const area = `${line} L ${x(pts[pts.length - 1].date).toFixed(1)} ${h - pad} L ${x(pts[0].date).toFixed(1)} ${h - pad} Z`;
+  const up = pts[pts.length - 1].v >= pts[0].v;
+  const col = up ? 'var(--up)' : 'var(--down)';
+  const marks = (flows || []).filter(f => { const t = new Date(f.date + 'T00:00:00').getTime(); return t >= t0 && t <= t1; }).map(f => {
+    const isDep = f.type !== 'withdrawal';
+    return `<circle cx="${x(f.date).toFixed(1)}" cy="${(h - pad - 2).toFixed(1)}" r="3" fill="${isDep ? 'var(--up)' : 'var(--down)'}"><title>${isDep ? 'Aporte' : 'Retiro'} ${esc(f.date)}</title></circle>`;
+  }).join('');
+  return `<svg class="pmh-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <path d="${area}" fill="${col}" opacity="0.12"/>
+    <path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${marks}
+  </svg>`;
+}
+function portfolioRealHistoryCardHTML() {
+  const hist = getPortHistory();
+  const useArs = hist.some(p => p.valueArs != null);
+  const pts = hist.map(p => ({ date: p.date, v: useArs ? p.valueArs : p.valueUsd })).filter(p => p.v != null);
+  const fmt = useArs ? fmtArs : fmtUsd;
+  const title = `Patrimonio real <span class="risk-days-note">— registro diario (${useArs ? 'ARS' : 'USD'})</span>`;
+  if (pts.length < 2) {
+    return `<div class="card port-notes-card">
+      <div class="dash-radar-title">${title}</div>
+      <div class="port-note" style="color:var(--text-mute);">📈 Empezamos a registrar el valor real de tu cartera cada día. Volvé mañana (y los días siguientes) para ver tu <strong>curva de patrimonio real</strong> armándose — captura tu valor de verdad, incluyendo aportes y cambios de posiciones, no una reconstrucción.</div>
+    </div>`;
+  }
+  let peak = -Infinity, maxDD = 0;
+  for (const p of pts) { if (p.v > peak) peak = p.v; const dd = (p.v - peak) / peak; if (dd < maxDD) maxDD = dd; }
+  const nowV = pts[pts.length - 1].v;
+  const snapshot = (days) => {
+    const target = Date.now() - days * 86400000;
+    let chosen = null;
+    for (const p of pts) { if (new Date(p.date + 'T00:00:00').getTime() <= target) chosen = p; }
+    return (chosen && chosen.v > 0) ? (nowV - chosen.v) / chosen.v * 100 : null;
+  };
+  const chips = [['7 días', 7], ['30 días', 30], ['90 días', 90]].map(([lbl, d]) => {
+    const c = snapshot(d);
+    return c == null ? '' : `<div class="pmh-chip"><span class="pmh-chip-l">vs ${lbl}</span><span class="pmh-chip-v ${c >= 0 ? 'up' : 'down'}">${c >= 0 ? '+' : ''}${c.toFixed(1)}%</span></div>`;
+  }).join('');
+  const first = pts[0];
+  return `<div class="card port-notes-card">
+    <div class="dash-radar-title">${title}</div>
+    <div class="port-note" style="padding:0 0 8px; color:var(--text-mute);">El valor REAL de tu cartera día a día (${pts.length} registro(s) desde ${esc(first.date)}). Los puntos <span style="color:var(--up);">●</span> marcan aportes y <span style="color:var(--down);">●</span> retiros, para no confundir "entró plata" con "ganó plata".</div>
+    ${portfolioHistorySVG(pts, getPortFlows())}
+    <div class="pmh-chips">
+      <div class="pmh-chip"><span class="pmh-chip-l">Ahora</span><span class="pmh-chip-v">${pv(fmt(nowV))}</span></div>
+      ${chips}
+      <div class="pmh-chip"><span class="pmh-chip-l">Drawdown máx.</span><span class="pmh-chip-v down">${(maxDD * 100).toFixed(1)}%</span></div>
+    </div>
+  </div>`;
+}
+
+/* ── #2 Exposición (moneda/economía) + concentración + VaR + cash drag ── */
+function portfolioExposureCardHTML(stats, risk) {
+  const rows = stats.rows.filter(r => r.value != null && r.value > 0);
+  const total = rows.reduce((s, r) => s + r.value, 0);
+  if (total <= 0) return '';
+  let ar = 0, global = 0, crypto = 0;
+  for (const r of rows) {
+    if (r.d?.category === 'Cripto') crypto += r.value;
+    else if (AR_TICKERS.has(r.ticker)) ar += r.value;
+    else global += r.value;
+  }
+  const buckets = [
+    { k: '🌎 Global / USD', v: global, note: 'Acciones y ETFs de EE.UU. — dólar-linked' },
+    { k: '🇦🇷 Argentina', v: ar, note: 'Empresas argentinas — expuestas a la economía en pesos' },
+    { k: '₿ Cripto', v: crypto, note: 'Bitcoin/Ethereum y afines' },
+  ].filter(b => b.v > 0);
+  const bar = buckets.map(b => `<div class="score-row" style="grid-template-columns:150px 1fr 46px;"><span class="score-label" title="${esc(b.note)}">${b.k}</span><div class="score-bar-bg"><div class="score-bar-fill" style="width:${Math.round(b.v / total * 100)}%;"></div></div><span class="score-fraction">${Math.round(b.v / total * 100)}%</span></div>`).join('');
+  const weighted = rows.map(r => ({ t: r.ticker, w: r.value / total })).sort((a, b) => b.w - a.w);
+  const heavy = weighted.filter(r => r.w > 0.20);
+  const top = weighted[0];
+  let varHTML = '';
+  if (risk?.portfolioReturns?.length >= 30 && stats.totalValueArs != null) {
+    const rr = risk.portfolioReturns.slice().sort((a, b) => a - b);
+    const p5 = rr[Math.floor(rr.length * 0.05)];
+    const day = Math.abs(p5) * 100, month = day * Math.sqrt(21);
+    const dayArs = Math.abs(p5) * stats.totalValueArs, monthArs = dayArs * Math.sqrt(21);
+    varHTML = `<div class="port-note" style="margin-top:10px;"><b>📉 VaR 95% (peor escenario típico):</b> en 1 de cada 20 días malos tu cartera podría caer <b class="down">≈ ${day.toFixed(1)}%</b> (${pv(fmtArs(dayArs))}); en un mes malo, <b class="down">≈ ${month.toFixed(1)}%</b> (${pv(fmtArs(monthArs))}).${risk.worstMonth != null ? ` El peor mes real del histórico fue <b class="down">${(risk.worstMonth * 100).toFixed(1)}%</b>.` : ''}</div>`;
+  }
+  let cashHTML = '';
+  const summary = portfolioDidacticSummary(stats);
+  const idle = summary?.availableReal, acct = summary?.accountNow;
+  if (idle != null && acct > 0) {
+    const pct = idle / acct * 100;
+    cashHTML = `<div class="port-note" style="margin-top:8px;">💵 <b>Efectivo parado (cash drag):</b> ${pv(fmtArs(Math.max(0, idle)))} (${pct.toFixed(0)}% de la cuenta).${pct >= 15 ? ' Es bastante — ponerlo a trabajar evita que la inflación se lo coma.' : pct < 0 ? ' Figurás invertido por encima de tu cuenta declarada; revisá el total de cuenta.' : ''}</div>`;
+  }
+  return `<div class="card port-notes-card">
+    <div class="dash-radar-title">Exposición y riesgo</div>
+    <div class="port-note" style="padding:0 0 10px; color:var(--text-mute);">Cómo está repartido tu riesgo por moneda/economía, tu concentración y tu peor escenario típico.</div>
+    ${bar}
+    ${top ? `<div class="port-note" style="margin-top:10px;">${heavy.length ? `⚠ <b>Concentración alta:</b> ${heavy.map(r => `${esc(r.t)} ${Math.round(r.w * 100)}%`).join(', ')} — cada uno pesa más del 20% de la cartera.` : `✓ Sin posiciones que superen el 20% (la mayor es ${esc(top.t)} con ${Math.round(top.w * 100)}%).`}</div>` : ''}
+    ${varHTML}
+    ${cashHTML}
+  </div>`;
+}
+
 function portfolioHTML() {
   const holdings = getPortfolio();
   const stats = holdings.length ? computePortfolioStats(holdings) : null;
+  // Snapshot diario del patrimonio real (idempotente por fecha) — solo cuando
+  // el valor ya está resuelto (no en el estado de carga inicial con valor 0).
+  if (stats && (stats.totalValue > 0 || stats.totalValueArs > 0) && holdings.every(h => portState.data[h.ticker])) recordPortSnapshot(stats.totalValue, stats.totalValueArs);
   const risk = stats ? computePortfolioRiskMetrics(stats.rows, portState.macro, portState.spy) : null;
   const health = stats ? computePortfolioHealth(stats, risk) : null;
   const notes = stats ? portfolioRiskNotes(stats, risk) : [];
@@ -9611,6 +9745,8 @@ function portfolioHTML() {
     ` : ''}
 
     ${tab === 'riesgo' ? `
+      ${portfolioRealHistoryCardHTML()}
+      ${portfolioExposureCardHTML(stats, risk)}
       ${riskMetricsCardHTML(risk, holdings.length)}
       ${equityCurveCardHTML(stats)}
       ${monteCarloCardHTML(mc)}
