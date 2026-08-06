@@ -3131,6 +3131,28 @@ body::after {
 .stk-note-input { width:100%; box-sizing:border-box; font-size:12.5px; padding:6px 9px; border-radius:8px; border:1px solid var(--border, rgba(255,255,255,.1)); background:var(--surface, rgba(255,255,255,.02)); color:var(--text); font-family:inherit; }
 .stk-note-input:focus { outline:none; border-color:color-mix(in oklab, var(--accent, #7c5cff) 55%, transparent); }
 
+/* ── Sesgo del día + gappers ── */
+.daybias-card { padding:16px 18px; }
+.daybias-regime { font-size:13px; margin:4px 0 12px; }
+.daybias-regime.up { color:var(--up-text, #4ade80); } .daybias-regime.down { color:var(--down-text, #f87171); } .daybias-regime.flat { color:var(--gold-text, #eab308); }
+.daybias-movers-head { font-size:11.5px; font-weight:600; letter-spacing:.3px; text-transform:uppercase; color:var(--text-mute); margin-bottom:8px; }
+.daybias-movers { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.daybias-col-t { display:block; font-size:11px; font-weight:700; margin-bottom:6px; }
+.daybias-col-t.up { color:var(--up-text, #4ade80); } .daybias-col-t.down { color:var(--down-text, #f87171); }
+.daybias-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.daybias-chip { font-size:12px; font-family:'IBM Plex Mono', monospace; padding:4px 9px; border-radius:8px; border:1px solid var(--border, rgba(255,255,255,.1)); background:var(--surface-2, rgba(255,255,255,.03)); color:var(--text-dim); cursor:pointer; transition:border-color .12s, color .12s; }
+.daybias-chip:hover { border-color:var(--accent, #7c5cff); color:var(--text); }
+.daybias-chip.up b { color:var(--up-text, #4ade80); } .daybias-chip.down b { color:var(--down-text, #f87171); }
+@media (max-width:560px){ .daybias-movers { grid-template-columns:1fr; } }
+
+/* ── Escáner intradía (15 min) ── */
+.intraday-bar { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:10px; }
+.intraday-ts { font-size:11.5px; color:var(--text-faint); }
+.intraday-metrics { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 2px; }
+.intraday-chip { font-size:11px; font-weight:600; padding:3px 9px; border-radius:999px; background:var(--surface-2, rgba(255,255,255,.04)); border:1px solid var(--border, rgba(255,255,255,.08)); color:var(--text-dim); font-family:'IBM Plex Mono', monospace; }
+.intraday-chip.up { color:var(--up-text, #4ade80); border-color:color-mix(in oklch, var(--up-text) 35%, transparent); }
+.intraday-chip.down { color:var(--down-text, #f87171); border-color:color-mix(in oklch, var(--down-text) 35%, transparent); }
+
 /* ── Calculadora de posición ── */
 .shortcalc-card { padding:16px 18px; }
 .shortcalc-inputs { display:flex; flex-wrap:wrap; gap:10px; }

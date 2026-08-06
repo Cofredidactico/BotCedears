@@ -5547,6 +5547,41 @@ function shortMarketRegimeHTML() {
   return `<div class="short-regime ${r.cls}"><span class="short-regime-lamp">${r.icon}</span><div><div class="short-regime-title">Régimen de mercado: <b>${esc(r.label)}</b></div><div class="short-regime-note">${esc(r.note)}</div></div></div>`;
 }
 
+/** Sesgo del día: cruza el régimen (largos/cortos) con los que más se mueven —
+ *  gappers de pre-market si estamos en ese horario, o los mayores movimientos
+ *  del día en otro caso — para armar el foco de la jornada de un vistazo. */
+function dayBiasCardHTML() {
+  const r = shortMarketRegime();
+  const isPre = typeof isPreMarketNow === 'function' && isPreMarketNow();
+  let movers = [];
+  if (isPre) for (const [tk, p] of Object.entries(dashState.premarket || {})) {
+    if (p && p.prePct != null && Math.abs(p.prePct) >= 1) movers.push({ ticker: tk, pct: p.prePct, src: 'pre' });
+  }
+  const usedPre = movers.length > 0;
+  if (!movers.length) for (const [tk, d] of Object.entries(dashState.data || {})) {
+    if (d && typeof d.changePct === 'number' && Math.abs(d.changePct) >= 1.5) movers.push({ ticker: tk, pct: d.changePct });
+  }
+  if (!r && !movers.length) return '';
+  const ups = movers.filter(m => m.pct > 0).sort((a, b) => b.pct - a.pct).slice(0, 6);
+  const downs = movers.filter(m => m.pct < 0).sort((a, b) => a.pct - b.pct).slice(0, 6);
+  const chip = (m, cls) => `<button class="daybias-chip ${cls}" data-short-ticker="${esc(m.ticker)}">${esc(m.ticker)} <b>${m.pct >= 0 ? '+' : ''}${m.pct.toFixed(1)}%</b></button>`;
+  const focusNote = r && r.cls === 'up' ? 'Contexto a favor de <b>largos</b>: priorizá continuaciones en los que suben.'
+    : r && r.cls === 'down' ? 'Contexto a favor de <b>cortos</b>: los que caen con fuerza son candidatos; cuidado con los largos.'
+    : 'Sin sesgo claro del mercado: operá selectivo y con setups de mayor confianza.';
+  return `
+    <div class="card daybias-card">
+      <div class="dash-radar-title">🧭 Sesgo del día</div>
+      ${r ? `<div class="daybias-regime ${r.cls}">${r.icon} Sesgo sugerido: <b>${esc(r.label)}</b></div>` : ''}
+      ${(ups.length || downs.length) ? `
+      <div class="daybias-movers-head">${usedPre ? '⚡ Gappers de pre-market (EE.UU.)' : '📊 Mayores movimientos del día'}</div>
+      <div class="daybias-movers">
+        ${ups.length ? `<div class="daybias-col"><span class="daybias-col-t up">▲ Suben</span><div class="daybias-chips">${ups.map(m => chip(m, 'up')).join('')}</div></div>` : ''}
+        ${downs.length ? `<div class="daybias-col"><span class="daybias-col-t down">▼ Bajan</span><div class="daybias-chips">${downs.map(m => chip(m, 'down')).join('')}</div></div>` : ''}
+      </div>` : `<div class="port-mini-note" style="margin-top:6px;">Todavía no hay movimientos fuertes cargados — cuando el Dashboard termine de cargar, aparecen acá.</div>`}
+      <div class="port-mini-note" style="margin-top:8px;">${focusNote}</div>
+    </div>`;
+}
+
 /* Gestión del riesgo del "libro" de trades abiertos: heat total, circuit
  * breaker de pérdida diaria, tamaño óptimo (Kelly fraccionado) desde tu
  * historial, y guardia de correlación entre posiciones abiertas. Es lo que más
@@ -5600,6 +5635,145 @@ function shortBookRiskHTML() {
 
 /* Seguimiento de trades cortos tomados: R actual, P&L y progreso al objetivo en
  * vivo, usando el último precio del universo/watchlist. */
+/* ── ⚡ Escáner INTRADÍA (velas de 15 min) ───────────────────────────────────
+ * Setup de muy corto plazo (horas): activos en estructura alcista sobre la
+ * EMA200 de 15m que además tuvieron gap de apertura y/o rebotaron aguantando
+ * en la EMA200 (soporte dinámico intradía). Incluye una tasa de acierto
+ * EMPÍRICA medida sobre la propia serie del activo — nunca un % inventado.
+ * Corre BAJO DEMANDA (botón) para no saturar las fuentes de velas. */
+const intradayState = { loading: false, scanned: false, results: [], ts: null, err: null };
+
+// Agrupa índices de velas por fecha: en 15m el t[] viene date-only, así que
+// cada fecha distinta es una sesión (rueda). Devuelve [{date, from, to}].
+function groupSessions(t) {
+  const sess = [];
+  for (let i = 0; i < t.length; i++) {
+    const last = sess[sess.length - 1];
+    if (last && last.date === t[i]) last.to = i;
+    else sess.push({ date: t[i], from: i, to: i });
+  }
+  return sess;
+}
+
+function intradaySetup(candles) {
+  const c = candles.c, h = candles.h, l = candles.l, o = candles.o, t = candles.t || [];
+  const n = c.length;
+  if (n < 60) return null;
+  const emaP = n >= 210 ? 200 : Math.min(100, Math.floor(n / 2)); // EMA de referencia
+  const emaArr = ema(c, emaP);
+  const price = c[n - 1], emaNow = emaArr[n - 1];
+  if (!(emaNow > 0)) return null;
+  const rsiArr = rsi(c, 14), rsiNow = rsiArr[n - 1];
+  const sessions = groupSessions(t);
+  const today = sessions[sessions.length - 1], prev = sessions[sessions.length - 2];
+  // Gap de apertura de hoy vs cierre de la sesión previa.
+  let gapPct = null;
+  if (today && prev) { const prevClose = c[prev.to], todayOpen = o[today.from]; if (prevClose > 0) gapPct = (todayOpen - prevClose) / prevClose * 100; }
+  // Toques a la EMA que aguantaron en las últimas ~2 sesiones (low tocó la EMA
+  // pero la vela cerró por encima → soporte dinámico defendido).
+  const scanFrom = prev ? prev.from : Math.max(0, n - 52);
+  let touches = 0;
+  for (let i = scanFrom; i < n; i++) { const e = emaArr[i]; if (e > 0 && l[i] <= e * 1.002 && c[i] > e) touches++; }
+  // Tasa de acierto EMPÍRICA: en toda la serie, tras un toque que aguantó,
+  // ¿el precio estaba más arriba 8 velas (≈2h) después?
+  const HORIZON = 8; let hits = 0, sample = 0;
+  for (let i = emaP; i < n - HORIZON; i++) { const e = emaArr[i]; if (e > 0 && l[i] <= e * 1.002 && c[i] > e) { sample++; if (c[i + HORIZON] > c[i]) hits++; } }
+  const bounceRate = sample >= 5 ? Math.round(hits / sample * 100) : null;
+  const aboveEma = price > emaNow;
+  let score = 0; const triggers = [];
+  if (aboveEma) { score += 30; triggers.push(`Precio sobre la EMA${emaP} de 15m — estructura alcista intradía`); }
+  if (touches >= 2) { score += 26; triggers.push(`${touches} rebotes que aguantaron en la EMA${emaP} — soporte firme`); }
+  else if (touches === 1) { score += 12; triggers.push(`Tocó y aguantó la EMA${emaP} una vez`); }
+  if (gapPct != null && gapPct > 0.5) { score += 18; triggers.push(`Gap alcista de apertura (+${gapPct.toFixed(1)}%)`); }
+  if (bounceRate != null && bounceRate >= 60) { score += 16; triggers.push(`Histórico intradía: subió el ${bounceRate}% de las veces tras tocar la EMA (${sample} casos)`); }
+  if (rsiNow != null && rsiNow > 40 && rsiNow < 68) score += 8;
+  if (rsiNow != null && rsiNow >= 72) { score -= 10; }
+  score = Math.max(0, Math.min(100, score));
+  // Plan intradiario: stop bajo la EMA (invalidación), objetivos por múltiplos del riesgo.
+  let atr15 = 0, k = 0;
+  for (let i = Math.max(1, n - 20); i < n; i++) { atr15 += Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])); k++; }
+  atr15 = k ? atr15 / k : (h[n - 1] - l[n - 1]);
+  const stop = Math.min(emaNow * 0.997, price - 1.2 * atr15);
+  const risk = price - stop;
+  const target1 = price + 1.5 * risk, target2 = price + 2.5 * risk;
+  const rr = risk > 0 ? (target1 - price) / risk : null;
+  const qualifies = aboveEma && score >= 50 && (touches >= 1 || (gapPct != null && gapPct > 0.5));
+  const confidence = score >= 74 ? 'muy alta' : score >= 60 ? 'alta' : score >= 48 ? 'media' : 'baja';
+  return { qualifies, score, confidence, price, ema: emaNow, emaP, gapPct, touches, bounceRate, bounceSample: sample, rsi: rsiNow, entry: price, stop, target1, target2, rr, triggers };
+}
+
+async function scanIntraday() {
+  if (intradayState.loading) return;
+  intradayState.loading = true; intradayState.err = null;
+  if (state.view === 'shorttrades' && !state.asset) renderReport();
+  try {
+    const wl = getWatchlist();
+    const pool = [...new Set([...wl, ...DASHBOARD_UNIVERSE])]
+      .filter(tk => { const a = universe.find(x => x.ticker === tk); return a && a.category !== 'Cripto'; })
+      .slice(0, 18); // capado para no saturar la fuente de velas
+    const results = [];
+    const CONC = 4;
+    for (let i = 0; i < pool.length; i += CONC) {
+      await Promise.all(pool.slice(i, i + CONC).map(async tk => {
+        try {
+          const cd = await getCandles(tk, '15min', 260);
+          if (!cd || cd.isReal === false || !cd.c || cd.c.length < 60) return;
+          const s = intradaySetup(cd);
+          if (s && s.qualifies) results.push({ ticker: tk, s });
+        } catch { /* símbolo sin velas intradía: se omite */ }
+      }));
+    }
+    results.sort((a, b) => b.s.score - a.s.score);
+    intradayState.results = results; intradayState.scanned = true; intradayState.ts = Date.now();
+  } catch (e) { intradayState.err = e.message; }
+  finally { intradayState.loading = false; if (state.view === 'shorttrades' && !state.asset) renderReport(); }
+}
+
+function intradayCardItem(ticker, s) {
+  const conf = SHORT_CONF_COLOR[s.confidence] || AMBER;
+  return `<div class="card short-card" data-short-ticker="${esc(ticker)}" style="--dir-color:oklch(0.74 0.14 199);">
+    <div class="short-head">
+      <div><div class="short-ticker">${esc(ticker)} <span class="dcv-cat dcv-cat-cedear">15m</span></div></div>
+      <div class="short-head-right">
+        <span class="short-dir-badge" style="color:oklch(0.86 0.12 199); background:oklch(0.30 0.09 199 / 0.5);">⚡ Intradía</span>
+        <div class="short-conf" style="color:${conf};"><div class="short-conf-score">${s.score}</div><div class="short-conf-label">confianza ${esc(s.confidence)}</div></div>
+      </div>
+    </div>
+    <div class="intraday-metrics">
+      ${s.gapPct != null ? `<span class="intraday-chip ${s.gapPct >= 0 ? 'up' : 'down'}">gap ${s.gapPct >= 0 ? '+' : ''}${s.gapPct.toFixed(1)}%</span>` : ''}
+      <span class="intraday-chip">${s.touches} toque(s) EMA${s.emaP}</span>
+      ${s.bounceRate != null ? `<span class="intraday-chip ${s.bounceRate >= 60 ? 'up' : ''}">subió ${s.bounceRate}% (${s.bounceSample} casos)</span>` : ''}
+      ${s.rsi != null ? `<span class="intraday-chip">RSI ${s.rsi.toFixed(0)}</span>` : ''}
+    </div>
+    <div class="short-triggers" style="margin:8px 0;">${s.triggers.map(x => `<span class="short-chip">${esc(x)}</span>`).join('')}</div>
+    <div class="short-plan">
+      <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
+      <div class="short-plan-cell"><span>Objetivo</span><b class="up">${fmtUsd(s.target1)}</b></div>
+      <div class="short-plan-cell"><span>Stop (EMA)</span><b class="down">${fmtUsd(s.stop)}</b></div>
+      <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
+    </div>
+    ${shortTakeBtn(ticker, 'intraday', 'long', s.entry, s.target1, s.stop, 'intraday')}
+  </div>`;
+}
+
+function intradayCardHTML() {
+  const st = intradayState;
+  return `
+    ${sectionTitleHTML('⚡ Intradía — 15 minutos', 'zap', 'margin-top:34px;')}
+    <div class="dash-intro">Escáner de setups <strong>intradía</strong> sobre velas de 15 min: activos en <strong>estructura alcista sobre la EMA200</strong> que además tuvieron <strong>gap de apertura</strong> y/o <strong>rebotaron aguantando en la EMA200</strong> (soporte dinámico). Cada uno trae su <strong>tasa de acierto histórica</strong> medida sobre la propia serie del activo — no un número inventado. Corre <strong>bajo demanda</strong> para no saturar las fuentes de datos.</div>
+    <div class="card">
+      <div class="intraday-bar">
+        <button class="port-add-btn" id="intraday-scan" ${st.loading ? 'disabled' : ''}>${st.loading ? 'Escaneando…' : (st.scanned ? '↻ Volver a escanear' : '🔍 Escanear intradía')}</button>
+        ${st.ts ? `<span class="intraday-ts">Último escaneo: ${relativeTime(st.ts)}</span>` : ''}
+      </div>
+      ${st.err ? `<div class="port-note">No se pudo completar el escaneo: ${esc(st.err)}</div>` : ''}
+      ${st.loading ? `<div class="dash-loading-note">Analizando velas de 15 min…</div>` : ''}
+      ${!st.loading && st.scanned && !st.results.length ? `<div class="watch-empty">Ningún activo cumple el setup intradiario ahora mismo. El mercado no siempre ofrece entradas claras — probá más tarde o en horario de rueda de EE.UU.</div>` : ''}
+      ${st.results.length ? `<div class="short-grid">${st.results.map(({ ticker, s }) => intradayCardItem(ticker, s)).join('')}</div>` : ''}
+      <div class="stk-foot">Setup especulativo de muy corto plazo (horas). La "tasa de acierto" es histórica sobre este activo, no una garantía. Mejor en horario de mercado de EE.UU. (las velas intradía se congelan fuera de rueda). Operá siempre con stop.</div>
+    </div>`;
+}
+
 /* ── 🧮 Calculadora de posición (banco de trabajo) ───────────────────────────
  * Herramienta autónoma: metés entrada/stop/objetivo + cuenta + riesgo% y te
  * calcula cantidad, riesgo en $, R:R, valor de la posición y breakeven, para
@@ -5782,7 +5956,7 @@ function shortSystemAnalyticsHTML() {
 function shortTakenTradesHTML() {
   const trades = getShortTrades();
   if (!trades.length) return '';
-  const kindLabel = { setup: 'Setup', rebound: 'Rebote', pullback: 'Pullback' };
+  const kindLabel = { setup: 'Setup', rebound: 'Rebote', pullback: 'Pullback', intraday: 'Intradía' };
   const row = (t) => {
     const d = dashState.data[t.ticker] || watchState.data[t.ticker];
     const price = d?.price ?? null;
@@ -6098,9 +6272,13 @@ function shortTradesPageHTML() {
 
     ${shortMarketRegimeHTML()}
 
+    ${dayBiasCardHTML()}
+
     ${shortBookRiskHTML()}
 
     ${shortCalculatorHTML()}
+
+    ${intradayCardHTML()}
 
     ${shortTakenTradesHTML()}
 
@@ -6508,6 +6686,7 @@ function wireShortTradesEvents() {
     document.getElementById('scalc-risk')?.addEventListener('change', recompute);
     recompute(); // primer cálculo si ya hay cuenta precargada
   }
+  document.getElementById('intraday-scan')?.addEventListener('click', () => scanIntraday());
   document.getElementById('short-conf')?.addEventListener('change', e => { shortState.minConf = e.target.value; rerender(); });
   document.getElementById('short-rr')?.addEventListener('change', e => { shortState.minRR = Number(e.target.value); rerender(); });
   document.getElementById('short-cat')?.addEventListener('change', e => { shortState.category = e.target.value; rerender(); });
