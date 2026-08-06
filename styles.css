@@ -402,6 +402,54 @@ a { color: inherit; }
 .port-table td.up { color: var(--up-text); }
 .port-table td.down { color: var(--down-text); }
 .port-pnl-abs { font-size: 11px; color: var(--text-mute); font-family: 'IBM Plex Mono', monospace; }
+
+/* ── Cabecera clicable (ordenar por columna) + thead sticky ── */
+.port-table thead th { position: sticky; top: 0; z-index: 2; }
+.port-th-sort { cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.12s; }
+.port-th-sort:hover { color: var(--accent-text); }
+.port-th-sort.active { color: var(--accent-text); }
+.port-th-dir { margin-left: 3px; font-size: 9px; }
+.port-sort-hint { font-size: 11px; color: var(--text-faint); }
+
+/* ── Micro-barra de P&L por fila (magnitud verde der. / roja izq.) ── */
+.port-pnl-bar { position: relative; display: block; height: 3px; margin-top: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
+.port-pnl-bar i { position: absolute; top: 0; height: 100%; border-radius: 2px; }
+.port-pnl-bar i.up { background: var(--up-text); }
+.port-pnl-bar i.down { background: var(--down-text); }
+
+/* ── Franja de composición de la cartera (barra apilada + leyenda) ── */
+.palloc-card { padding: 14px 16px; margin-bottom: 14px; }
+.palloc-title { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-mute); margin-bottom: 10px; }
+.palloc-bar { display: flex; width: 100%; height: 16px; border-radius: 6px; overflow: hidden; background: var(--surface-2); }
+.palloc-seg { height: 100%; min-width: 1px; transition: opacity 0.12s; }
+.palloc-seg:hover { opacity: 0.82; }
+.palloc-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
+.palloc-leg { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; }
+.palloc-leg i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.palloc-leg b { color: var(--text); }
+.palloc-leg-rest { color: var(--text-faint); }
+
+/* ── Resumen de ganadores/perdedores (chips) ── */
+.pwin-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.pwin-chip { font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); font-family: 'IBM Plex Mono', monospace; }
+.pwin-chip.up { color: var(--up-text); border-color: color-mix(in oklch, var(--up-text) 40%, transparent); }
+.pwin-chip.down { color: var(--down-text); border-color: color-mix(in oklch, var(--down-text) 40%, transparent); }
+.pwin-chip.flat { color: var(--text-mute); }
+.pwin-chip.best { color: var(--up-text); background: color-mix(in oklch, var(--up-text) 12%, transparent); border-color: transparent; }
+.pwin-chip.worst { color: var(--down-text); background: color-mix(in oklch, var(--down-text) 12%, transparent); border-color: transparent; }
+
+/* ── TIR automática de tenencias ── */
+.autotir-box { background: var(--bg-input); border: 1px solid var(--border-soft); border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; }
+.autotir-head { font-size: 11.5px; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase; color: var(--text-mute); margin-bottom: 10px; }
+.autotir-grid { display: flex; flex-wrap: wrap; gap: 10px 22px; }
+.autotir-item { display: flex; flex-direction: column; gap: 1px; }
+.autotir-k { font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.4px; }
+.autotir-item b { font-size: 20px; font-family: 'IBM Plex Mono', monospace; font-weight: 700; }
+.autotir-item b.up { color: var(--up-text); }
+.autotir-item b.down { color: var(--down-text); }
+.autotir-nd { color: var(--text-mute); }
+.autotir-note { font-size: 10.5px; color: var(--text-faint); }
+.autotir-sub { font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-mute); margin: 4px 0 6px; }
 .port-pnl-real { font-size: 10.5px; font-family: 'IBM Plex Mono', monospace; opacity: 0.85; }
 .port-pnl-real.up { color: var(--up-text); }
 .port-pnl-real.down { color: var(--down-text); }
