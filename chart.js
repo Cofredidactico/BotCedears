@@ -78,7 +78,7 @@ function priceExtent(candles, start, opts) {
 }
 
 export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
-  const { support, resistance, plan } = opts;
+  const { support, resistance, plan, poc = null, showVwap = true, showFib = true, showGaps = true } = opts;
   const nTotal = candles.c.length;
   if (nTotal < 5) return '<div class="chart-empty">Historial insuficiente para graficar.</div>';
 
@@ -294,6 +294,49 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
     <span class="${chg >= 0 ? 'csl-up' : 'csl-down'}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</span>
   </div>`;
 
+  /* ── VWAP (precio promedio ponderado por volumen, anclado al inicio de la
+   * ventana) — el "precio justo" donde más se operó; suele actuar de imán. ── */
+  let vwapSvg = '';
+  if (showVwap && hasVolume) {
+    const vwap = []; let cumPV = 0, cumV = 0;
+    for (let i = 0; i < count; i++) { const tp = (h[i] + l[i] + c[i]) / 3; cumPV += tp * (v[i] || 0); cumV += (v[i] || 0); vwap.push(cumV > 0 ? cumPV / cumV : null); }
+    vwapSvg = polyline(vwap, x, yPrice, 'oklch(0.82 0.11 199)', 0.75, 1.3);
+    const vwLast = last(vwap);
+    if (vwLast != null) vwapSvg += `<text x="${(x(count - 1) - 4).toFixed(1)}" y="${(yPrice(vwLast) - 4).toFixed(1)}" fill="oklch(0.82 0.11 199)" font-size="8.5" font-family="IBM Plex Mono, monospace" text-anchor="end">VWAP</text>`;
+  }
+
+  /* ── POC (Volume Profile): el precio de mayor volumen operado — soporte/
+   * resistencia "pesado". Llega ya calculado en opts.poc. ── */
+  let pocSvg = '';
+  if (poc != null && isFinite(poc) && poc >= pMin && poc <= pMax) {
+    const yy = yPrice(poc);
+    pocSvg = `<line x1="${PAD_L}" y1="${yy.toFixed(1)}" x2="${W - PAD_R}" y2="${yy.toFixed(1)}" stroke="${BLUE}" stroke-width="1" stroke-dasharray="5 3" opacity="0.55"/>${pillLabel(W - PAD_R + 6, yy, 'POC ' + niceFmt(poc), BLUE, 'oklch(0.15 0.03 199)')}`;
+  }
+
+  /* ── Fibonacci: retrocesos del swing visible (0,382 / 0,5 / 0,618) — niveles
+   * donde suele frenar/rebotar una corrección. ── */
+  let fibSvg = '';
+  if (showFib) {
+    const fibHi = Math.max(...h), fibLo = Math.min(...l);
+    if (fibHi > fibLo) for (const f of [0.382, 0.5, 0.618]) {
+      const val = fibHi - (fibHi - fibLo) * f;
+      const yy = yPrice(val);
+      fibSvg += `<line x1="${PAD_L}" y1="${yy.toFixed(1)}" x2="${W - PAD_R}" y2="${yy.toFixed(1)}" stroke="${GOLD}" stroke-width="0.8" stroke-dasharray="1 5" opacity="0.38"/><text x="${(PAD_L + 3)}" y="${(yy - 2).toFixed(1)}" fill="${AXIS_TEXT}" font-size="8" font-family="IBM Plex Mono, monospace">fib ${(f * 100).toFixed(1)}</text>`;
+    }
+  }
+
+  /* ── Gaps de apertura: hueco entre el cierre previo y la apertura (>1%) —
+   * el mercado repreció de un salto; se sombrea el hueco. ── */
+  let gapSvg = '';
+  if (showGaps) for (let i = 1; i < count; i++) {
+    const prevC = c[i - 1];
+    if (!(prevC > 0)) continue;
+    const gp = (o[i] - prevC) / prevC;
+    if (Math.abs(gp) < 0.01) continue;
+    const y1 = yPrice(prevC), y2 = yPrice(o[i]);
+    gapSvg += `<rect x="${(x(i) - slot / 2).toFixed(1)}" y="${Math.min(y1, y2).toFixed(1)}" width="${Math.max(1, slot * 0.9).toFixed(1)}" height="${Math.max(1, Math.abs(y1 - y2)).toFixed(1)}" fill="${gp > 0 ? GREEN : RED}" opacity="0.14"><title>Gap ${gp > 0 ? '+' : ''}${(gp * 100).toFixed(1)}%</title></rect>`;
+  }
+
   const emaLbl = (val) => val == null ? '—' : niceFmt(val);
   return `
     <div class="chart-svg-wrap">
@@ -304,10 +347,14 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
       ${priceGridSvg}
       ${areaFill}
       ${bbFill}
+      ${gapSvg}
+      ${fibSvg}
       ${zonesSvg}
+      ${pocSvg}
       ${bbSvg}
       ${candlesSvg}
       ${emaSvg}
+      ${vwapSvg}
       ${extremaSvg}
       ${lastPriceSvg}
       ${sepSvg}
@@ -326,6 +373,9 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
       <span><i style="background:${WHITE};"></i>EMA 50 · ${emaLbl(last(ema50))}</span>
       <span><i style="background:${PURPLE};"></i>EMA 200 · ${emaLbl(last(ema200))}</span>
       <span><i style="background:${BLUE};"></i>Bollinger</span>
+      ${vwapSvg ? `<span><i style="background:oklch(0.82 0.11 199);"></i>VWAP</span>` : ''}
+      ${pocSvg ? `<span><i style="background:${BLUE};"></i>POC (volumen)</span>` : ''}
+      ${fibSvg ? `<span><i style="background:${GOLD}; opacity:0.5;"></i>Fibonacci</span>` : ''}
       ${plan ? `
       <span><i style="background:${GREEN}; opacity:0.35;"></i>Zona de compra</span>
       <span><i style="background:${GOLD}; opacity:0.35;"></i>Zona de venta</span>

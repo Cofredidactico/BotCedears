@@ -910,7 +910,7 @@ function chartCardBody(dailyTechnical, plan) {
   if (entry.isReal === false && isLive()) {
     return `<div class="chart-empty chart-empty-degraded">Gráfico no disponible en este momento — el proveedor de velas no respondió o alcanzó su límite diario. No se muestra un gráfico simulado para no confundirlo con datos reales. Probá la pestaña <strong>Análisis Libre (TradingView)</strong> arriba, o volvé a intentar en unos minutos.</div>`;
   }
-  const svg = renderPriceChartSVG(entry.candles, { support: dailyTechnical.support, resistance: dailyTechnical.resistance, plan: plan?.raw });
+  const svg = renderPriceChartSVG(entry.candles, { support: dailyTechnical.support, resistance: dailyTechnical.resistance, plan: plan?.raw, poc: dailyTechnical.volumeProfile?.hasData ? dailyTechnical.volumeProfile.poc : null });
   const staleNote = entry.isReal === false ? `<div class="chart-stale">Datos de demostración — modo de prueba local.</div>` : '';
   return svg + staleNote;
 }
@@ -2414,7 +2414,18 @@ function renderReportImpl() {
   // Acá sí se pasa confluence semanal (a diferencia de computeLightSignal y
   // el cron de Telegram): es un solo ticker, no hay riesgo de multiplicar
   // pedidos por decenas de activos a la vez.
-  const priceAlert = detectPriceAlert(quote.usd, t, { confluence, recentCloses: r.candles.c.slice(-3) });
+  // Contexto en vivo: confluencia semanal + régimen de mercado + blackout de
+  // earnings + liquidez, para que la alerta de la ficha sea la más confiable.
+  const _rvArr = r.candles.v || [];
+  const _rvolN = _rvArr.slice(-21, -1).filter(x => x > 0);
+  const _ravgVol = _rvolN.length ? _rvolN.reduce((a, b) => a + b, 0) / _rvolN.length : 0;
+  const _rliqUsd = _ravgVol > 0 && quote.usd > 0 ? _ravgVol * quote.usd : null;
+  const priceAlert = detectPriceAlert(quote.usd, t, {
+    confluence, recentCloses: r.candles.c.slice(-3),
+    regime: spyRegimeState(),
+    earningsInDays: r.daysToEarnings,
+    liquidityLow: _rliqUsd != null ? _rliqUsd < 5e6 : false,
+  });
   const priceAlertMeta = priceAlert ? ALERT_META[priceAlert.type] : null;
 
   const { risks, catalysts } = risksAndCatalysts(r);
@@ -5376,6 +5387,14 @@ function shortMarketRegime() {
   if (above20 && above50 && rising) return { label: 'Favorable a LARGOS', icon: '🟢', cls: 'up', note: 'El S&P 500 está por encima de sus medias (20 y 50) y subiendo — los setups largos operan con viento a favor. Priorizá largos.' };
   if (!above20 && !above50 && !rising) return { label: 'Favorable a CORTOS', icon: '🔴', cls: 'down', note: 'El S&P 500 está por debajo de sus medias y cayendo — cuidado con los largos; el contexto acompaña a los cortos. Priorizá cortos o esperá afuera.' };
   return { label: 'Neutral / mixto', icon: '🟡', cls: 'flat', note: 'El mercado no tiene una dirección clara. Reducí el tamaño, sé selectivo y exigí setups de mayor confianza.' };
+}
+// Estado del régimen para el motor de alertas: 'bull' | 'bear' | 'neutral' | null.
+function spyRegimeState() {
+  const r = shortMarketRegime();
+  if (!r) return null;
+  if (r.label.includes('LARGOS')) return 'bull';
+  if (r.label.includes('CORTOS')) return 'bear';
+  return 'neutral';
 }
 function shortMarketRegimeHTML() {
   const r = shortMarketRegime();
@@ -11613,7 +11632,18 @@ async function computeLightSignal(ticker, macro) {
     macro: { vix: macro?.vix ?? null, riesgoPaisArg: macro?.riesgoPaisArg ?? null, fearGreed: macro?.fearGreed ?? null },
     newsSentiment: null, candles,
   });
-  const priceAlert = detectPriceAlert(quote.usd, technical, { recentCloses: candles.c.slice(-3) });
+  // Contexto en vivo para el motor de alertas: régimen de mercado (S&P 500) y
+  // liquidez del subyacente. Reduce falsas señales (comprar contra el mercado o
+  // en papeles poco operables). El backtest NO pasa este contexto → no cambia.
+  const _vArr = candles.v || [];
+  const _volN = _vArr.slice(-21, -1).filter(x => x > 0);
+  const _avgVol = _volN.length ? _volN.reduce((a, b) => a + b, 0) / _volN.length : 0;
+  const _liqUsd = _avgVol > 0 && quote.usd > 0 ? _avgVol * quote.usd : null;
+  const priceAlert = detectPriceAlert(quote.usd, technical, {
+    recentCloses: candles.c.slice(-3),
+    regime: spyRegimeState(),
+    liquidityLow: _liqUsd != null ? _liqUsd < 5e6 : false,
+  });
   // Plan operativo numérico (stop, objetivos) — computePlan es puro cálculo
   // sobre lo ya pedido, sin requests extra; lo usa la tabla del Portfolio
   // para stop sugerido y distancia al stop de cada tenencia.
