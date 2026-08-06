@@ -37,7 +37,8 @@ async function init() {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
   // Estado inicial + reacción a cambios (login, logout, refresh del link mágico).
-  sb.auth.onAuthStateChange(() => { refresh(); });
+  // Guardamos el access_token en cada cambio para el guardado con keepalive.
+  sb.auth.onAuthStateChange((_e, session) => { _accessToken = session?.access_token ?? null; refresh(); });
   await refresh();
 }
 
@@ -45,6 +46,7 @@ async function refresh() {
   try {
     const { data } = await sb.auth.getSession();
     currentUser = data?.session?.user ?? null;
+    _accessToken = data?.session?.access_token ?? null;
     if (!currentUser) { currentProfile = null; renderLogin(); return; }
     currentProfile = await fetchProfile(currentUser.id);
     // El admin siempre entra (aunque su perfil aún no diga approved).
@@ -96,7 +98,7 @@ async function setApproved(id, approved) {
  * nube está vacía y este navegador ya tenía datos, sube esos como base). Cada
  * cambio en localStorage se guarda solo (debounce). Sin tocar los cientos de
  * lugares donde la app escribe: interceptamos localStorage.setItem una vez. */
-let syncStarted = false, _saveTimer = null;
+let syncStarted = false, _saveTimer = null, _accessToken = null;
 const SYNC_DENY = (k) => k.startsWith('icp_cache_') || k === 'icp_ref_cache';
 const isSyncKey = (k) => typeof k === 'string' && k.startsWith('icp_') && !SYNC_DENY(k);
 function snapshotLocal() {
@@ -112,10 +114,37 @@ async function loadCloud() {
   catch (err) { console.warn('[sync] no se pudo leer la nube:', err?.message); return null; }
 }
 async function saveCloud() {
-  try { const { error } = await sb.from('user_data').upsert({ id: currentUser.id, data: snapshotLocal(), updated_at: new Date().toISOString() }); if (error) throw error; }
+  try { const { error } = await sb.from('user_data').upsert({ id: currentUser.id, data: snapshotLocal(), updated_at: new Date().toISOString() }, { onConflict: 'id' }); if (error) throw error; }
   catch (err) { console.warn('[sync] no se pudo guardar en la nube:', err?.message); }
 }
+/** Guardado "a prueba de cierre". En el celular, al minimizar/cerrar la app o
+ *  bloquear la pantalla el navegador CONGELA la página y aborta los fetch en
+ *  curso — así el guardado normal (supabase-js) puede quedar a mitad de camino
+ *  y perderse el último cambio (el bug del "no se guardó lo que hice en el
+ *  celu"). Este hace un POST REST directo con keepalive:true, que el navegador
+ *  se compromete a completar aunque la página se descargue. Best-effort y
+ *  totalmente defensivo: si algo falla, la app no se entera. */
+function saveCloudBeacon() {
+  if (!currentUser || !_accessToken) return;
+  try {
+    const body = JSON.stringify({ id: currentUser.id, data: snapshotLocal(), updated_at: new Date().toISOString() });
+    fetch(`${SUPABASE_URL}/rest/v1/user_data`, {
+      method: 'POST',
+      keepalive: true,
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${_accessToken}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body,
+    }).catch(() => { /* la página ya no está: no hay a quién avisar */ });
+  } catch { /* ignore */ }
+}
 function scheduleSave() { clearTimeout(_saveTimer); _saveTimer = setTimeout(saveCloud, 1500); }
+// Al ocultarse/descargarse la página: cancelamos el debounce pendiente y
+// guardamos YA con keepalive, que sobrevive al congelamiento del móvil.
+function flushOnHide() { clearTimeout(_saveTimer); saveCloudBeacon(); }
 async function initCloudSync() {
   if (syncStarted || !currentUser) return; syncStarted = true;
   const cloud = await loadCloud();
@@ -132,7 +161,12 @@ async function initCloudSync() {
   // para no disparar un guardado redundante al escribir los datos entrantes).
   const orig = localStorage.setItem.bind(localStorage);
   localStorage.setItem = (k, v) => { orig(k, v); if (isSyncKey(k)) scheduleSave(); };
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveCloud(); });
+  // 'pagehide' es la señal MÁS confiable de descarga en el celular (Safari iOS
+  // ni siquiera dispara 'beforeunload'); 'visibilitychange:hidden' cubre el
+  // caso de cambiar de app o bloquear la pantalla. Ambos hacen el flush con
+  // keepalive para que el último cambio sí llegue a la nube.
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushOnHide(); });
+  window.addEventListener('pagehide', flushOnHide);
 }
 
 /* ── UI: overlay ── */
