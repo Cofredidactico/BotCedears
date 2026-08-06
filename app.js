@@ -10247,8 +10247,8 @@ function portfolioHTML() {
     ${portfolioPreMarketCardHTML(holdings)}
     ${cashFlowsCardHTML(stats)}
     <div class="port-summary-grid">
-      <div class="card port-summary-card">
-        <div class="dash-radar-title">Valor total</div>
+      <div class="card port-summary-card port-summary-hero">
+        <div class="dash-radar-title">${ICONS.briefcase} Valor total</div>
         <div class="port-summary-value">${pv(fmtUsd(stats.totalValue))}</div>
         ${stats.totalValueArs != null ? `<div class="port-summary-sub" title="${stats.arsEligibleCount === stats.rows.length ? 'Suma de todas las posiciones, a la última cotización real del CEDEAR' : `Solo ${stats.arsEligibleCount} de ${stats.rows.length} posiciones tienen CEDEAR — no incluye cripto ni activos sin ratio ARS`}">${pv(fmtArs(stats.totalValueArs))}${stats.arsEligibleCount < stats.rows.length ? ' (posiciones con CEDEAR)' : ''}</div>` : ''}
         ${stats.totalGainUsd != null ? `<div class="port-summary-sub ${stats.totalGainUsd >= 0 ? 'up' : 'down'}">${stats.totalGainUsd >= 0 ? '+' : ''}${pv(fmtUsd(stats.totalGainUsd))} (${fmtPct(stats.totalCostUsd > 0 ? (stats.totalGainUsd / stats.totalCostUsd) * 100 : 0)}) en posiciones con costo en USD</div>` : ''}
@@ -10256,14 +10256,14 @@ function portfolioHTML() {
         ${stats.totalRealGainArs != null ? `<div class="port-summary-sub port-real-sub ${stats.totalRealGainArs >= 0 ? 'up' : 'down'}">retorno real: ${fmtPct(stats.totalRealCostArs > 0 ? (stats.totalRealGainArs / stats.totalRealCostArs) * 100 : 0)} ajustado por inflación (IPC)</div>` : ''}
       </div>
       <div class="card port-summary-card">
-        <div class="dash-radar-title">Score ponderado</div>
-        <div class="port-summary-value">${stats.weightedScore ?? 'N/D'}</div>
+        <div class="dash-radar-title">${ICONS.gauge || ICONS.chart} Score ponderado</div>
+        <div class="port-summary-value"${stats.weightedScore != null ? ` style="color:${scoreLabelColor(scoreLabelForValue(stats.weightedScore)).color};"` : ''}>${stats.weightedScore ?? 'N/D'}</div>
         <div class="port-summary-sub">de 100, ponderado por peso en la cartera</div>
       </div>
       <div class="card port-summary-card">
-        <div class="dash-radar-title">Posiciones</div>
+        <div class="dash-radar-title">${ICONS.coins || ICONS.briefcase} Posiciones</div>
         <div class="port-summary-value">${holdings.length}</div>
-        <div class="port-summary-sub">${loadingCount > 0 ? `${loadingCount} cargando…` : 'todas actualizadas'}</div>
+        <div class="port-summary-sub">${loadingCount > 0 ? `<span class="port-loading-dot"></span>${loadingCount} cargando…` : '✓ todas actualizadas'}</div>
       </div>
     </div>
 
@@ -10435,10 +10435,30 @@ function portfolioTotalsRowHTML(stats) {
   </tr></tfoot>`;
 }
 
+/** Avatar-monograma determinístico por ticker: color estable derivado del
+ *  nombre (hash → hue), sin depender de logos externos (respeta la CSP y no
+ *  suma requests). Le da identidad visual a cada fila de tenencias. */
+// Etiqueta a partir de un score 0-100 (mismos cortes que scoring.js) — para
+// colorear el score ponderado de la cartera con la paleta de señales.
+function scoreLabelForValue(score) {
+  if (score >= 80) return 'Compra Fuerte';
+  if (score >= 65) return 'Compra Moderada';
+  if (score >= 45) return 'Mantener';
+  if (score >= 30) return 'Reducir';
+  return 'Venta';
+}
+function tickerAvatar(ticker) {
+  const t = String(ticker || '?').toUpperCase();
+  let hash = 0;
+  for (let i = 0; i < t.length; i++) hash = (hash * 31 + t.charCodeAt(i)) >>> 0;
+  const hue = hash % 360;
+  return `<span class="tkr-avatar" style="background:linear-gradient(135deg, oklch(0.66 0.14 ${hue}), oklch(0.55 0.13 ${(hue + 28) % 360})); color:oklch(0.98 0.02 ${hue});" aria-hidden="true">${esc(t.slice(0, 2))}</span>`;
+}
+
 function portfolioRowHTML(r, maxAbsPnl = 1) {
   if (!r.d) {
     const skelCols = portState.compact ? 3 : 7;
-    return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td colspan="${skelCols}"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button></td></tr>`;
+    return `<tr data-port-ticker="${esc(r.ticker)}"><td class="port-ticker-cell"><div class="ptk-wrap">${tickerAvatar(r.ticker)}<div class="ptk-main"><span class="ptk-sym">${esc(r.ticker)}</span></div></div></td><td colspan="${skelCols}"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button></td></tr>`;
   }
   const sig = scoreLabelColor(r.d.scoreLabel);
   const fmtGain = r.gainCurrency === 'ARS' ? fmtArs : fmtUsd;
@@ -10470,7 +10490,10 @@ function portfolioRowHTML(r, maxAbsPnl = 1) {
     stopCell = `${fmtUsd(pr.stopLoss)} <span class="port-stop-dist ${near ? 'near' : ''}" title="Distancia entre el precio actual y el stop sugerido">${distPct <= 0 ? 'stop superado' : `a ${distPct.toFixed(1)}%`}</span><br><span class="port-pnl-abs">obj ${fmtUsd(pr.tp1)}</span>`;
   }
 
-  const tickerCell = `<td class="port-ticker-cell">${esc(r.ticker)}${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}${r.costCurrency === 'ARS' ? ' <span class="watch-stale">ARS</span>' : ''}${r.d.alert && !r.d.alert.pending ? `<br><span class="port-row-alert" style="color:${ALERT_META[r.d.alert.type]?.color};"${alertTitleAttr(r.d.alert)}>⚡ ${esc(ALERT_META[r.d.alert.type]?.label ?? '')}</span>` : ''}</td>`;
+  const _badges = `${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}${r.costCurrency === 'ARS' ? ' <span class="watch-stale">ARS</span>' : ''}`;
+  const _alertLine = r.d.alert && !r.d.alert.pending ? `<span class="port-row-alert" style="color:${ALERT_META[r.d.alert.type]?.color};"${alertTitleAttr(r.d.alert)}>⚡ ${esc(ALERT_META[r.d.alert.type]?.label ?? '')}</span>` : '';
+  const _sub = r.d.sector ? `<span class="ptk-name">${esc(r.d.sector)}</span>` : (r.d.category ? `<span class="ptk-name">${esc(r.d.category)}</span>` : '');
+  const tickerCell = `<td class="port-ticker-cell"><div class="ptk-wrap">${tickerAvatar(r.ticker)}<div class="ptk-main"><span class="ptk-sym">${esc(r.ticker)}${_badges}</span>${_sub}${_alertLine}</div></div></td>`;
   const valueCell = `<td>${r.valueArs != null
     ? `${pv(fmtArs(r.valueArs))}<br><span class="port-pnl-abs">${pv(fmtUsd(r.value))}</span>`
     : (r.value != null ? pv(fmtUsd(r.value)) : 'N/D')}</td>`;

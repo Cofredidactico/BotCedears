@@ -323,12 +323,29 @@ a { color: inherit; }
   padding: 8px 18px; cursor: pointer; box-shadow: var(--glow-up); transition: transform 0.1s, box-shadow 0.15s;
 }
 .port-add-btn:hover { transform: translateY(-1px); box-shadow: 0 0 26px oklch(0.76 0.18 152 / 0.45); }
-.port-summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
-.port-summary-card { padding: 18px 20px; }
-.port-summary-value { font-family: 'Newsreader', serif; font-size: 28px; }
+.port-summary-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.port-summary-card { padding: 18px 20px; position: relative; overflow: hidden; }
+.port-summary-card .dash-radar-title { display: flex; align-items: center; gap: 7px; }
+.port-summary-card .dash-radar-title .sec-icon { width: 15px; height: 15px; opacity: 0.75; }
+.port-summary-value { font-family: 'Newsreader', serif; font-size: 28px; font-variant-numeric: tabular-nums; }
 .port-summary-sub { font-size: 12px; color: var(--text-mute); margin-top: 4px; }
 .port-summary-sub.up { color: var(--up-text); }
 .port-summary-sub.down { color: var(--down-text); }
+/* Hero: la card del valor total, con acento de marca y número más grande. */
+.port-summary-hero { background: linear-gradient(135deg, var(--accent-soft) -30%, var(--bg-card) 55%); border-color: oklch(0.70 0.19 291 / 0.30); }
+.port-summary-hero::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, var(--accent), var(--accent-2, oklch(0.80 0.14 199))); }
+.port-summary-hero .port-summary-value { font-size: 34px; letter-spacing: -0.5px; }
+.port-loading-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent, #7c5cff); margin-right: 5px; vertical-align: middle; animation: portPulse 1.1s ease-in-out infinite; }
+@keyframes portPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+/* ── Avatar-monograma + celda de ticker enriquecida en Tenencias ── */
+.tkr-avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; min-width: 30px; border-radius: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; font-weight: 700; letter-spacing: 0.3px; box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.10), 0 1px 3px oklch(0 0 0 / 0.25); }
+.ptk-wrap { display: flex; align-items: center; gap: 10px; }
+.ptk-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ptk-sym { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 13px; letter-spacing: 0.2px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.ptk-name { font-size: 10.5px; color: var(--text-faint); text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+.ptk-main .port-row-alert { font-size: 10px; margin-top: 1px; }
+.port-ticker-cell { vertical-align: middle; }
 .port-notes-card { padding: 18px 20px; margin-bottom: 24px; }
 .port-note { font-size: 13px; line-height: 1.6; padding: 6px 0; color: var(--text-dim); }
 .port-note.risk { color: var(--amber-text); }
