@@ -5600,6 +5600,185 @@ function shortBookRiskHTML() {
 
 /* Seguimiento de trades cortos tomados: R actual, P&L y progreso al objetivo en
  * vivo, usando el último precio del universo/watchlist. */
+/* ── 🧮 Calculadora de posición (banco de trabajo) ───────────────────────────
+ * Herramienta autónoma: metés entrada/stop/objetivo + cuenta + riesgo% y te
+ * calcula cantidad, riesgo en $, R:R, valor de la posición y breakeven, para
+ * planear CUALQUIER trade (no solo los del radar). Todo en la misma moneda que
+ * elija el usuario — cálculo puro, sin pedir datos. */
+function shortCalculatorHTML() {
+  const acc = portState.accountTotalArs != null ? Math.round(portState.accountTotalArs) : '';
+  return `
+    ${sectionTitleHTML('🧮 Calculadora de posición', 'target')}
+    <div class="card shortcalc-card">
+      <div class="dash-intro" style="margin-bottom:12px;">Planeá cualquier trade: cuántas unidades comprar para arriesgar solo lo que querés, el R:R y el valor de la posición. <strong>Usá la misma moneda en los tres precios y en la cuenta</strong> (todo en pesos, o todo en dólares).</div>
+      <div class="shortcalc-inputs">
+        <label class="shortcalc-field"><span>Entrada</span><input type="text" inputmode="decimal" id="scalc-entry" class="port-input" placeholder="ej. 100" autocomplete="off" /></label>
+        <label class="shortcalc-field"><span>Stop</span><input type="text" inputmode="decimal" id="scalc-stop" class="port-input" placeholder="ej. 96" autocomplete="off" /></label>
+        <label class="shortcalc-field"><span>Objetivo <small>(opcional)</small></span><input type="text" inputmode="decimal" id="scalc-target" class="port-input" placeholder="ej. 110" autocomplete="off" /></label>
+        <label class="shortcalc-field"><span>Cuenta total</span><input type="text" inputmode="decimal" id="scalc-account" class="port-input" placeholder="ej. 1.000.000" value="${acc}" autocomplete="off" /></label>
+        <label class="shortcalc-field"><span>Riesgo por trade</span><select id="scalc-risk" class="watch-select"><option value="0.5">0,5%</option><option value="1" selected>1%</option><option value="1.5">1,5%</option><option value="2">2%</option><option value="3">3%</option></select></label>
+      </div>
+      <div class="shortcalc-out" id="scalc-out"><div class="shortcalc-hint">Completá entrada, stop y cuenta para ver el cálculo.</div></div>
+    </div>`;
+}
+// Cálculo puro de la calculadora (misma moneda en todos los campos).
+function shortCalcCompute({ entry, stop, target, account, riskPct }) {
+  if (!(entry > 0) || !(stop > 0) || entry === stop) return { error: 'Completá entrada y stop (distintos).' };
+  if (!(account > 0)) return { error: 'Completá el total de tu cuenta.' };
+  const long = stop < entry;
+  const perUnitRisk = Math.abs(entry - stop);
+  const riskBudget = account * (riskPct / 100);
+  const qty = Math.floor(riskBudget / perUnitRisk);
+  if (!(qty > 0)) return { error: 'El riesgo por unidad es mayor a tu presupuesto de riesgo — bajá el % o achicá el stop.' };
+  const positionValue = qty * entry;
+  const riskAmount = qty * perUnitRisk;
+  const stopDistPct = (perUnitRisk / entry) * 100;
+  let rr = null, rewardPct = null;
+  if (target > 0 && ((long && target > entry) || (!long && target < entry))) {
+    const reward = Math.abs(target - entry);
+    rr = reward / perUnitRisk;
+    rewardPct = (reward / entry) * 100;
+  }
+  const exposurePct = (positionValue / account) * 100;
+  return { long, perUnitRisk, qty, positionValue, riskAmount, stopDistPct, rr, rewardPct, exposurePct };
+}
+function shortCalcRenderResult(container) {
+  const num = (id) => { const el = document.getElementById(id); if (!el) return null; const raw = String(el.value || '').replace(/[^\d.,]/g, ''); if (!raw) return null; const lc = raw.lastIndexOf(','), ld = raw.lastIndexOf('.'); let s = raw; if (lc > -1 && ld > -1) { const dec = lc > ld ? ',' : '.'; s = raw.split(dec === ',' ? '.' : ',').join('').replace(dec, '.'); } else if (lc > -1) s = raw.replace(/\./g, '').replace(',', '.'); const n = parseFloat(s); return isNaN(n) ? null : n; };
+  const riskPct = parseFloat(document.getElementById('scalc-risk')?.value || '1') || 1;
+  const r = shortCalcCompute({ entry: num('scalc-entry'), stop: num('scalc-stop'), target: num('scalc-target'), account: num('scalc-account'), riskPct });
+  if (r.error) { container.innerHTML = `<div class="shortcalc-hint">${esc(r.error)}</div>`; return; }
+  const fmt = (n) => n >= 1000 ? Math.round(n).toLocaleString('es-AR') : n.toFixed(2);
+  const dm = r.long ? { w: 'LARGO', cls: 'up', a: '▲' } : { w: 'CORTO', cls: 'down', a: '▼' };
+  const tile = (v, k, cls = '') => `<div class="scalc-tile"><div class="scalc-v ${cls}">${v}</div><div class="scalc-k">${k}</div></div>`;
+  container.innerHTML = `
+    <div class="scalc-dir ${dm.cls}">${dm.a} Trade ${dm.w} · stop a ${r.stopDistPct.toFixed(2)}% de la entrada</div>
+    <div class="scalc-tiles">
+      ${tile(fmt(r.qty), 'unidades a operar')}
+      ${tile(fmt(r.riskAmount), 'riesgo real ($)', 'down')}
+      ${tile(fmt(r.positionValue), 'valor de la posición')}
+      ${tile(`${r.exposurePct.toFixed(1)}%`, 'de tu cuenta', r.exposurePct > 100 ? 'down' : '')}
+      ${tile(r.rr != null ? `${r.rr.toFixed(2)}:1` : '—', 'riesgo/beneficio', r.rr != null ? (r.rr >= 1.5 ? 'up' : r.rr >= 1 ? '' : 'down') : '')}
+      ${tile(r.rewardPct != null ? `+${r.rewardPct.toFixed(1)}%` : '—', 'ganancia al objetivo', r.rewardPct != null ? 'up' : '')}
+    </div>
+    ${r.rr != null && r.rr < 1 ? `<div class="shortcalc-warn">⚠ El R:R es menor a 1:1 — arriesgás más de lo que buscás ganar. Buscá un objetivo más lejano o una entrada más cerca del stop.</div>` : ''}
+    ${r.exposurePct > 100 ? `<div class="shortcalc-warn">⚠ La posición supera tu cuenta — necesitarías apalancamiento. Con este stop, tu tamaño máximo sin apalancar es menor.</div>` : ''}`;
+}
+
+/* ── 📊 Analítica de tu sistema: expectancy + Monte Carlo + distribución R +
+ * correlación de trades abiertos ──────────────────────────────────────────── */
+// Monte Carlo por bootstrap: re-muestrea tus resultados R reales en 1.000
+// secuencias del mismo largo para estimar resultado esperado y drawdown.
+function shortMonteCarlo(rArr, sims = 1000) {
+  const n = rArr.length;
+  if (n < 5) return null;
+  const finals = [], maxDDs = [];
+  for (let s = 0; s < sims; s++) {
+    let cum = 0, peak = 0, dd = 0;
+    for (let i = 0; i < n; i++) {
+      cum += rArr[(Math.random() * n) | 0];
+      if (cum > peak) peak = cum;
+      const curDD = peak - cum;
+      if (curDD > dd) dd = curDD;
+    }
+    finals.push(cum); maxDDs.push(dd);
+  }
+  finals.sort((a, b) => a - b); maxDDs.sort((a, b) => a - b);
+  const pct = (arr, p) => arr[Math.min(arr.length - 1, Math.floor(p * arr.length))];
+  return { medianFinal: pct(finals, 0.5), p5: pct(finals, 0.05), p95: pct(finals, 0.95), medianDD: pct(maxDDs, 0.5), worstDD: pct(maxDDs, 0.95), profitable: finals.filter(x => x > 0).length / sims, n };
+}
+function shortSystemAnalyticsHTML() {
+  const closed = getClosedShortTrades().filter(t => t.realizedR != null);
+  const open = getShortTrades();
+  if (closed.length < 3 && open.length < 2) return '';
+
+  // ── Expectancy detallada ──
+  const rArr = closed.map(t => t.realizedR);
+  const n = rArr.length;
+  const wins = rArr.filter(r => r > 0), losses = rArr.filter(r => r < 0);
+  const winRate = n ? wins.length / n : null;
+  const avgWin = wins.length ? wins.reduce((a, b) => a + b, 0) / wins.length : 0;
+  const avgLoss = losses.length ? Math.abs(losses.reduce((a, b) => a + b, 0) / losses.length) : 0;
+  const expectancy = n ? rArr.reduce((a, b) => a + b, 0) / n : null;
+  const payoff = avgLoss > 0 ? avgWin / avgLoss : null;
+  const mc = shortMonteCarlo(rArr);
+
+  // ── Distribución de R (histograma) ──
+  const buckets = [
+    { lo: -Infinity, hi: -2, label: '≤ −2R', cls: 'down' },
+    { lo: -2, hi: -1, label: '−2 a −1R', cls: 'down' },
+    { lo: -1, hi: 0, label: '−1 a 0R', cls: 'down' },
+    { lo: 0, hi: 1, label: '0 a +1R', cls: 'up' },
+    { lo: 1, hi: 2, label: '+1 a +2R', cls: 'up' },
+    { lo: 2, hi: 3, label: '+2 a +3R', cls: 'up' },
+    { lo: 3, hi: Infinity, label: '≥ +3R', cls: 'up' },
+  ];
+  for (const b of buckets) b.count = rArr.filter(r => r > b.lo && r <= b.hi).length;
+  const maxBucket = Math.max(1, ...buckets.map(b => b.count));
+
+  // ── Correlación / concentración de trades abiertos ──
+  const bySector = {}; let longs = 0, shorts = 0;
+  for (const t of open) {
+    const d = dashState.data[t.ticker] || watchState.data[t.ticker];
+    const sec = d?.sector || 'Sin sector';
+    (bySector[sec] ??= []).push(t.ticker);
+    if (t.direction === 'short') shorts++; else longs++;
+  }
+  const sectorRows = Object.entries(bySector).map(([sec, tks]) => ({ sec, tks, n: tks.length })).sort((a, b) => b.n - a.n);
+  const concentrated = sectorRows.find(r => r.n >= 2);
+  const sameSide = open.length >= 3 && (longs === 0 || shorts === 0);
+
+  const tile = (v, k, cls = '') => `<div class="stk-stat"><div class="stk-stat-v ${cls}">${v}</div><div class="stk-stat-k">${k}</div></div>`;
+  const edgeVerdict = expectancy == null ? null : expectancy > 0.1 ? { t: 'Tu sistema tiene ventaja (edge +)', cls: 'up' } : expectancy < -0.1 ? { t: 'Hoy tu sistema pierde plata (edge −)', cls: 'down' } : { t: 'Sistema al borde (sin ventaja clara)', cls: 'flat' };
+
+  return `
+    ${sectionTitleHTML('📊 Analítica de tu sistema', 'chart', 'margin-top:34px;')}
+    <div class="dash-intro">¿Tu forma de operar tiene <strong>ventaja real</strong>? Expectativa por trade, una simulación Monte Carlo de tu propio historial, la distribución de tus resultados y el riesgo oculto de tener varios trades correlacionados abiertos. Todo sobre TUS trades cerrados.</div>
+    <div class="card stk-card">
+      ${n >= 3 ? `
+      ${edgeVerdict ? `<div class="short-edge ${edgeVerdict.cls}">${edgeVerdict.t} · <b>${expectancy >= 0 ? '+' : ''}${expectancy.toFixed(2)}R</b> por trade</div>` : ''}
+      <div class="stk-stats">
+        ${tile(`${Math.round(winRate * 100)}%`, 'aciertos', winRate >= 0.5 ? 'up' : 'down')}
+        ${tile(`+${avgWin.toFixed(2)}R`, 'ganancia media', 'up')}
+        ${tile(`−${avgLoss.toFixed(2)}R`, 'pérdida media', 'down')}
+        ${tile(payoff != null ? `${payoff.toFixed(2)}×` : '—', 'payoff (gana/pierde)', payoff != null && payoff >= 1 ? 'up' : 'down')}
+        ${tile(`${expectancy >= 0 ? '+' : ''}${expectancy.toFixed(2)}R`, 'expectativa/trade', expectancy >= 0 ? 'up' : 'down')}
+      </div>
+      <div class="port-note" style="margin-top:6px;">Cada trade te deja en promedio <b class="${expectancy >= 0 ? 'up' : 'down'}">${expectancy >= 0 ? '+' : ''}${expectancy.toFixed(2)}R</b>. Con ${Math.round(winRate * 100)}% de aciertos y un payoff de ${payoff != null ? payoff.toFixed(2) + '×' : 'N/D'}, ${expectancy >= 0 ? 'a la larga ganás si repetís el proceso con disciplina.' : 'a la larga perdés: subí el payoff (dejá correr las ganancias / cortá antes las pérdidas) o mejorá la selección.'}</div>
+
+      <div class="short-dist">
+        <div class="short-strat-stats-head">Distribución de resultados (R)</div>
+        <div class="short-dist-bars">
+          ${buckets.map(b => `<div class="sdist-col"><div class="sdist-bar-wrap"><div class="sdist-bar ${b.cls}" style="height:${Math.round((b.count / maxBucket) * 100)}%;" title="${b.count} trade(s)"></div></div><div class="sdist-n">${b.count}</div><div class="sdist-lbl">${b.label}</div></div>`).join('')}
+        </div>
+      </div>
+
+      ${mc ? `
+      <div class="short-strat-stats" style="margin-top:14px;">
+        <div class="short-strat-stats-head">Monte Carlo — 1.000 secuencias de ${mc.n} trades (re-muestreando tu historial)</div>
+        <div class="stk-stats">
+          ${tile(`${mc.medianFinal >= 0 ? '+' : ''}${mc.medianFinal.toFixed(1)}R`, 'resultado típico', mc.medianFinal >= 0 ? 'up' : 'down')}
+          ${tile(`${mc.p5.toFixed(1)}R`, 'mala racha (P5)', 'down')}
+          ${tile(`+${mc.p95.toFixed(1)}R`, 'buena racha (P95)', 'up')}
+          ${tile(`−${mc.medianDD.toFixed(1)}R`, 'caída típica (drawdown)', 'down')}
+          ${tile(`${Math.round(mc.profitable * 100)}%`, 'secuencias en verde', mc.profitable >= 0.5 ? 'up' : 'down')}
+        </div>
+        <div class="port-note" style="margin-top:4px;">Prepará la cabeza para una racha en contra de <b class="down">~${mc.medianDD.toFixed(1)}R</b> (y hasta <b class="down">${mc.worstDD.toFixed(1)}R</b> en el peor 5%): es parte normal del juego aunque tu sistema tenga ventaja. Dimensioná el riesgo por trade para bancarla sin fundirte.</div>
+      </div>` : `<div class="port-note" style="margin-top:10px;">Cerrá al menos 5 trades para habilitar la simulación Monte Carlo (hoy: ${n}).</div>`}
+      ` : `<div class="port-note">Cerrá al menos 3 trades para ver la expectativa y la distribución de tu sistema (hoy: ${n}).</div>`}
+
+      ${open.length >= 2 ? `
+      <div class="short-strat-stats" style="margin-top:14px;">
+        <div class="short-strat-stats-head">Correlación de tus trades abiertos (${open.length})</div>
+        <div class="short-corr-rows">
+          ${sectorRows.map(r => `<div class="short-corr-row"><span class="scorr-sec">${esc(r.sec)}</span><span class="scorr-tks">${r.tks.map(esc).join(', ')}</span><span class="scorr-n ${r.n >= 2 ? 'down' : ''}">${r.n}</span></div>`).join('')}
+        </div>
+        ${concentrated ? `<div class="shortcalc-warn">⚠ Tenés <b>${concentrated.n} trades en ${esc(concentrated.sec)}</b> (${concentrated.tks.map(esc).join(', ')}). Si el sector se mueve en contra, caen todos juntos — tu riesgo real es <b>mayor que la suma</b> de cada stop. Considerá cerrar uno o achicar el tamaño.</div>` : ''}
+        ${sameSide ? `<div class="shortcalc-warn">⚠ Tus ${open.length} trades abiertos apuntan al <b>mismo lado</b> (${longs ? 'todos largos' : 'todos cortos'}). Estás muy expuesto a que el mercado gire en contra de golpe.</div>` : ''}
+        ${!concentrated && !sameSide ? `<div class="port-note" style="margin-top:6px;">✓ Tus trades abiertos están razonablemente diversificados por sector y dirección.</div>` : ''}
+      </div>` : ''}
+    </div>`;
+}
+
 function shortTakenTradesHTML() {
   const trades = getShortTrades();
   if (!trades.length) return '';
@@ -5642,6 +5821,23 @@ function shortTakenTradesHTML() {
         <span>Obj <b class="up">${fmtUsd(t.target)}</b> · Stop <b class="down">${fmtUsd(t.stop)}</b></span>
       </div>
       ${progress != null ? `<div class="stk-bar"><i style="width:${Math.max(0, Math.min(100, progress))}%; background:${progress >= 0 ? 'var(--up)' : 'var(--down)'};"></i></div>` : ''}
+      ${(() => {
+        // ── Gestión del trade abierto: trailing por R, salidas parciales y time stop ──
+        const riskUnit = Math.abs(t.entry - t.stop);
+        if (!(riskUnit > 0)) return '';
+        const lvl = (m) => long ? t.entry + m * riskUnit : t.entry - m * riskUnit;
+        const tips = [];
+        if (rNow != null && status === 'en curso') {
+          if (rNow >= 2) tips.push(`🔒 Trailing: subí el stop a <b>+1R (${fmtUsd(lvl(1))})</b> — asegurás al menos +1R de ganancia y dejás correr el resto.`);
+          else if (rNow >= 1) tips.push(`🔒 Subí el stop a la <b>entrada (${fmtUsd(t.entry)})</b> — a partir de acá el trade no puede perder (breakeven).`);
+          if (rNow >= 1) tips.push(`✂ Salida parcial: cerrá <b>⅓ ahora</b> (+${rNow.toFixed(1)}R) y llevá el resto hacia +2R (${fmtUsd(lvl(2))}).`);
+          if (days >= SHORT_TIME_STOP_DAYS && rNow < 0.5) tips.push(`⏱ <b>Time stop:</b> lleva ${days}d y apenas ${rNow >= 0 ? '+' : ''}${rNow.toFixed(2)}R — si no arranca, liberá el capital para otro setup.`);
+        }
+        return `<div class="stk-mgmt">
+          <div class="stk-mgmt-ladder">🎯 Salidas escalonadas: <b class="up">+1R ${fmtUsd(lvl(1))}</b> · <b class="up">+2R ${fmtUsd(lvl(2))}</b> · <b class="up">+3R ${fmtUsd(lvl(3))}</b></div>
+          ${tips.map(m => `<div class="stk-mgmt-tip">${m}</div>`).join('')}
+        </div>`;
+      })()}
       <div class="stk-note"><input class="stk-note-input" data-stk-note="${esc(t.id)}" value="${esc(t.note || '')}" placeholder="📝 Nota: motivo de entrada, cómo viene, plan…" aria-label="Nota del trade ${esc(t.ticker)}" maxlength="180" /></div>
     </div>`;
   };
@@ -5904,9 +6100,13 @@ function shortTradesPageHTML() {
 
     ${shortBookRiskHTML()}
 
+    ${shortCalculatorHTML()}
+
     ${shortTakenTradesHTML()}
 
     ${shortClosedHistoryHTML()}
+
+    ${shortSystemAnalyticsHTML()}
 
     ${(() => {
       const bull = longN + totalRebounds + totalPullbacks, bear = shortN;
@@ -6297,6 +6497,17 @@ function shortReliabBodyHTML(res, direction, rr = null, strategy = null) {
 
 function wireShortTradesEvents() {
   const rerender = () => renderReport();
+  // Calculadora de posición: recalcula en vivo sin re-render (para no perder el
+  // foco del input mientras se escribe).
+  const scalcOut = document.getElementById('scalc-out');
+  if (scalcOut) {
+    const recompute = () => shortCalcRenderResult(scalcOut);
+    ['scalc-entry', 'scalc-stop', 'scalc-target', 'scalc-account'].forEach(id => {
+      document.getElementById(id)?.addEventListener('input', recompute);
+    });
+    document.getElementById('scalc-risk')?.addEventListener('change', recompute);
+    recompute(); // primer cálculo si ya hay cuenta precargada
+  }
   document.getElementById('short-conf')?.addEventListener('change', e => { shortState.minConf = e.target.value; rerender(); });
   document.getElementById('short-rr')?.addEventListener('change', e => { shortState.minRR = Number(e.target.value); rerender(); });
   document.getElementById('short-cat')?.addEventListener('change', e => { shortState.category = e.target.value; rerender(); });
