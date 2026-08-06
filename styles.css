@@ -3064,3 +3064,12 @@ body::after {
 .pmh-chip-l { display:block; font-size:10.5px; color:var(--text-mute); }
 .pmh-chip-v { display:block; font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:1px; }
 .pmh-chip-v.up { color:var(--up); } .pmh-chip-v.down { color:var(--down); }
+
+/* ── Trade Cortos pro 2: checklist, vigencia ── */
+.short-checklist { margin-top:10px; padding:9px 11px; border-radius:9px; background:var(--surface-2, rgba(255,255,255,.03)); border:1px dashed var(--border, rgba(255,255,255,.1)); }
+.short-checklist-head { font-size:11.5px; font-weight:600; color:var(--text-mute); margin-bottom:5px; }
+.short-chk-item { font-size:12.5px; line-height:1.7; }
+.short-chk-item.ok { color:var(--up); }
+.short-chk-item.warn { color:var(--warn, oklch(0.78 0.14 75)); }
+.short-chk-item.bad { color:var(--down); }
+.stk-row.stk-expired { border-left:2px solid var(--warn, oklch(0.78 0.14 75)); padding-left:8px; }

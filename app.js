@@ -5239,6 +5239,9 @@ const SHORT_TRADES_KEY = 'icp_short_trades';
 const SHORT_CLOSED_KEY = 'icp_short_closed';
 const SHORT_TRADES_MAX = 100;  // tope de trades en seguimiento simultáneo (subido de 40)
 const SHORT_CLOSED_MAX = 200;  // historial de trades cerrados que se guarda
+const SHORT_MAX_HEAT_R = 6;    // riesgo total abierto recomendado (en R) — aviso si se supera
+const SHORT_DAILY_LOSS_R = -3; // límite de pérdida diaria (en R) — circuit breaker
+const SHORT_TIME_STOP_DAYS = 3;// vigencia por defecto de un setup corto (ruedas)
 function getShortTrades() {
   try { const a = JSON.parse(localStorage.getItem(SHORT_TRADES_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
 }
@@ -5247,8 +5250,23 @@ function addShortTrade(t) {
   const list = getShortTrades();
   if (list.some(x => x.ticker === t.ticker && x.kind === t.kind)) return list; // no duplicar el mismo tipo por ticker
   if (list.length >= SHORT_TRADES_MAX) { showToast(`Llegaste al máximo de ${SHORT_TRADES_MAX} trades en seguimiento — cerrá alguno para sumar otro.`, 'info'); return list; }
-  list.unshift({ ...t, id: `${t.ticker}-${t.kind}-${Date.now()}`, date: new Date().toISOString().slice(0, 10) });
+  // Régimen de mercado al momento de tomar (para el win-rate por régimen) y
+  // excursiones (MFE/MAE) que se irán actualizando en vivo.
+  const regime = (typeof shortMarketRegime === 'function' ? shortMarketRegime()?.label : null) ?? null;
+  list.unshift({ ...t, id: `${t.ticker}-${t.kind}-${Date.now()}`, date: new Date().toISOString().slice(0, 10), regime, mfeR: 0, maeR: 0 });
   saveShortTrades(list); return list;
+}
+// Actualiza las excursiones máximas (MFE) y mínimas (MAE) en R de un trade
+// abierto con el R actual — se llama en cada render del seguimiento.
+function updateShortTradeExcursions(id, rNow) {
+  if (rNow == null || !isFinite(rNow)) return;
+  const list = getShortTrades();
+  const t = list.find(x => x.id === id);
+  if (!t) return;
+  let changed = false;
+  if (t.mfeR == null || rNow > t.mfeR) { t.mfeR = rNow; changed = true; }
+  if (t.maeR == null || rNow < t.maeR) { t.maeR = rNow; changed = true; }
+  if (changed) saveShortTrades(list);
 }
 
 /* ── Historial de trades cerrados (resultado real) ───────────────────────────
@@ -5365,6 +5383,57 @@ function shortMarketRegimeHTML() {
   return `<div class="short-regime ${r.cls}"><span class="short-regime-lamp">${r.icon}</span><div><div class="short-regime-title">Régimen de mercado: <b>${esc(r.label)}</b></div><div class="short-regime-note">${esc(r.note)}</div></div></div>`;
 }
 
+/* Gestión del riesgo del "libro" de trades abiertos: heat total, circuit
+ * breaker de pérdida diaria, tamaño óptimo (Kelly fraccionado) desde tu
+ * historial, y guardia de correlación entre posiciones abiertas. Es lo que más
+ * plata cuida en trading real: no sobreexponerse ni operar en tilt. */
+function shortBookRiskHTML() {
+  const open = getShortTrades();
+  if (!open.length) return '';
+  // Heat: cada trade abierto arriesga ~riskPct de la cuenta hasta su stop.
+  const heatR = open.length; // 1R por trade (asumiendo tamaño homogéneo por riesgo)
+  const heatPct = shortState.riskPct * open.length;
+  const heatBad = heatR > SHORT_MAX_HEAT_R;
+  // Circuit breaker: R realizado HOY (trades cerrados hoy).
+  const today = new Date().toISOString().slice(0, 10);
+  const todayR = getClosedShortTrades().filter(t => t.closeDate === today && t.realizedR != null).reduce((a, b) => a + b.realizedR, 0);
+  const breaker = todayR <= SHORT_DAILY_LOSS_R;
+  // Kelly fraccionado desde el historial real.
+  const closed = getClosedShortTrades().filter(t => t.realizedR != null);
+  let kellyHTML = '';
+  if (closed.length >= 15) {
+    const wins = closed.filter(t => t.realizedR > 0), losses = closed.filter(t => t.realizedR <= 0);
+    const W = wins.length / closed.length;
+    const avgWin = wins.length ? wins.reduce((a, b) => a + b.realizedR, 0) / wins.length : 0;
+    const avgLoss = losses.length ? Math.abs(losses.reduce((a, b) => a + b.realizedR, 0) / losses.length) : 1;
+    const bRatio = avgLoss > 0 ? avgWin / avgLoss : avgWin;
+    const f = bRatio > 0 ? W - (1 - W) / bRatio : 0;
+    const halfKelly = Math.max(0, f * 0.5) * 100;
+    kellyHTML = `<div class="port-note" style="margin-top:8px;">🧮 <b>Tamaño óptimo (½ Kelly):</b> según tu win rate real (${Math.round(W * 100)}%) y tu relación ganancia/pérdida, arriesgar <b>${halfKelly.toFixed(1)}%</b> por trade maximiza el crecimiento sin arriesgar de más. ${shortState.riskPct > halfKelly + 0.3 ? `Hoy arriesgás ${shortState.riskPct}% — es más agresivo de lo óptimo.` : 'Tu riesgo actual está en línea.'}</div>`;
+  }
+  // Guardia de correlación entre posiciones abiertas.
+  const withCloses = open.map(t => ({ t, closes: (dashState.data[t.ticker] || watchState.data[t.ticker])?.closes })).filter(x => x.closes?.length > 60);
+  const corr = [];
+  for (let i = 0; i < withCloses.length; i++) for (let j = i + 1; j < withCloses.length; j++) {
+    try { const cb = correlationAndBeta(withCloses[i].closes, withCloses[j].closes); if (cb?.correlation != null && cb.correlation > 0.7) corr.push(`${withCloses[i].t.ticker}↔${withCloses[j].t.ticker} (${cb.correlation.toFixed(2)})`); } catch { /* noop */ }
+  }
+  const tile = (v, k, cls = '') => `<div class="stk-stat"><div class="stk-stat-v ${cls}">${v}</div><div class="stk-stat-k">${k}</div></div>`;
+  return `
+    ${sectionTitleHTML('🛡️ Gestión del riesgo del libro', 'target')}
+    <div class="card stk-card">
+      <div class="stk-stats">
+        ${tile(`${heatR}R`, `riesgo abierto (máx ${SHORT_MAX_HEAT_R}R)`, heatBad ? 'down' : '')}
+        ${tile(`~${heatPct.toFixed(1)}%`, 'de la cuenta en riesgo', heatBad ? 'down' : '')}
+        ${tile(`${todayR >= 0 ? '+' : ''}${todayR.toFixed(1)}R`, 'resultado de hoy', breaker ? 'down' : todayR > 0 ? 'up' : '')}
+        ${tile(open.length, 'trades abiertos')}
+      </div>
+      ${heatBad ? `<div class="port-note" style="color:var(--down);">⚠ <b>Riesgo abierto alto:</b> ${heatR}R supera tu tope sugerido de ${SHORT_MAX_HEAT_R}R. Si varios trades fallan juntos, la pérdida se acumula — considerá no sumar más hasta cerrar alguno.</div>` : ''}
+      ${breaker ? `<div class="port-note" style="color:var(--down);">🛑 <b>Circuit breaker:</b> ya perdiste ${todayR.toFixed(1)}R hoy (tope ${SHORT_DAILY_LOSS_R}R). Frenar acá evita el "revenge trading" — mañana es otro día.</div>` : ''}
+      ${corr.length ? `<div class="port-note" style="margin-top:8px;">🔗 <b>Correlación alta entre abiertos:</b> ${corr.join(', ')} — se mueven casi igual, así que estás doblando la misma apuesta (menos diversificación de la que parece).</div>` : ''}
+      ${kellyHTML}
+    </div>`;
+}
+
 /* Seguimiento de trades cortos tomados: R actual, P&L y progreso al objetivo en
  * vivo, usando el último precio del universo/watchlist. */
 function shortTakenTradesHTML() {
@@ -5385,8 +5454,14 @@ function shortTakenTradesHTML() {
       if (long ? price <= t.stop : price >= t.stop) { status = 'stop tocado'; statusCls = 'down'; }
       else if (long ? price >= t.target : price <= t.target) { status = 'objetivo alcanzado'; statusCls = 'up'; }
     }
+    // Actualiza las excursiones (MFE/MAE) en vivo con el R actual.
+    if (rNow != null) updateShortTradeExcursions(t.id, rNow);
     const days = Math.max(0, Math.round((Date.now() - new Date(t.date + 'T00:00:00').getTime()) / 86400000));
-    return `<div class="stk-row">
+    // Vigencia: si pasó el tiempo de caducidad sin llegar al objetivo ni al stop.
+    const expired = status === 'en curso' && days > SHORT_TIME_STOP_DAYS;
+    if (expired) { status = `⏱ vencido (${days}d)`; statusCls = 'flat'; }
+    const mfe = t.mfeR, mae = t.maeR;
+    return `<div class="stk-row${expired ? ' stk-expired' : ''}">
       <div class="stk-head">
         <span class="stk-tk" data-short-ticker="${esc(t.ticker)}">${esc(t.ticker)}</span>
         <span class="stk-kind">${kindLabel[t.kind] ?? esc(t.kind)} ${long ? '▲' : '▼'}</span>
@@ -5399,6 +5474,7 @@ function shortTakenTradesHTML() {
         <span>Ahora <b>${price != null ? fmtUsd(price) : 'N/D'}</b></span>
         <span>P&amp;L <b class="${plPct == null ? '' : plPct >= 0 ? 'up' : 'down'}">${plPct == null ? 'N/D' : `${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%`}</b></span>
         <span>R actual <b class="${rNow == null ? '' : rNow >= 0 ? 'up' : 'down'}">${rNow == null ? 'N/D' : `${rNow >= 0 ? '+' : ''}${rNow.toFixed(2)}R`}</b></span>
+        ${(mfe != null || mae != null) ? `<span title="MFE: lo máximo a favor que llegó; MAE: lo máximo en contra que sufrió">Rec. <b class="up">+${(mfe ?? 0).toFixed(2)}R</b>/<b class="down">${(mae ?? 0).toFixed(2)}R</b></span>` : ''}
         <span>Obj <b class="up">${fmtUsd(t.target)}</b> · Stop <b class="down">${fmtUsd(t.stop)}</b></span>
       </div>
       ${progress != null ? `<div class="stk-bar"><i style="width:${Math.max(0, Math.min(100, progress))}%; background:${progress >= 0 ? 'var(--up)' : 'var(--down)'};"></i></div>` : ''}
@@ -5481,6 +5557,18 @@ function shortClosedHistoryHTML() {
     const w = arr.filter(r => r > 0).length;
     return { k, label: SHORT_STRATEGIES[k]?.label ?? (k === 'rebound' ? 'Rebote' : k === 'pullback' ? 'Pullback' : k), icon: SHORT_STRATEGIES[k]?.icon ?? '•', n: arr.length, winRate: Math.round(w / arr.length * 100), avgR: arr.reduce((a, b) => a + b, 0) / arr.length };
   }).sort((a, b) => b.avgR - a.avgR);
+  // Win rate por régimen de mercado (el que había al tomar el trade).
+  const byReg = {};
+  for (const t of rated) { if (!t.regime) continue; (byReg[t.regime] ??= []).push(t.realizedR); }
+  const regRows = Object.entries(byReg).map(([k, arr]) => {
+    const w = arr.filter(r => r > 0).length;
+    return { k, n: arr.length, winRate: Math.round(w / arr.length * 100), avgR: arr.reduce((a, b) => a + b, 0) / arr.length };
+  }).sort((a, b) => b.avgR - a.avgR);
+  // MAE/MFE promedio (heat sufrido y recorrido a favor antes de cerrar).
+  const withExc = rated.filter(t => t.mfeR != null && t.maeR != null);
+  const avgMFE = withExc.length ? withExc.reduce((a, b) => a + b.mfeR, 0) / withExc.length : null;
+  const avgMAE = withExc.length ? withExc.reduce((a, b) => a + b.maeR, 0) / withExc.length : null;
+  const excInsight = (avgMFE != null && avgR != null && avgMFE > avgR + 0.4) ? ' Tus trades suelen llegar bastante más a favor de lo que terminás capturando — quizás estás saliendo temprano.' : '';
   const tile = (v, k, cls = '') => `<div class="stk-stat"><div class="stk-stat-v ${cls}">${v}</div><div class="stk-stat-k">${k}</div></div>`;
   const recent = closed.slice(0, 12);
   return `
@@ -5505,6 +5593,17 @@ function shortClosedHistoryHTML() {
           </tbody>
         </table>
       </div>` : ''}
+      ${regRows.length ? `
+      <div class="short-strat-stats">
+        <div class="short-strat-stats-head">Por régimen de mercado (al tomar el trade)</div>
+        <table class="bt-table">
+          <thead><tr><th>Régimen</th><th>Trades</th><th>Acierto</th><th>R prom.</th></tr></thead>
+          <tbody>
+            ${regRows.map(r => `<tr><td>${esc(r.k)}</td><td>${r.n}</td><td class="${r.winRate >= 50 ? 'bt-pos' : 'bt-neg'}">${r.winRate}%</td><td class="${r.avgR >= 0 ? 'bt-pos' : 'bt-neg'}">${r.avgR >= 0 ? '+' : ''}${r.avgR.toFixed(2)}R</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+      ${avgMFE != null ? `<div class="port-note" style="margin-top:10px;">📈 <b>Excursiones promedio:</b> tus trades llegaron a <b class="up">+${avgMFE.toFixed(2)}R</b> a favor (MFE) y sufrieron <b class="down">${avgMAE.toFixed(2)}R</b> en contra (MAE) antes de cerrar.${excInsight}</div>` : ''}
       <div class="short-closed-list">
         ${recent.map(t => {
           const dm = shortDirMeta(t.direction);
@@ -5638,6 +5737,8 @@ function shortTradesPageHTML() {
     </div>
 
     ${shortMarketRegimeHTML()}
+
+    ${shortBookRiskHTML()}
 
     ${shortTakenTradesHTML()}
 
@@ -5872,6 +5973,25 @@ function shortSetupsTableHTML(rows, near = false) {
     </table></div></div>`;
 }
 
+// Checklist pre-trade: obliga a validar lo básico antes de tomar (disciplina).
+function shortChecklistHTML(ticker, d, s) {
+  const item = (state, txt) => `<div class="short-chk-item ${state}">${state === 'ok' ? '✓' : state === 'warn' ? '⚠' : '✕'} ${txt}</div>`;
+  const items = [];
+  const regime = shortMarketRegime();
+  if (regime) {
+    const favLong = regime.label.includes('LARGOS'), favShort = regime.label.includes('CORTOS'), neutral = regime.label.includes('Neutral');
+    const aligned = (s.direction === 'long' && favLong) || (s.direction === 'short' && favShort);
+    items.push(item(aligned ? 'ok' : neutral ? 'warn' : 'bad', `A favor del régimen (${regime.icon} ${esc(regime.label)})`));
+  }
+  items.push(item(s.rr != null && s.rr >= 1.5 ? 'ok' : (s.rr != null && s.rr >= 1 ? 'warn' : 'bad'), `Riesgo/Beneficio ≥ 1.5:1 (${s.rr != null ? s.rr.toFixed(1) : '?'}:1)`));
+  const ed = earningsSoonDays(ticker);
+  items.push(item(ed == null ? 'ok' : 'warn', ed == null ? 'Sin balance (earnings) cercano' : `Balance en ${ed}d — riesgo de gap`));
+  if (d.liquidityUsd != null) items.push(item(d.liquidityUsd >= 5e6 ? 'ok' : (d.liquidityUsd >= 1e6 ? 'warn' : 'bad'), `Liquidez ${shortLiquidityLabel(d.liquidityUsd)}`));
+  const openN = getShortTrades().length;
+  items.push(item(openN < SHORT_MAX_HEAT_R ? 'ok' : 'warn', `Riesgo del libro (${openN}/${SHORT_MAX_HEAT_R}R abiertos)`));
+  return `<div class="short-checklist"><div class="short-checklist-head">✅ Checklist pre-trade (validá antes de entrar)</div>${items.join('')}</div>`;
+}
+
 // Badge de la estrategia del setup (con explicación en el tooltip).
 function shortStrategyBadge(key) {
   const st = SHORT_STRATEGIES[key];
@@ -5944,6 +6064,7 @@ function shortTradeCardHTML(ticker, d) {
         </div>
         ${shortSizingHTML(sizing, s)}
         ${shortPartialPlanHTML(s)}
+        ${shortChecklistHTML(ticker, d, s)}
         ${s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
         ${shortTakeBtn(ticker, 'setup', s.direction, s.entry, s.target1, s.stop, s.strategy)}
         <div class="short-reliab" data-reliab-slot="${esc(ticker)}">
