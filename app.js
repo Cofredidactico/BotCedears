@@ -1,5 +1,5 @@
 import { getUniverse, getAsset, getQuote, getCandles, getFundamentals, getNews, getGeneralNews, getMacro, getCCL, getCCLHistory, getEarnings, getInflacion, getDividends, getBonds, getRecommendations, getPreMarket, isLive } from './dataSource.js';
-import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged, macd, rsi, ema } from './indicators.js';
+import { computeTechnical, resampleWeekly, weeklyConfluence, correlationAndBeta, relativeStrength as relStrength, monthlySeasonality, structureChanged, macd, rsi, ema, atr, adx } from './indicators.js';
 import { computeScore, computePlan, SECTOR_PE_RANGE, detectPriceAlert } from './scoring.js';
 import { renderPriceChartSVG, renderRadarSVG, wireChartHover, renderCompareOverlaySVG } from './chart.js';
 import { getWatchlist, isWatched, toggleWatchlist, WATCHLIST_MAX } from './watchlist.js';
@@ -3728,6 +3728,29 @@ function marketSessionState() {
   } catch { return null; }
 }
 
+/** Banner de estado del mercado: aclara EN VIVO si los precios de abajo son el
+ *  último cierre (mercado cerrado / pre-market) o en vivo (rueda abierta), para
+ *  que nunca se confunda "cierre de ayer" con un dato desactualizado. En
+ *  pre-market muestra además cómo viene el S&P para el movimiento de hoy. */
+function marketStatusBannerHTML() {
+  const phase = marketPhaseET();
+  if (phase === 'REGULAR') return ''; // en vivo: no hace falta aclarar nada
+  const spyPre = dashState.premarket?.SPY;
+  let msg, cls, icon;
+  if (phase === 'PRE') {
+    icon = '🌅'; cls = 'pre';
+    const spyTxt = spyPre?.prePct != null ? ` El S&P 500 viene <b class="${spyPre.prePct >= 0 ? 'up' : 'down'}">${spyPre.prePct >= 0 ? '+' : ''}${spyPre.prePct.toFixed(2)}%</b> en el pre-market.` : '';
+    msg = `<b>Pre-market</b> — la rueda de EE.UU. todavía no abrió. Los precios de abajo son el <b>último cierre</b>; el movimiento de <b>hoy</b> se ve en el <b>pre-market</b> (en cada ficha y en el widget de pre-market).${spyTxt}`;
+  } else if (phase === 'POST') {
+    icon = '🌇'; cls = 'post';
+    msg = `<b>After-hours</b> — la rueda regular cerró. Los precios son el <b>cierre de hoy</b>; puede haber algún movimiento post-cierre.`;
+  } else {
+    icon = '🌙'; cls = 'closed';
+    msg = `<b>Mercado cerrado</b> — mostrando el <b>último cierre</b>. Los valores se actualizan cuando abre la rueda de EE.UU.`;
+  }
+  return `<div class="mkt-banner ${cls}"><span class="mkt-banner-icon">${icon}</span><div class="mkt-banner-txt">${msg}</div></div>`;
+}
+
 /** Clima del mercado: combina amplitud del universo, VIX, tendencia del S&P y
  *  Fear&Greed en un veredicto simple risk-on / neutral / risk-off. Es una
  *  lectura de sentimiento, no una predicción — cada factor es visible. */
@@ -4173,6 +4196,7 @@ function dashboardHTML() {
         ${climate ? dashHeroClimateHTML(climate) : ''}
       </div>
     </div>
+    ${marketStatusBannerHTML()}
     ${sectionTitleHTML('Dashboard', 'grid')}
     <div class="dash-intro">Oportunidades del día y radar del mercado sobre un universo curado de ${DASHBOARD_UNIVERSE.length} activos líquidos (acciones US, CEDEARs argentinos, ETFs y cripto) — no es todo el universo buscable, para no exceder el límite de requests del proveedor de datos gratuito. Elegí cualquiera para ver el informe completo, o buscá otro activo arriba.</div>
 
@@ -5655,51 +5679,105 @@ function groupSessions(t) {
   return sess;
 }
 
-function intradaySetup(candles) {
-  const c = candles.c, h = candles.h, l = candles.l, o = candles.o, t = candles.t || [];
+function intradaySetup(candles, ctx = {}) {
+  const c = candles.c, h = candles.h, l = candles.l, o = candles.o, v = candles.v || [], t = candles.t || [];
   const n = c.length;
   if (n < 60) return null;
   const emaP = n >= 210 ? 200 : Math.min(100, Math.floor(n / 2)); // EMA de referencia
-  const emaArr = ema(c, emaP);
+  const emaArr = ema(c, emaP), ema9 = ema(c, 9), ema20 = ema(c, 20), ema50 = ema(c, 50);
   const price = c[n - 1], emaNow = emaArr[n - 1];
   if (!(emaNow > 0)) return null;
   const rsiArr = rsi(c, 14), rsiNow = rsiArr[n - 1];
+  const { hist } = macd(c);
+  const atrArr = atr(h, l, c, 14), adxArr = adx(h, l, c, 14);
+  const atrNow = atrArr[n - 1] > 0 ? atrArr[n - 1] : (h[n - 1] - l[n - 1]);
+  const adxNow = adxArr[n - 1];
   const sessions = groupSessions(t);
   const today = sessions[sessions.length - 1], prev = sessions[sessions.length - 2];
+  const hasVol = v.some(x => x > 0);
+
   // Gap de apertura de hoy vs cierre de la sesión previa.
   let gapPct = null;
   if (today && prev) { const prevClose = c[prev.to], todayOpen = o[today.from]; if (prevClose > 0) gapPct = (todayOpen - prevClose) / prevClose * 100; }
-  // Toques a la EMA que aguantaron en las últimas ~2 sesiones (low tocó la EMA
-  // pero la vela cerró por encima → soporte dinámico defendido).
+
+  // VWAP anclado al inicio de la sesión de hoy (precio "justo" intradía).
+  let vwap = null;
+  if (today && hasVol) { let pv = 0, vol = 0; for (let i = today.from; i < n; i++) { const tp = (h[i] + l[i] + c[i]) / 3; pv += tp * (v[i] || 0); vol += (v[i] || 0); } vwap = vol > 0 ? pv / vol : null; }
+
+  // Pendiente de la EMA de referencia (sube/plancha/baja) sobre ~20 velas.
+  const emaSlopePct = (emaArr[n - 1] && emaArr[n - 21]) ? (emaArr[n - 1] - emaArr[n - 21]) / emaArr[n - 21] * 100 : 0;
+  // Stack de medias 9>20>50 (impulso ordenado).
+  const stackUp = ema9[n - 1] > ema20[n - 1] && ema20[n - 1] > ema50[n - 1];
+
+  // RVOL de la sesión: volumen de hoy (escalado por la fracción de rueda
+  // transcurrida) vs el promedio por sesión de las ~10 ruedas previas.
+  let rvol = null;
+  if (today && hasVol) {
+    const todayVol = v.slice(today.from, n).reduce((a, b) => a + (b || 0), 0);
+    const prevSess = sessions.slice(Math.max(0, sessions.length - 11), sessions.length - 1);
+    const avg = prevSess.length ? prevSess.reduce((a, s) => a + v.slice(s.from, s.to + 1).reduce((x, y) => x + (y || 0), 0), 0) / prevSess.length : 0;
+    const barsToday = n - today.from, barsFull = prev ? (prev.to - prev.from + 1) : 26;
+    const frac = Math.min(1, barsToday / Math.max(1, barsFull));
+    rvol = (avg > 0 && frac > 0) ? todayVol / (avg * frac) : null;
+  }
+
+  // Toques a la EMA que aguantaron en las últimas ~2 sesiones.
   const scanFrom = prev ? prev.from : Math.max(0, n - 52);
   let touches = 0;
   for (let i = scanFrom; i < n; i++) { const e = emaArr[i]; if (e > 0 && l[i] <= e * 1.002 && c[i] > e) touches++; }
-  // Tasa de acierto EMPÍRICA: en toda la serie, tras un toque que aguantó,
+  // Tasa de acierto EMPÍRICA sobre toda la serie: tras un toque que aguantó,
   // ¿el precio estaba más arriba 8 velas (≈2h) después?
   const HORIZON = 8; let hits = 0, sample = 0;
   for (let i = emaP; i < n - HORIZON; i++) { const e = emaArr[i]; if (e > 0 && l[i] <= e * 1.002 && c[i] > e) { sample++; if (c[i + HORIZON] > c[i]) hits++; } }
   const bounceRate = sample >= 5 ? Math.round(hits / sample * 100) : null;
+
   const aboveEma = price > emaNow;
-  let score = 0; const triggers = [];
-  if (aboveEma) { score += 30; triggers.push(`Precio sobre la EMA${emaP} de 15m — estructura alcista intradía`); }
-  if (touches >= 2) { score += 26; triggers.push(`${touches} rebotes que aguantaron en la EMA${emaP} — soporte firme`); }
-  else if (touches === 1) { score += 12; triggers.push(`Tocó y aguantó la EMA${emaP} una vez`); }
-  if (gapPct != null && gapPct > 0.5) { score += 18; triggers.push(`Gap alcista de apertura (+${gapPct.toFixed(1)}%)`); }
-  if (bounceRate != null && bounceRate >= 60) { score += 16; triggers.push(`Histórico intradía: subió el ${bounceRate}% de las veces tras tocar la EMA (${sample} casos)`); }
-  if (rsiNow != null && rsiNow > 40 && rsiNow < 68) score += 8;
-  if (rsiNow != null && rsiNow >= 72) { score -= 10; }
+  const distEmaAtr = atrNow > 0 ? (price - emaNow) / atrNow : 0; // extensión sobre la EMA, en ATRs
+  const aboveVwap = vwap != null ? price > vwap : null;
+  const macdUp = hist[n - 1] != null && hist[n - 2] != null && hist[n - 1] > hist[n - 2];
+
+  // Contexto de mayor timeframe (diario) y filtros duros.
+  const daily = ctx.daily;
+  const dailyUp = daily && daily.score != null ? daily.score >= 45 : null; // Mantener+ en el diario
+  const earningsSoon = ctx.earningsInDays != null && ctx.earningsInDays >= 0 && ctx.earningsInDays <= 1;
+  const lowLiquidity = ctx.liquidityUsd != null && ctx.liquidityUsd < 3e6;
+
+  let score = 0; const triggers = [], risks = [];
+  const add = (p, label) => { score += p; triggers.push(label); };
+  if (aboveEma) add(22, `Precio sobre la EMA${emaP} de 15m — estructura alcista intradía`);
+  if (emaSlopePct > 0.05) add(10, `EMA${emaP} en pendiente ascendente (tendencia intradía sana)`);
+  else if (emaSlopePct < -0.05) { score -= 8; risks.push(`La EMA${emaP} viene cayendo — el soporte es menos confiable`); }
+  if (stackUp) add(10, 'Medias 9 > 20 > 50 alineadas al alza (impulso ordenado)');
+  if (touches >= 2) add(20, `${touches} rebotes que aguantaron en la EMA${emaP} — soporte firme`);
+  else if (touches === 1) add(10, `Tocó y aguantó la EMA${emaP} una vez`);
+  if (gapPct != null && gapPct > 0.5) add(12, `Gap alcista de apertura (+${gapPct.toFixed(1)}%)`);
+  if (aboveVwap === true) add(12, 'Precio sobre el VWAP de la sesión — compradores en control');
+  else if (aboveVwap === false) { score -= 6; risks.push('Precio bajo el VWAP de la sesión — control vendedor intradía'); }
+  if (macdUp) add(8, 'MACD de 15m girando al alza');
+  if (rvol != null && rvol >= 1.3) add(10, `Volumen alto en la rueda (RVOL ${rvol.toFixed(1)}×) — hay participación real`);
+  else if (rvol != null && rvol < 0.7) { score -= 4; risks.push(`Volumen flojo (RVOL ${rvol.toFixed(1)}×) — poca convicción`); }
+  if (adxNow != null && adxNow >= 20) add(6, `Tendencia con fuerza (ADX ${adxNow.toFixed(0)})`);
+  if (bounceRate != null && bounceRate >= 60) add(12, `Histórico intradía: subió el ${bounceRate}% tras tocar la EMA (${sample} casos)`);
+  if (dailyUp === true) add(8, 'El diario acompaña (score ≥ 45)');
+  else if (dailyUp === false) { score -= 10; risks.push('El diario NO acompaña (score bajo) — estarías operando contra el marco mayor'); }
+  if (rsiNow != null && rsiNow >= 74) { score -= 12; risks.push(`RSI de 15m sobrecomprado (${rsiNow.toFixed(0)}) — puede corregir antes de seguir`); }
+  if (distEmaAtr > 4) { score -= 10; risks.push(`Muy estirado sobre la EMA (${distEmaAtr.toFixed(1)} ATRs) — mala relación riesgo/beneficio para entrar acá`); }
+  if (earningsSoon) { score -= 15; risks.push('Reporta balance hoy o mañana — un earnings puede romper cualquier setup técnico'); }
   score = Math.max(0, Math.min(100, score));
+
   // Plan intradiario: stop bajo la EMA (invalidación), objetivos por múltiplos del riesgo.
-  let atr15 = 0, k = 0;
-  for (let i = Math.max(1, n - 20); i < n; i++) { atr15 += Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])); k++; }
-  atr15 = k ? atr15 / k : (h[n - 1] - l[n - 1]);
-  const stop = Math.min(emaNow * 0.997, price - 1.2 * atr15);
+  const stop = Math.min(emaNow * 0.997, price - 1.2 * atrNow);
   const risk = price - stop;
   const target1 = price + 1.5 * risk, target2 = price + 2.5 * risk;
   const rr = risk > 0 ? (target1 - price) / risk : null;
-  const qualifies = aboveEma && score >= 50 && (touches >= 1 || (gapPct != null && gapPct > 0.5));
-  const confidence = score >= 74 ? 'muy alta' : score >= 60 ? 'alta' : score >= 48 ? 'media' : 'baja';
-  return { qualifies, score, confidence, price, ema: emaNow, emaP, gapPct, touches, bounceRate, bounceSample: sample, rsi: rsiNow, entry: price, stop, target1, target2, rr, triggers };
+
+  // Calificación ENDURECIDA: estructura alcista + EMA no cayendo + no estirado +
+  // sin earnings inminente + con liquidez + (toques o gap) + no bajo el VWAP +
+  // el diario no en contra + score alto.
+  const qualifies = aboveEma && emaSlopePct > -0.15 && score >= 58 && distEmaAtr <= 4 && !earningsSoon && !lowLiquidity
+    && (touches >= 1 || (gapPct != null && gapPct > 0.5)) && aboveVwap !== false && dailyUp !== false;
+  const confidence = score >= 78 ? 'muy alta' : score >= 64 ? 'alta' : score >= 54 ? 'media' : 'baja';
+  return { qualifies, score, confidence, price, ema: emaNow, emaP, gapPct, touches, bounceRate, bounceSample: sample, rsi: rsiNow, vwap, aboveVwap, rvol, adx: adxNow, emaSlopePct, stackUp, distEmaAtr, macdUp, entry: price, stop, target1, target2, rr, triggers, risks };
 }
 
 async function scanIntraday() {
@@ -5718,7 +5796,10 @@ async function scanIntraday() {
         try {
           const cd = await getCandles(tk, '15min', 260);
           if (!cd || cd.isReal === false || !cd.c || cd.c.length < 60) return;
-          const s = intradaySetup(cd);
+          const daily = dashState.data[tk] || watchState.data[tk];
+          const e = shortState.earnings[tk];
+          const earningsInDays = e?.nextDate ? daysUntil(e.nextDate) : null;
+          const s = intradaySetup(cd, { daily, liquidityUsd: daily?.liquidityUsd, earningsInDays });
           if (s && s.qualifies) results.push({ ticker: tk, s });
         } catch { /* símbolo sin velas intradía: se omite */ }
       }));
@@ -5743,9 +5824,13 @@ function intradayCardItem(ticker, s) {
       ${s.gapPct != null ? `<span class="intraday-chip ${s.gapPct >= 0 ? 'up' : 'down'}">gap ${s.gapPct >= 0 ? '+' : ''}${s.gapPct.toFixed(1)}%</span>` : ''}
       <span class="intraday-chip">${s.touches} toque(s) EMA${s.emaP}</span>
       ${s.bounceRate != null ? `<span class="intraday-chip ${s.bounceRate >= 60 ? 'up' : ''}">subió ${s.bounceRate}% (${s.bounceSample} casos)</span>` : ''}
+      ${s.aboveVwap != null ? `<span class="intraday-chip ${s.aboveVwap ? 'up' : 'down'}">${s.aboveVwap ? 'sobre' : 'bajo'} VWAP</span>` : ''}
+      ${s.rvol != null ? `<span class="intraday-chip ${s.rvol >= 1.3 ? 'up' : s.rvol < 0.7 ? 'down' : ''}">RVOL ${s.rvol.toFixed(1)}×</span>` : ''}
+      ${s.adx != null ? `<span class="intraday-chip">ADX ${s.adx.toFixed(0)}</span>` : ''}
       ${s.rsi != null ? `<span class="intraday-chip">RSI ${s.rsi.toFixed(0)}</span>` : ''}
     </div>
     <div class="short-triggers" style="margin:8px 0;">${s.triggers.map(x => `<span class="short-chip">${esc(x)}</span>`).join('')}</div>
+    ${s.risks && s.risks.length ? `<div class="short-risks">${s.risks.map(r => `<div>⚠ ${esc(r)}</div>`).join('')}</div>` : ''}
     <div class="short-plan">
       <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
       <div class="short-plan-cell"><span>Objetivo</span><b class="up">${fmtUsd(s.target1)}</b></div>
@@ -5760,7 +5845,7 @@ function intradayCardHTML() {
   const st = intradayState;
   return `
     ${sectionTitleHTML('⚡ Intradía — 15 minutos', 'zap', 'margin-top:34px;')}
-    <div class="dash-intro">Escáner de setups <strong>intradía</strong> sobre velas de 15 min: activos en <strong>estructura alcista sobre la EMA200</strong> que además tuvieron <strong>gap de apertura</strong> y/o <strong>rebotaron aguantando en la EMA200</strong> (soporte dinámico). Cada uno trae su <strong>tasa de acierto histórica</strong> medida sobre la propia serie del activo — no un número inventado. Corre <strong>bajo demanda</strong> para no saturar las fuentes de datos.</div>
+    <div class="dash-intro">Escáner de setups <strong>intradía</strong> sobre velas de 15 min: activos en <strong>estructura alcista sobre la EMA200</strong> que además tuvieron <strong>gap</strong> y/o <strong>rebotaron aguantando en la EMA200</strong>. Ahora con filtros de precisión: <strong>VWAP de la sesión</strong>, <strong>pendiente y stack de medias</strong> (9&gt;20&gt;50), <strong>volumen relativo (RVOL)</strong>, <strong>MACD/ADX de 15m</strong>, guardia de <strong>sobre-extensión</strong>, y el <strong>marco diario</strong> como filtro — descarta los que van contra la tendencia mayor, sin liquidez o con balance inminente. Cada candidato trae su <strong>tasa de acierto histórica</strong> real. Corre <strong>bajo demanda</strong>.</div>
     <div class="card">
       <div class="intraday-bar">
         <button class="port-add-btn" id="intraday-scan" ${st.loading ? 'disabled' : ''}>${st.loading ? 'Escaneando…' : (st.scanned ? '↻ Volver a escanear' : '🔍 Escanear intradía')}</button>
@@ -12864,8 +12949,31 @@ const PREMARKET_STATE_ES = {
   PRE: 'Pre-market abierto', PREPRE: 'Antes del pre-market', REGULAR: 'Mercado abierto',
   POST: 'After-hours (post cierre)', POSTPOST: 'Mercado cerrado', CLOSED: 'Mercado cerrado',
 };
-const isPreMarketNow = () => dashState.premarketState === 'PRE' || dashState.premarketState === 'PREPRE';
-function premarketStateLabel() { return PREMARKET_STATE_ES[dashState.premarketState] || (dashState.premarketState ? 'Mercado cerrado' : null); }
+/** Fase del mercado de EE.UU. calculada por RELOJ (zona horaria de Nueva York,
+ *  con DST automático) — no depende de que Yahoo devuelva marketState, que a
+ *  veces falta y dejaba el pre-market "sin aparecer". Así el pre-market se ve
+ *  siempre y de forma confiable desde ~5am ART (4am ET) hasta la apertura, y
+ *  las 10am de Argentina caen siempre en PRE. Feriados de EE.UU. no se
+ *  contemplan (el dato en vivo simplemente no cambiará ese día). */
+function marketPhaseET() {
+  try {
+    const now = new Date();
+    const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const day = et.getDay(); // 0 dom … 6 sáb
+    if (day === 0 || day === 6) return 'CLOSED';
+    const mins = et.getHours() * 60 + et.getMinutes();
+    if (mins >= 4 * 60 && mins < 9 * 60 + 30) return 'PRE';        // 4:00–9:30 ET
+    if (mins >= 9 * 60 + 30 && mins < 16 * 60) return 'REGULAR';   // 9:30–16:00 ET
+    if (mins >= 16 * 60 && mins < 20 * 60) return 'POST';          // 16:00–20:00 ET
+    return 'CLOSED';
+  } catch { return dashState.premarketState || 'CLOSED'; }
+}
+const isPreMarketNow = () => marketPhaseET() === 'PRE';
+const isMarketOpenNow = () => marketPhaseET() === 'REGULAR';
+function premarketStateLabel() {
+  const phase = marketPhaseET();
+  return PREMARKET_STATE_ES[phase] || PREMARKET_STATE_ES[dashState.premarketState] || 'Mercado cerrado';
+}
 
 function refreshPreMarketViews() { try { if (!state.loading) renderReport(); } catch { /* noop */ } }
 
