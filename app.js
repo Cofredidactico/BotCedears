@@ -816,7 +816,76 @@ const CHART_TAB_API = {
   '1year': { interval: '1week', n: 56 },    // ~1 año+ de velas semanales
   '5year': { interval: '1month', n: 62 },   // ~5 años de velas mensuales
 };
-const chartState = { tf: '1day', cache: {}, loading: new Set(), mode: 'institucional' }; // mode: 'institucional' | 'libre'
+const chartState = {
+  tf: '1day', cache: {}, loading: new Set(), mode: 'institucional', // mode: 'institucional' | 'libre'
+  type: 'candles',   // 'candles' | 'line' | 'area' | 'heikin'
+  logScale: false,
+  ov: {              // overlays activos (persisten mientras dura la sesión)
+    ema: true, bb: true, vwap: true, poc: true, fib: true, gaps: true,
+    keltner: false, supertrend: false, pivots: false, ichimoku: false, volprofile: false, patterns: false,
+  },
+};
+// El estado del gráfico persiste entre sesiones (tipo/escala/indicadores).
+try {
+  const saved = JSON.parse(localStorage.getItem('icp_chart_prefs') || 'null');
+  if (saved && typeof saved === 'object') {
+    if (typeof saved.type === 'string') chartState.type = saved.type;
+    if (typeof saved.logScale === 'boolean') chartState.logScale = saved.logScale;
+    if (saved.ov && typeof saved.ov === 'object') Object.assign(chartState.ov, saved.ov);
+  }
+} catch {}
+function saveChartPrefs() {
+  try { localStorage.setItem('icp_chart_prefs', JSON.stringify({ type: chartState.type, logScale: chartState.logScale, ov: chartState.ov })); } catch {}
+}
+/** Opts de overlays/tipo/escala que consumen renderPriceChartSVG y wireChartHover,
+ *  derivados del estado del gráfico + los datos técnicos del activo. */
+function chartRenderOpts(dailyTechnical, plan, extra = {}) {
+  const ov = chartState.ov;
+  return {
+    support: dailyTechnical.support, resistance: dailyTechnical.resistance, plan: plan?.raw,
+    poc: dailyTechnical.volumeProfile?.hasData ? dailyTechnical.volumeProfile.poc : null,
+    type: chartState.type, logScale: chartState.logScale,
+    showEma: ov.ema, showBb: ov.bb, showVwap: ov.vwap, showPoc: ov.poc, showFib: ov.fib, showGaps: ov.gaps,
+    showKeltner: ov.keltner, showSupertrend: ov.supertrend, showPivots: ov.pivots, showIchimoku: ov.ichimoku, showVolProfile: ov.volprofile,
+    showPatterns: ov.patterns,
+    ...extra,   // earningsInDays lo pasa el llamador (vive en el reporte, no en technical)
+  };
+}
+
+/** Barra de controles profesional del gráfico: tipo de vela, escala, e
+ *  indicadores como chips que se encienden/apagan. Bien distribuida en
+ *  grupos para no recargar. */
+const CHART_TYPE_OPTS = [['candles', 'Velas'], ['heikin', 'Heikin-Ashi'], ['line', 'Línea'], ['area', 'Área']];
+const CHART_OVERLAY_OPTS = [
+  ['ema', 'EMA'], ['bb', 'Bollinger'], ['vwap', 'VWAP'], ['poc', 'POC'], ['fib', 'Fibonacci'], ['gaps', 'Gaps'],
+  ['keltner', 'Keltner'], ['supertrend', 'Supertrend'], ['ichimoku', 'Ichimoku'], ['pivots', 'Pivots'], ['volprofile', 'Vol. Profile'], ['patterns', 'Patrones'],
+];
+function chartControlsHTML() {
+  const typeChips = CHART_TYPE_OPTS.map(([k, lbl]) =>
+    `<button class="chart-ctl-chip ${chartState.type === k ? 'active' : ''}" data-chart-type="${k}">${lbl}</button>`).join('');
+  const ovChips = CHART_OVERLAY_OPTS.map(([k, lbl]) =>
+    `<button class="chart-ctl-chip ov ${chartState.ov[k] ? 'active' : ''}" data-overlay="${k}">${lbl}</button>`).join('');
+  return `
+    <div class="chart-controls">
+      <div class="chart-ctl-group">
+        <span class="chart-ctl-label">Tipo</span>
+        ${typeChips}
+      </div>
+      <div class="chart-ctl-group">
+        <span class="chart-ctl-label">Escala</span>
+        <button class="chart-ctl-chip ${!chartState.logScale ? 'active' : ''}" data-chart-scale="lin">Lineal</button>
+        <button class="chart-ctl-chip ${chartState.logScale ? 'active' : ''}" data-chart-scale="log">Log</button>
+      </div>
+      <div class="chart-ctl-group grow">
+        <span class="chart-ctl-label">Indicadores</span>
+        ${ovChips}
+      </div>
+      <div class="chart-ctl-group">
+        <button class="chart-ctl-chip icon" data-chart-action="fullscreen" title="Pantalla completa" aria-label="Pantalla completa">⛶</button>
+        <button class="chart-ctl-chip icon" data-chart-action="png" title="Descargar como imagen" aria-label="Descargar como imagen">⬇ PNG</button>
+      </div>
+    </div>`;
+}
 function chartTabsForAsset(asset) {
   return asset?.category === 'Cripto' ? CHART_TABS.filter(t => t.key === '1day' || t.key === '1week') : CHART_TABS;
 }
@@ -898,7 +967,54 @@ function mountTradingViewTAWidget(containerId, symbol) {
   el.appendChild(script);
 }
 
-function chartCardBody(dailyTechnical, plan) {
+/** Pantalla completa del gráfico (Fullscreen API). El estilo se maneja por
+ *  la pseudo-clase :fullscreen en CSS, así que no hace falta clase manual. */
+function toggleChartFullscreen(card) {
+  if (!card) return;
+  if (document.fullscreenElement) { document.exitFullscreen?.(); return; }
+  const req = card.requestFullscreen || card.webkitRequestFullscreen;
+  if (!req) { showToast('Pantalla completa no soportada en este navegador', 'info'); return; }
+  Promise.resolve(req.call(card)).catch(() => showToast('No se pudo abrir en pantalla completa', 'info'));
+}
+
+/** Exporta el gráfico SVG actual a PNG (client-side, sin dependencias):
+ *  clona el SVG, le agrega fondo opaco, lo rasteriza en un canvas 2× y
+ *  dispara la descarga. */
+function downloadChartPNG(wrap, asset) {
+  const svg = wrap?.querySelector('svg');
+  if (!svg) { showToast('No hay gráfico para exportar', 'error'); return; }
+  const vb = (svg.getAttribute('viewBox') || '0 0 960 560').split(/\s+/).map(Number);
+  const w = vb[2] || 960, h = vb[3] || 560;
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('width', w); clone.setAttribute('height', h);
+  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  bg.setAttribute('x', 0); bg.setAttribute('y', 0); bg.setAttribute('width', w); bg.setAttribute('height', h); bg.setAttribute('fill', '#0b0d14');
+  clone.insertBefore(bg, clone.firstChild);
+  const xml = new XMLSerializer().serializeToString(clone);
+  const svg64 = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)));
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = w * scale; canvas.height = h * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0b0d14'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (!blob) { showToast('No se pudo exportar el gráfico', 'error'); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${asset?.ticker || 'grafico'}_${chartState.tf}.png`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      showToast('Gráfico descargado como PNG', 'success');
+    }, 'image/png');
+  };
+  img.onerror = () => showToast('No se pudo exportar el gráfico', 'error');
+  img.src = svg64;
+}
+
+function chartCardBody(dailyTechnical, plan, earningsInDays = null) {
   const tf = chartState.tf;
   const entry = chartState.cache[tf];
   if (chartState.loading.has(tf) && !entry) return `<div class="skel skel-chart"></div>`;
@@ -910,9 +1026,9 @@ function chartCardBody(dailyTechnical, plan) {
   if (entry.isReal === false && isLive()) {
     return `<div class="chart-empty chart-empty-degraded">Gráfico no disponible en este momento — el proveedor de velas no respondió o alcanzó su límite diario. No se muestra un gráfico simulado para no confundirlo con datos reales. Probá la pestaña <strong>Análisis Libre (TradingView)</strong> arriba, o volvé a intentar en unos minutos.</div>`;
   }
-  const svg = renderPriceChartSVG(entry.candles, { support: dailyTechnical.support, resistance: dailyTechnical.resistance, plan: plan?.raw, poc: dailyTechnical.volumeProfile?.hasData ? dailyTechnical.volumeProfile.poc : null });
+  const svg = renderPriceChartSVG(entry.candles, chartRenderOpts(dailyTechnical, plan, { earningsInDays }));
   const staleNote = entry.isReal === false ? `<div class="chart-stale">Datos de demostración — modo de prueba local.</div>` : '';
-  return svg + staleNote;
+  return chartControlsHTML() + svg + staleNote;
 }
 
 /** Columna al lado del gráfico de TradingView (siempre en vivo): el gauge
@@ -2611,7 +2727,7 @@ function renderReportImpl() {
       <div class="chart-tabs">
         ${chartTabsForAsset(asset).map(tab => `<button class="chart-tab ${chartState.tf === tab.key ? 'active' : ''}" data-tf="${tab.key}">${tab.label}</button>`).join('')}
       </div>
-      ${chartCardBody(t, plan)}
+      ${chartCardBody(t, plan, daysToEarnings)}
       `}
     </div>
 
@@ -2813,7 +2929,36 @@ function renderReportImpl() {
   const chartEntry = chartState.cache[chartState.tf];
   // Mismos opts que el render (support/resistance/plan diarios) para que la
   // escala de precio del crosshair coincida exactamente con lo dibujado.
-  if (chartWrap && chartEntry) wireChartHover(chartWrap, chartEntry.candles, { support: t.support, resistance: t.resistance, plan: plan?.raw });
+  if (chartWrap && chartEntry) wireChartHover(chartWrap, chartEntry.candles, chartRenderOpts(t, plan, { earningsInDays: daysToEarnings }));
+
+  // Barra de controles del gráfico: tipo de vela, escala e indicadores.
+  const chartCard = els.report.querySelector('.chart-card');
+  els.report.querySelectorAll('[data-chart-type]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (chartState.type === btn.dataset.chartType) return;
+      chartState.type = btn.dataset.chartType; saveChartPrefs(); renderReport();
+    });
+  });
+  els.report.querySelectorAll('[data-chart-scale]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const wantLog = btn.dataset.chartScale === 'log';
+      if (chartState.logScale === wantLog) return;
+      chartState.logScale = wantLog; saveChartPrefs(); renderReport();
+    });
+  });
+  els.report.querySelectorAll('[data-overlay]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const k = btn.dataset.overlay;
+      chartState.ov[k] = !chartState.ov[k]; saveChartPrefs(); renderReport();
+    });
+  });
+  els.report.querySelectorAll('[data-chart-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.chartAction;
+      if (action === 'fullscreen') toggleChartFullscreen(chartCard);
+      else if (action === 'png') downloadChartPNG(chartWrap, state.asset);
+    });
+  });
 
   els.report.querySelectorAll('.chart-mode-tab').forEach(btn => {
     btn.addEventListener('click', () => {

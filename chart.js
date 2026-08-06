@@ -5,7 +5,54 @@
  * Volumen y RSI debajo, todo sobre el mismo OHLCV real que usa
  * indicators.js — nada se simula acá.
  */
-import { ema, bollinger, rsi, macd, sma } from './indicators.js';
+import { ema, bollinger, rsi, macd, sma, atr, keltnerChannels, detectCandlePattern } from './indicators.js';
+
+/* ── Supertrend (ATR trailing por bandas) — indicador de tendencia clásico:
+ *  línea verde bajo el precio en tendencia alcista, roja arriba en bajista,
+ *  que "flipea" en el cruce. Se calcula sobre el OHLC real. ── */
+function supertrend(highs, lows, closes, period = 10, mult = 3) {
+  const atrS = atr(highs, lows, closes, period);
+  const n = closes.length;
+  const line = new Array(n).fill(NaN), dir = new Array(n).fill(1); // 1 = alcista, -1 = bajista
+  let prevUpper = NaN, prevLower = NaN, prevDir = 1, prevST = NaN;
+  for (let i = 0; i < n; i++) {
+    if (isNaN(atrS[i])) continue;
+    const hl2 = (highs[i] + lows[i]) / 2;
+    let upper = hl2 + mult * atrS[i], lower = hl2 - mult * atrS[i];
+    if (!isNaN(prevUpper)) upper = (upper < prevUpper || closes[i - 1] > prevUpper) ? upper : prevUpper;
+    if (!isNaN(prevLower)) lower = (lower > prevLower || closes[i - 1] < prevLower) ? lower : prevLower;
+    let d = prevDir;
+    if (!isNaN(prevST)) {
+      if (prevDir === 1 && closes[i] < prevLower) d = -1;
+      else if (prevDir === -1 && closes[i] > prevUpper) d = 1;
+    }
+    const st = d === 1 ? lower : upper;
+    line[i] = st; dir[i] = d;
+    prevUpper = upper; prevLower = lower; prevDir = d; prevST = st;
+  }
+  return { line, dir };
+}
+
+/* ── Ichimoku Kinko Hyo (versión sin desplazamiento adelantado, ya que el
+ *  gráfico no tiene barras futuras): Tenkan(9), Kijun(26) y la nube
+ *  Senkou A/B calculada en el eje actual — lectura de tendencia y de la
+ *  "nube" como zona de soporte/resistencia. ── */
+function donchianMid(highs, lows, period) {
+  const n = highs.length, out = new Array(n).fill(NaN);
+  for (let i = period - 1; i < n; i++) {
+    let hi = -Infinity, lo = Infinity;
+    for (let k = i - period + 1; k <= i; k++) { if (highs[k] > hi) hi = highs[k]; if (lows[k] < lo) lo = lows[k]; }
+    out[i] = (hi + lo) / 2;
+  }
+  return out;
+}
+function ichimoku(highs, lows) {
+  const tenkan = donchianMid(highs, lows, 9);
+  const kijun = donchianMid(highs, lows, 26);
+  const senkouA = tenkan.map((t, i) => (isNaN(t) || isNaN(kijun[i])) ? NaN : (t + kijun[i]) / 2);
+  const senkouB = donchianMid(highs, lows, 52);
+  return { tenkan, kijun, senkouA, senkouB };
+}
 
 const W = 960;
 const PAD_L = 6, PAD_R = 82;
@@ -78,7 +125,15 @@ function priceExtent(candles, start, opts) {
 }
 
 export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
-  const { support, resistance, plan, poc = null, showVwap = true, showFib = true, showGaps = true } = opts;
+  const {
+    support, resistance, plan, poc = null,
+    type = 'candles',          // 'candles' | 'line' | 'area' | 'heikin'
+    logScale = false,
+    showEma = true, showBb = true, showVwap = true, showPoc = true, showFib = true, showGaps = true,
+    showKeltner = false, showSupertrend = false, showPivots = false, showIchimoku = false, showVolProfile = false,
+    showPatterns = false,
+    earningsInDays = null,
+  } = opts;
   const nTotal = candles.c.length;
   if (nTotal < 5) return '<div class="chart-empty">Historial insuficiente para graficar.</div>';
 
@@ -104,16 +159,19 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
   const candleW = Math.max(1.2, Math.min(9, slot * 0.66));
   const x = (i) => PAD_L + slot * i + slot / 2;
 
-  /* ── escala de precio ── */
+  /* ── escala de precio (lineal o logarítmica) ── */
   const { pMin, pMax } = priceExtent(candles, start, opts);
-  const yPrice = (val) => scaleY(val, pMin, pMax, PRICE_TOP, PRICE_BOTTOM);
+  const useLog = logScale && pMin > 0 && pMax > 0;
+  const tScale = (val) => useLog ? Math.log(val) : val;
+  const tMin = tScale(pMin), tMax = tScale(pMax);
+  const yPrice = (val) => (val == null || !isFinite(val) || (useLog && val <= 0)) ? NaN : scaleY(tScale(val), tMin, tMax, PRICE_TOP, PRICE_BOTTOM);
 
   const last = (arr) => { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null && !isNaN(arr[i])) return arr[i]; return null; };
 
   /* ── grilla horizontal + etiquetas de precio a la derecha ── */
   let priceGridSvg = '';
   for (let i = 0; i <= 5; i++) {
-    const val = pMin + ((pMax - pMin) * i) / 5;
+    const val = useLog ? Math.exp(tMin + ((tMax - tMin) * i) / 5) : pMin + ((pMax - pMin) * i) / 5;
     const yy = yPrice(val).toFixed(1);
     priceGridSvg += `<line x1="${PAD_L}" y1="${yy}" x2="${W - PAD_R}" y2="${yy}" stroke="${GRID_SOFT}" stroke-width="1"/>`;
     priceGridSvg += `<text x="${W - PAD_R + 6}" y="${yy}" fill="${AXIS_TEXT}" font-size="10" font-family="IBM Plex Mono, monospace" dominant-baseline="middle">${niceFmt(val)}</text>`;
@@ -159,7 +217,7 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
 
   /* ── relleno de Bandas de Bollinger (área tenue entre banda sup. e inf.) ── */
   let bbFill = '';
-  {
+  if (showBb) {
     const pts = [];
     for (let i = 0; i < count; i++) if (!isNaN(bbUpper[i])) pts.push(`${i === 0 || isNaN(bbUpper[i - 1]) ? 'M' : 'L'}${x(i).toFixed(1)},${yPrice(bbUpper[i]).toFixed(1)}`);
     for (let i = count - 1; i >= 0; i--) if (!isNaN(bbLower[i])) pts.push(`L${x(i).toFixed(1)},${yPrice(bbLower[i]).toFixed(1)}`);
@@ -177,23 +235,50 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
     <filter id="lastGlow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
   </defs>`;
 
-  /* ── velas ── */
+  /* ── Heikin-Ashi (velas suavizadas): promedia OHLC para filtrar ruido y
+   *  mostrar la tendencia más "limpia". Se computa sobre la serie completa
+   *  y se recorta a la ventana visible para que el color/tendencia sea
+   *  consistente entre timeframes. ── */
+  const heikin = (() => {
+    const O = candles.o, Hh = candles.h, Ll = candles.l, Cc = candles.c, N = Cc.length;
+    const ho = new Array(N), hh = new Array(N), hl = new Array(N), hc = new Array(N);
+    for (let i = 0; i < N; i++) {
+      hc[i] = (O[i] + Hh[i] + Ll[i] + Cc[i]) / 4;
+      ho[i] = i === 0 ? (O[i] + Cc[i]) / 2 : (ho[i - 1] + hc[i - 1]) / 2;
+      hh[i] = Math.max(Hh[i], ho[i], hc[i]);
+      hl[i] = Math.min(Ll[i], ho[i], hc[i]);
+    }
+    return { o: ho.slice(start), h: hh.slice(start), l: hl.slice(start), c: hc.slice(start) };
+  })();
+
+  // OHLC efectivo para dibujar el cuerpo de las velas según el tipo de gráfico.
+  const dO = type === 'heikin' ? heikin.o : o;
+  const dH = type === 'heikin' ? heikin.h : h;
+  const dL = type === 'heikin' ? heikin.l : l;
+  const dC = type === 'heikin' ? heikin.c : c;
+
+  /* ── serie de precio (velas / línea / área / Heikin-Ashi) ── */
   let candlesSvg = '';
-  for (let i = 0; i < count; i++) {
-    const up = c[i] >= o[i];
-    const color = up ? GREEN : RED;
-    const xc = x(i);
-    candlesSvg += `<line x1="${xc.toFixed(1)}" y1="${yPrice(h[i]).toFixed(1)}" x2="${xc.toFixed(1)}" y2="${yPrice(l[i]).toFixed(1)}" stroke="${color}" stroke-width="1" opacity="0.9"/>`;
-    const yOpen = yPrice(o[i]), yClose = yPrice(c[i]);
-    const rectY = Math.min(yOpen, yClose), rectH = Math.max(1, Math.abs(yOpen - yClose));
-    // Cuerpo lleno para bajistas, hueco (contorno) para alcistas — convención
-    // de las plataformas profesionales, más limpio de leer de un vistazo.
-    if (up) candlesSvg += `<rect x="${(xc - candleW / 2).toFixed(1)}" y="${rectY.toFixed(1)}" width="${candleW.toFixed(1)}" height="${rectH.toFixed(1)}" fill="oklch(0.72 0.17 152 / 0.25)" stroke="${color}" stroke-width="1"/>`;
-    else candlesSvg += `<rect x="${(xc - candleW / 2).toFixed(1)}" y="${rectY.toFixed(1)}" width="${candleW.toFixed(1)}" height="${rectH.toFixed(1)}" fill="${color}"/>`;
+  if (type === 'line' || type === 'area') {
+    // El área/glow bajo el cierre ya se dibuja con `areaFill`; acá va la línea.
+    candlesSvg = polyline(c, x, yPrice, 'oklch(0.80 0.16 264)', 0.98, 2);
+  } else {
+    for (let i = 0; i < count; i++) {
+      const up = dC[i] >= dO[i];
+      const color = up ? GREEN : RED;
+      const xc = x(i);
+      candlesSvg += `<line x1="${xc.toFixed(1)}" y1="${yPrice(dH[i]).toFixed(1)}" x2="${xc.toFixed(1)}" y2="${yPrice(dL[i]).toFixed(1)}" stroke="${color}" stroke-width="1" opacity="0.9"/>`;
+      const yOpen = yPrice(dO[i]), yClose = yPrice(dC[i]);
+      const rectY = Math.min(yOpen, yClose), rectH = Math.max(1, Math.abs(yOpen - yClose));
+      // Cuerpo lleno para bajistas, hueco (contorno) para alcistas — convención
+      // de las plataformas profesionales, más limpio de leer de un vistazo.
+      if (up) candlesSvg += `<rect x="${(xc - candleW / 2).toFixed(1)}" y="${rectY.toFixed(1)}" width="${candleW.toFixed(1)}" height="${rectH.toFixed(1)}" fill="oklch(0.72 0.17 152 / 0.25)" stroke="${color}" stroke-width="1"/>`;
+      else candlesSvg += `<rect x="${(xc - candleW / 2).toFixed(1)}" y="${rectY.toFixed(1)}" width="${candleW.toFixed(1)}" height="${rectH.toFixed(1)}" fill="${color}"/>`;
+    }
   }
 
-  const bbSvg = polyline(bbUpper, x, yPrice, BLUE, 0.5, 1) + polyline(bbLower, x, yPrice, BLUE, 0.5, 1);
-  const emaSvg = polyline(ema20, x, yPrice, GOLD, 0.95, 1.5) + polyline(ema50, x, yPrice, WHITE, 0.9, 1.5) + polyline(ema200, x, yPrice, PURPLE, 0.85, 1.6);
+  const bbSvg = showBb ? polyline(bbUpper, x, yPrice, BLUE, 0.5, 1) + polyline(bbLower, x, yPrice, BLUE, 0.5, 1) : '';
+  const emaSvg = showEma ? polyline(ema20, x, yPrice, GOLD, 0.95, 1.5) + polyline(ema50, x, yPrice, WHITE, 0.9, 1.5) + polyline(ema200, x, yPrice, PURPLE, 0.85, 1.6) : '';
 
   /* ── marcadores de máximo/mínimo del rango visible ── */
   let extremaSvg = '';
@@ -308,7 +393,7 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
   /* ── POC (Volume Profile): el precio de mayor volumen operado — soporte/
    * resistencia "pesado". Llega ya calculado en opts.poc. ── */
   let pocSvg = '';
-  if (poc != null && isFinite(poc) && poc >= pMin && poc <= pMax) {
+  if (showPoc && poc != null && isFinite(poc) && poc >= pMin && poc <= pMax) {
     const yy = yPrice(poc);
     pocSvg = `<line x1="${PAD_L}" y1="${yy.toFixed(1)}" x2="${W - PAD_R}" y2="${yy.toFixed(1)}" stroke="${BLUE}" stroke-width="1" stroke-dasharray="5 3" opacity="0.55"/>${pillLabel(W - PAD_R + 6, yy, 'POC ' + niceFmt(poc), BLUE, 'oklch(0.15 0.03 199)')}`;
   }
@@ -337,6 +422,109 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
     gapSvg += `<rect x="${(x(i) - slot / 2).toFixed(1)}" y="${Math.min(y1, y2).toFixed(1)}" width="${Math.max(1, slot * 0.9).toFixed(1)}" height="${Math.max(1, Math.abs(y1 - y2)).toFixed(1)}" fill="${gp > 0 ? GREEN : RED}" opacity="0.14"><title>Gap ${gp > 0 ? '+' : ''}${(gp * 100).toFixed(1)}%</title></rect>`;
   }
 
+  /* ── Keltner Channels (media EMA20 ± 1,5·ATR) — canal de volatilidad más
+   * suave que Bollinger; el precio saliéndose marca impulso real. ── */
+  const KELT = 'oklch(0.74 0.11 165)';
+  let keltnerSvg = '';
+  if (showKeltner) {
+    const atrS = atr(candles.h, candles.l, candles.c, 14);
+    const kc = keltnerChannels(candles.c, atrS, 20, 1.5);
+    keltnerSvg = polyline(kc.upper.slice(start), x, yPrice, KELT, 0.6, 1) + polyline(kc.lower.slice(start), x, yPrice, KELT, 0.6, 1) + polyline(kc.mid.slice(start), x, yPrice, KELT, 0.4, 1);
+  }
+
+  /* ── Supertrend (ATR trailing): verde bajo el precio = alcista, roja arriba
+   * = bajista; el punto marca el flip de tendencia. ── */
+  let supertrendSvg = '';
+  if (showSupertrend) {
+    const st = supertrend(candles.h, candles.l, candles.c, 10, 3);
+    const stLine = st.line.slice(start), stDir = st.dir.slice(start);
+    const upSeg = stLine.map((val, i) => stDir[i] === 1 ? val : NaN);
+    const dnSeg = stLine.map((val, i) => stDir[i] === -1 ? val : NaN);
+    supertrendSvg = polyline(upSeg, x, yPrice, GREEN, 0.9, 1.8) + polyline(dnSeg, x, yPrice, RED, 0.9, 1.8);
+    for (let i = 1; i < count; i++) {
+      if (isNaN(stLine[i]) || isNaN(stDir[i - 1]) || stDir[i] === stDir[i - 1]) continue;
+      const up = stDir[i] === 1;
+      supertrendSvg += `<circle cx="${x(i).toFixed(1)}" cy="${yPrice(stLine[i]).toFixed(1)}" r="2.8" fill="${up ? GREEN : RED}"/>`;
+    }
+  }
+
+  /* ── Ichimoku Kinko Hyo: Tenkan/Kijun + nube Senkou A-B (soporte/resistencia
+   * dinámica). Nube sin desplazamiento adelantado — el gráfico no tiene barras
+   * futuras — señalado como simplificación. ── */
+  let ichimokuSvg = '';
+  if (showIchimoku) {
+    const ich = ichimoku(candles.h, candles.l);
+    const tk = ich.tenkan.slice(start), kj = ich.kijun.slice(start), sa = ich.senkouA.slice(start), sb = ich.senkouB.slice(start);
+    const aPts = [], bPts = [];
+    for (let i = 0; i < count; i++) if (!isNaN(sa[i]) && !isNaN(sb[i])) { aPts.push([x(i), yPrice(sa[i])]); bPts.push([x(i), yPrice(sb[i])]); }
+    let cloud = '';
+    if (aPts.length > 2) {
+      const fwd = aPts.map((p, idx) => `${idx === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+      const back = bPts.slice().reverse().map(p => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+      const bull = last(sa) >= last(sb);
+      cloud = `<path d="${fwd} ${back} Z" fill="${bull ? GREEN : RED}" opacity="0.10"/>`;
+    }
+    ichimokuSvg = cloud
+      + polyline(sa, x, yPrice, 'oklch(0.72 0.14 152)', 0.5, 1)
+      + polyline(sb, x, yPrice, 'oklch(0.68 0.16 23)', 0.5, 1)
+      + polyline(tk, x, yPrice, 'oklch(0.80 0.15 250)', 0.9, 1.3)
+      + polyline(kj, x, yPrice, 'oklch(0.78 0.16 30)', 0.9, 1.3);
+  }
+
+  /* ── Pivots clásicos del día (P, R1/R2, S1/S2) desde la última barra —
+   * niveles de referencia intradía que usan muchos operadores. ── */
+  let pivotsSvg = '';
+  if (showPivots) {
+    const H_ = h[count - 1], L_ = l[count - 1], C_ = c[count - 1];
+    const P = (H_ + L_ + C_) / 3, R1 = 2 * P - L_, S1 = 2 * P - H_, R2 = P + (H_ - L_), S2 = P - (H_ - L_);
+    for (const [lab, val, col] of [['P', P, PANEL_LABEL], ['R1', R1, GOLD], ['S1', S1, BLUE], ['R2', R2, GOLD], ['S2', S2, BLUE]]) {
+      if (!(val >= pMin && val <= pMax)) continue;
+      const yy = yPrice(val);
+      pivotsSvg += `<line x1="${PAD_L}" y1="${yy.toFixed(1)}" x2="${W - PAD_R}" y2="${yy.toFixed(1)}" stroke="${col}" stroke-width="0.8" stroke-dasharray="4 4" opacity="0.5"/><text x="${W - PAD_R - 3}" y="${(yy - 2).toFixed(1)}" fill="${col}" font-size="8" text-anchor="end" font-family="IBM Plex Mono, monospace" opacity="0.85">${lab} ${niceFmt(val)}</text>`;
+    }
+  }
+
+  /* ── Volume Profile: histograma horizontal de volumen operado por nivel de
+   * precio en la ventana visible; el bin dorado es el POC. Va de fondo, a la
+   * izquierda, para no tapar las velas. ── */
+  let volProfileSvg = '';
+  if (showVolProfile && hasVolume) {
+    const bins = 24, lo = pMin, hi = pMax, bs = (hi - lo) / bins;
+    const vb = new Array(bins).fill(0);
+    for (let i = 0; i < count; i++) { const tp = (h[i] + l[i] + c[i]) / 3; let b = Math.floor((tp - lo) / bs); b = Math.max(0, Math.min(bins - 1, b)); vb[b] += v[i] || 0; }
+    const vbMax = Math.max(...vb) || 1, maxW = 92, pocBin = vb.indexOf(vbMax);
+    for (let b = 0; b < bins; b++) {
+      if (vb[b] <= 0) continue;
+      const yTop = yPrice(lo + (b + 1) * bs), yBot = yPrice(lo + b * bs);
+      const bw = (vb[b] / vbMax) * maxW;
+      volProfileSvg += `<rect x="${PAD_L}" y="${yTop.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, yBot - yTop - 1).toFixed(1)}" fill="${b === pocBin ? GOLD : BLUE}" opacity="${b === pocBin ? 0.30 : 0.15}"/>`;
+    }
+  }
+
+  /* ── Anotaciones de patrones de vela sobre las últimas ~40 velas visibles
+   * (marcador con el nombre del patrón en el tooltip nativo). ── */
+  let patternsSvg = '';
+  if (showPatterns) {
+    const from = Math.max(6, count - 40);
+    for (let i = from; i < count; i++) {
+      const gi = start + i + 1;
+      const pat = detectCandlePattern(candles.o.slice(0, gi), candles.h.slice(0, gi), candles.l.slice(0, gi), candles.c.slice(0, gi));
+      if (!pat) continue;
+      const bull = pat.bias === 'bullish', bear = pat.bias === 'bearish';
+      const col = bull ? GREEN : bear ? RED : AXIS_TEXT;
+      const mark = bull ? '▲' : bear ? '▼' : '◆';
+      const yy = bull ? yPrice(l[i]) + 13 : bear ? yPrice(h[i]) - 6 : yPrice(h[i]) - 6;
+      patternsSvg += `<text x="${x(i).toFixed(1)}" y="${yy.toFixed(1)}" fill="${col}" font-size="9" text-anchor="middle" font-family="IBM Plex Mono, monospace"><title>${esc(pat.label)}</title>${mark}</text>`;
+    }
+  }
+
+  /* ── Marcador de earnings próximo (línea en el borde derecho) ── */
+  let earningsSvg = '';
+  if (earningsInDays != null && earningsInDays >= 0 && earningsInDays <= 45) {
+    const xE = W - PAD_R - 2;
+    earningsSvg = `<line x1="${xE}" y1="${PRICE_TOP}" x2="${xE}" y2="${PRICE_BOTTOM}" stroke="${GOLD}" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/><text x="${xE - 4}" y="${PRICE_TOP + 11}" fill="${GOLD}" font-size="9" text-anchor="end" font-family="IBM Plex Mono, monospace">📅 Earnings ${earningsInDays === 0 ? 'hoy' : 'en ' + earningsInDays + 'd'}</text>`;
+  }
+
   const emaLbl = (val) => val == null ? '—' : niceFmt(val);
   return `
     <div class="chart-svg-wrap">
@@ -345,17 +533,24 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
       ${defsSvg}
       ${vGridSvg}
       ${priceGridSvg}
+      ${volProfileSvg}
       ${areaFill}
       ${bbFill}
       ${gapSvg}
       ${fibSvg}
+      ${ichimokuSvg}
+      ${keltnerSvg}
+      ${pivotsSvg}
       ${zonesSvg}
       ${pocSvg}
       ${bbSvg}
       ${candlesSvg}
+      ${supertrendSvg}
       ${emaSvg}
       ${vwapSvg}
+      ${patternsSvg}
       ${extremaSvg}
+      ${earningsSvg}
       ${lastPriceSvg}
       ${sepSvg}
       ${volSvg}
@@ -369,13 +564,19 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
     <div class="chart-legend">
       <span><i style="background:${GREEN};"></i>Alcista</span>
       <span><i style="background:${RED};"></i>Bajista</span>
-      <span><i style="background:${GOLD};"></i>EMA 20 · ${emaLbl(last(ema20))}</span>
+      ${showEma ? `<span><i style="background:${GOLD};"></i>EMA 20 · ${emaLbl(last(ema20))}</span>
       <span><i style="background:${WHITE};"></i>EMA 50 · ${emaLbl(last(ema50))}</span>
-      <span><i style="background:${PURPLE};"></i>EMA 200 · ${emaLbl(last(ema200))}</span>
-      <span><i style="background:${BLUE};"></i>Bollinger</span>
+      <span><i style="background:${PURPLE};"></i>EMA 200 · ${emaLbl(last(ema200))}</span>` : ''}
+      ${bbSvg ? `<span><i style="background:${BLUE};"></i>Bollinger</span>` : ''}
       ${vwapSvg ? `<span><i style="background:oklch(0.82 0.11 199);"></i>VWAP</span>` : ''}
       ${pocSvg ? `<span><i style="background:${BLUE};"></i>POC (volumen)</span>` : ''}
       ${fibSvg ? `<span><i style="background:${GOLD}; opacity:0.5;"></i>Fibonacci</span>` : ''}
+      ${keltnerSvg ? `<span><i style="background:${KELT};"></i>Keltner</span>` : ''}
+      ${supertrendSvg ? `<span><i style="background:${GREEN};"></i>Supertrend</span>` : ''}
+      ${ichimokuSvg ? `<span><i style="background:oklch(0.80 0.15 250);"></i>Ichimoku</span>` : ''}
+      ${pivotsSvg ? `<span><i style="background:${GOLD}; opacity:0.6;"></i>Pivots</span>` : ''}
+      ${volProfileSvg ? `<span><i style="background:${BLUE}; opacity:0.5;"></i>Vol. Profile</span>` : ''}
+      ${patternsSvg ? `<span><i style="background:${WHITE};"></i>Patrones</span>` : ''}
       ${plan ? `
       <span><i style="background:${GREEN}; opacity:0.35;"></i>Zona de compra</span>
       <span><i style="background:${GOLD}; opacity:0.35;"></i>Zona de venta</span>
@@ -409,6 +610,7 @@ export function wireChartHover(container, candles, opts = {}, windowSize = 130) 
   const plotW = W - PAD_L - PAD_R;
   const slot = plotW / count;
   const { pMin, pMax } = priceExtent(candles, start, opts);
+  const useLog = opts.logScale && pMin > 0 && pMax > 0;
   const defaultStatus = statusLine ? statusLine.innerHTML : '';
 
   const onMove = (e) => {
@@ -426,7 +628,8 @@ export function wireChartHover(container, candles, opts = {}, windowSize = 130) 
     if (hLine && yTag && svgY >= PRICE_TOP && svgY <= PRICE_BOTTOM) {
       const yy = Math.max(PRICE_TOP, Math.min(PRICE_BOTTOM, svgY));
       hLine.setAttribute('y1', yy.toFixed(1)); hLine.setAttribute('y2', yy.toFixed(1)); hLine.setAttribute('opacity', '0.45');
-      const priceAtY = pMin + ((PRICE_BOTTOM - yy) / (PRICE_BOTTOM - PRICE_TOP)) * (pMax - pMin);
+      const frac = (PRICE_BOTTOM - yy) / (PRICE_BOTTOM - PRICE_TOP);
+      const priceAtY = useLog ? Math.exp(Math.log(pMin) + frac * (Math.log(pMax) - Math.log(pMin))) : pMin + frac * (pMax - pMin);
       yTag.setAttribute('opacity', '1');
       yTag.querySelector('rect').setAttribute('y', (yy - 8).toFixed(1));
       const tx = yTag.querySelector('text'); tx.setAttribute('y', yy.toFixed(1)); tx.textContent = niceFmt(priceAtY);
