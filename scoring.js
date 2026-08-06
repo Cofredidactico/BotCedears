@@ -300,7 +300,10 @@ export function computePlan(technical, score) {
  * de una sola vela, la alerta vuelve marcada `pending: true` ("tentativa")
  * en vez de confirmada. */
 export function detectPriceAlert(price, technical, opts = {}) {
-  const { confluence = null, recentCloses = null } = opts;
+  // `regime` ('bull'|'bear'|'neutral'|null), `liquidityLow` y `earningsInDays`
+  // son CONTEXTO opcional que solo llega en vivo (no en el backtest, que pasa
+  // opts sin ellos) → sin contexto, el comportamiento histórico no cambia.
+  const { confluence = null, recentCloses = null, regime = null, liquidityLow = false, earningsInDays = null } = opts;
   const { support, resistance, atr, rsi, obvConfirms, divergence,
     relVolume, ema50, ema200, volumeProfile, squeeze, candlePattern,
     bullishAlign, bearishAlign, adx } = technical;
@@ -372,7 +375,12 @@ export function detectPriceAlert(price, technical, opts = {}) {
   // filtro de tendencia son los de mayor valor predictivo (evitan el
   // "cuchillo cayendo" y la compra contra la corriente); el volumen y la
   // confluencia de nivel, intermedios; RSI/OBV/divergencia, de apoyo.
+  // Régimen de mercado (S&P 500): comprar con el mercado a favor sube mucho la
+  // probabilidad; en contra, la baja. Solo cuenta si llega el contexto en vivo.
+  const regimeBuyOk = regime == null ? null : (regime === 'bull' ? true : (regime === 'bear' ? false : null));
+  const regimeSellOk = regime == null ? null : (regime === 'bear' ? true : (regime === 'bull' ? false : null));
   const checks = direction === 'buy' ? [
+    { label: 'Mercado global a favor (S&P 500)', ok: regimeBuyOk, w: 2.5, primary: true },
     { label: 'Precio girando al alza (reversión)', ok: reversal, w: 3, primary: true },
     { label: 'Tendencia no bajista fuerte', ok: trendOk, w: 3, primary: true },
     { label: 'Clímax de volumen en el soporte', ok: volClimax, w: 2, primary: true },
@@ -384,6 +392,7 @@ export function detectPriceAlert(price, technical, opts = {}) {
     { label: 'Compresión de volatilidad (posible envión)', ok: squeezeActive, w: 1 },
     confluence ? { label: 'Semanal alcista', ok: confluence.weeklyBias === 'up', w: 1.5 } : null,
   ] : [
+    { label: 'Mercado global a favor (S&P 500 débil)', ok: regimeSellOk, w: 2.5, primary: true },
     { label: 'Precio girando a la baja (reversión)', ok: reversal, w: 3, primary: true },
     { label: 'Tendencia no alcista fuerte', ok: trendOk, w: 3, primary: true },
     { label: 'Clímax de volumen en la resistencia', ok: volClimax, w: 2, primary: true },
@@ -411,6 +420,14 @@ export function detectPriceAlert(price, technical, opts = {}) {
   if (reversal === false) { if (grade === 'A') grade = 'B'; caps.push('todavía sin girar'); }
   if (trendOk === false) { grade = 'C'; caps.push('tendencia en contra'); }
   if (rr != null && rr < 1) { grade = 'C'; caps.push('poco recorrido (R:R bajo)'); }
+  // ── Filtros de contexto (solo en vivo) ──
+  // Mercado global claramente en contra → nunca grado A.
+  if ((direction === 'buy' && regime === 'bear') || (direction === 'sell' && regime === 'bull')) { if (grade === 'A') grade = 'B'; caps.push('mercado global en contra'); }
+  // Baja liquidez → difícil de operar, se degrada.
+  if (liquidityLow) { if (grade === 'A') grade = 'B'; caps.push('baja liquidez'); }
+  // Blackout de earnings: dentro de ~3 ruedas de un balance, la incertidumbre
+  // es enorme (gaps que ningún indicador anticipa) → se degrada a grado C.
+  if (earningsInDays != null && earningsInDays >= 0 && earningsInDays <= 3) { grade = 'C'; caps.push(`balance en ${earningsInDays === 0 ? 'el día' : earningsInDays + 'd'}`); }
   if (pending) { grade = 'C'; }
 
   const gradeOrder = { A: 0, B: 1, C: 2 };
