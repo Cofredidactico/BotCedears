@@ -166,7 +166,7 @@ function saveDashCollapsed() { lsSetSafe('icp_dash_collapsed', [...dashWidgetSta
 
 /* ───────────────────────── portfolio advisor ───────────────────────── */
 const portState = {
-  data: {}, loading: new Set(), sortBy: lsGetSafe('icp_port_sort', 'weight'), editing: null,
+  data: {}, loading: new Set(), sortBy: lsGetSafe('icp_port_sort', 'weight'), sortDir: lsGetSafe('icp_port_sortdir', 'desc'), editing: null,
   macro: null, inflacion: null, ccl: null,
   spy: null, // cierres de SPY para beta/benchmark de la cartera
   cclHistory: null, // serie histórica del CCL (argentinadatos) para medir la cartera en dólares reales
@@ -7669,9 +7669,10 @@ function sortPortfolioRows(rows) {
     if (key === 'value') return r.value ?? -Infinity;
     return r.weight ?? -Infinity;
   };
+  const dir = portState.sortDir === 'asc' ? -1 : 1; // 'desc' es el default histórico (mayor a menor)
   list.sort((a, b) => {
-    if (portState.sortBy === 'ticker') return val(a, 'ticker').localeCompare(val(b, 'ticker'));
-    return val(b, portState.sortBy) - val(a, portState.sortBy);
+    if (portState.sortBy === 'ticker') return dir * val(a, 'ticker').localeCompare(val(b, 'ticker'));
+    return dir * (val(b, portState.sortBy) - val(a, portState.sortBy));
   });
   return list;
 }
@@ -7764,15 +7765,14 @@ function cashFlowsSummary() {
   for (const f of flows) { if (f.type === 'withdrawal') withdrawals += (f.amount || 0); else deposits += (f.amount || 0); }
   return { flows, deposits, withdrawals, net: deposits - withdrawals, count: flows.length };
 }
-/** TIR anualizada (money-weighted / XIRR): dado el flujo de aportes/retiros
- *  fechados y el valor ACTUAL de la cuenta, resuelve la tasa que iguala el
- *  valor presente. Óptica del inversor: aporte = sale plata (−), retiro = entra
- *  (+), valor actual hoy = como si liquidaras (+). Bisección robusta. */
-function portfolioMWR(accountNowArs) {
-  const flows = getPortFlows().filter(f => f.date && f.amount > 0);
-  if (!flows.length || !(accountNowArs > 0)) return null;
-  const cf = flows.map(f => ({ date: f.date, amt: f.type === 'withdrawal' ? f.amount : -f.amount }));
-  cf.push({ date: new Date().toISOString().slice(0, 10), amt: accountNowArs });
+/** XIRR robusto por bisección: dado un flujo [{date, amt}] (amt<0 = sale
+ *  plata, amt>0 = entra), resuelve la tasa ANUAL que hace el valor presente
+ *  neto = 0. Devuelve null si el flujo no cruza de signo (no converge). Núcleo
+ *  compartido por la TIR de aportes/retiros y la TIR automática de tenencias. */
+function xirr(cashflows) {
+  const cf = (cashflows || []).filter(x => x && x.date && isFinite(x.amt));
+  if (cf.length < 2) return null;
+  cf.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const t0 = new Date(cf[0].date).getTime();
   if (isNaN(t0)) return null;
   const yrs = (d) => (new Date(d).getTime() - t0) / (365.25 * 24 * 3600 * 1000);
@@ -7788,6 +7788,45 @@ function portfolioMWR(accountNowArs) {
   return (lo + hi) / 2;
 }
 
+/** TIR anualizada (money-weighted) a partir de los aportes/retiros fechados +
+ *  el valor ACTUAL de la cuenta. Óptica del inversor: aporte = sale plata (−),
+ *  retiro = entra (+), valor de hoy = como si liquidaras (+). */
+function portfolioMWR(accountNowArs) {
+  const flows = getPortFlows().filter(f => f.date && f.amount > 0);
+  if (!flows.length || !(accountNowArs > 0)) return null;
+  const cf = flows.map(f => ({ date: f.date, amt: f.type === 'withdrawal' ? f.amount : -f.amount }));
+  cf.push({ date: new Date().toISOString().slice(0, 10), amt: accountNowArs });
+  return xirr(cf);
+}
+
+/** TIR AUTOMÁTICA por moneda, directamente de las TENENCIAS (sin necesidad de
+ *  cargar aportes/retiros): cada compra es un egreso en su fecha (−costo×cant.)
+ *  y el valor de mercado actual es el ingreso terminal (+). Se calcula por
+ *  bucket de moneda (USD contra valor USD, ARS contra valor del CEDEAR) para
+ *  no mezclar pesos con dólares. Solo entran posiciones con fecha de compra. */
+function portfolioHoldingsTIR(stats) {
+  const today = new Date().toISOString().slice(0, 10);
+  const buckets = { USD: { cf: [], terminal: 0, n: 0, noDate: 0 }, ARS: { cf: [], terminal: 0, n: 0, noDate: 0 } };
+  for (const r of (stats?.rows || [])) {
+    if (r.avgCost == null || !(r.shares > 0)) continue;
+    const cur = r.costCurrency === 'ARS' ? 'ARS' : 'USD';
+    const term = cur === 'ARS' ? r.valueArs : r.value;
+    if (term == null) continue;
+    if (!r.purchaseDate) { buckets[cur].noDate++; continue; }
+    buckets[cur].cf.push({ date: r.purchaseDate, amt: -(r.avgCost * r.shares) });
+    buckets[cur].terminal += term;
+    buckets[cur].n++;
+  }
+  const out = {};
+  for (const cur of ['USD', 'ARS']) {
+    const b = buckets[cur];
+    if (b.n < 1 || !(b.terminal > 0)) { out[cur] = b.noDate > 0 ? { rate: null, positions: 0, noDate: b.noDate } : null; continue; }
+    const cf = b.cf.concat([{ date: today, amt: b.terminal }]);
+    out[cur] = { rate: xirr(cf), positions: b.n, terminal: b.terminal, noDate: b.noDate };
+  }
+  return out;
+}
+
 function cashFlowsCardHTML(stats) {
   const s = cashFlowsSummary();
   const currentArs = stats.totalValueArs ?? null;
@@ -7795,10 +7834,29 @@ function cashFlowsCardHTML(stats) {
   const mwr = portfolioMWR(realNow);
   const recent = s.flows.slice().reverse().slice(0, 12); // más recientes primero
   const today = new Date().toISOString().slice(0, 10);
+  // TIR automática de las tenencias (no depende de cargar aportes/retiros).
+  const autoTir = portfolioHoldingsTIR(stats);
+  const tirChip = (cur, sym) => {
+    const b = autoTir[cur];
+    if (!b) return '';
+    if (b.rate == null) return b.noDate ? `<div class="autotir-item"><span class="autotir-k">TIR ${sym}</span><b class="autotir-nd">N/D</b><span class="autotir-note">cargá la fecha de compra</span></div>` : '';
+    const pct = b.rate * 100;
+    return `<div class="autotir-item"><span class="autotir-k">TIR ${sym} anual</span><b class="${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</b><span class="autotir-note">${b.positions} posición${b.positions === 1 ? '' : 'es'} con fecha</span></div>`;
+  };
+  const autoTirHtml = (autoTir.USD || autoTir.ARS) ? `
+      <div class="autotir-box">
+        <div class="autotir-head">TIR automática de tus tenencias ${infoTip('Retorno anualizado money-weighted (XIRR) calculado solo, a partir de tus compras fechadas y el valor de mercado de hoy — no hace falta que cargues aportes ni retiros. Se muestra por moneda para no mezclar pesos con dólares. Solo entran las posiciones que tengan fecha de compra.')}</div>
+        <div class="autotir-grid">
+          ${tirChip('USD', 'USD')}
+          ${tirChip('ARS', 'ARS')}
+        </div>
+      </div>` : '';
   return `
     <div class="card port-notes-card flows-card">
-      <div class="dash-radar-title">Aportes y Retiros</div>
-      <div class="mc-intro">Registrá cuándo <strong>metiste</strong> (aporte) o <strong>sacaste</strong> (retiro) plata de la cuenta. Con eso, el "resultado real" de arriba usa tu <strong>aporte neto</strong> exacto —aún si moviste plata varias veces— y se calcula la <strong>TIR</strong> (retorno de tu dinero), que tiene en cuenta <em>cuándo</em> entró y salió cada peso.</div>
+      <div class="dash-radar-title">Retorno real de tu dinero (TIR)</div>
+      ${autoTirHtml}
+      <div class="autotir-sub">Aportes y Retiros — TIR precisa de toda la cuenta</div>
+      <div class="mc-intro">Opcional, para más precisión: registrá cuándo <strong>metiste</strong> (aporte) o <strong>sacaste</strong> (retiro) plata. Con eso el <strong>aporte neto</strong> es exacto —aún si moviste plata varias veces— y la <strong>TIR</strong> de abajo mide toda la cuenta (efectivo incluido), no solo lo invertido.</div>
       <div class="flows-form">
         <div class="flows-seg" role="group" aria-label="Tipo de movimiento">
           <button class="flows-seg-btn ${portState.flowType !== 'withdrawal' ? 'active' : ''}" data-flow-type="deposit">＋ Aporte</button>
@@ -10080,24 +10138,77 @@ function portfolioHTML() {
     ` : ''}
 
     ${tab === 'tenencias' ? `
+      ${portfolioAllocationStripHTML(stats)}
+      ${portfolioWinnersSummaryHTML(stats)}
       <div class="port-table-controls">
         <select class="watch-select" id="port-sort" aria-label="Ordenar tenencias por">
           ${PORT_SORT_OPTIONS.map(o => `<option value="${o.key}" ${portState.sortBy === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
         </select>
+        <span class="port-sort-hint">Tocá una columna para ordenar ↕</span>
       </div>
       <div class="port-table-wrap">
         <table class="port-table">
-          <thead><tr>${portState.compact
-            ? '<th>Ticker</th><th>Valor</th><th>P&amp;L</th><th>Señal</th><th>Recomendación</th><th></th>'
-            : '<th>Ticker</th><th>Cantidad</th><th>Precio</th><th>Valor</th><th>Peso</th><th>P&amp;L</th><th>Stop / Objetivo</th><th>Señal</th><th>Recomendación</th><th></th>'}</tr></thead>
+          <thead><tr>${portTableHeadHTML()}</tr></thead>
           <tbody>
-            ${sortPortfolioRows(stats.rows).map(r => portfolioRowHTML(r)).join('')}
+            ${(() => { const maxAbsPnl = Math.max(1, ...stats.rows.map(r => Math.abs(r.gainPct ?? 0))); return sortPortfolioRows(stats.rows).map(r => portfolioRowHTML(r, maxAbsPnl)).join(''); })()}
           </tbody>
           ${portfolioTotalsRowHTML(stats)}
         </table>
       </div>
     ` : ''}`}
   `;
+}
+
+/** Cabecera de la tabla con columnas clicables para ordenar (indicador ▲/▼
+ *  en la columna activa). Las columnas no ordenables van sin data-sort. */
+function portTableHeadHTML() {
+  const ind = (key) => portState.sortBy === key ? `<span class="port-th-dir">${portState.sortDir === 'asc' ? '▲' : '▼'}</span>` : '';
+  const th = (label, key) => key
+    ? `<th class="port-th-sort ${portState.sortBy === key ? 'active' : ''}" data-port-sort="${key}" role="button" tabindex="0" title="Ordenar por ${esc(label)}">${label}${ind(key)}</th>`
+    : `<th>${label}</th>`;
+  if (portState.compact) {
+    return th('Ticker', 'ticker') + th('Valor', 'value') + th('P&amp;L', 'gainPct') + th('Señal', 'score') + th('Recomendación', null) + th('', null);
+  }
+  return th('Ticker', 'ticker') + th('Cantidad', null) + th('Precio', null) + th('Valor', 'value')
+    + th('Peso', 'weight') + th('P&amp;L', 'gainPct') + th('Stop / Objetivo', null) + th('Señal', 'score')
+    + th('Recomendación', null) + th('', null);
+}
+
+/** Franja de composición: barra apilada horizontal con el peso de cada posición
+ *  (colores rotativos), leyenda con las 6 mayores. Un vistazo a cómo está
+ *  repartida la cartera, arriba de la tabla. */
+const PORT_ALLOC_COLORS = ['oklch(0.70 0.19 291)', 'oklch(0.74 0.14 199)', 'oklch(0.72 0.17 152)', 'oklch(0.80 0.15 85)', 'oklch(0.70 0.15 30)', 'oklch(0.72 0.15 340)', 'oklch(0.66 0.13 250)', 'oklch(0.74 0.13 130)'];
+function portfolioAllocationStripHTML(stats) {
+  const rows = stats.rows.filter(r => r.weight != null && r.weight > 0).sort((a, b) => b.weight - a.weight);
+  if (!rows.length) return '';
+  const col = (i) => PORT_ALLOC_COLORS[i % PORT_ALLOC_COLORS.length];
+  const segs = rows.map((r, i) => `<span class="palloc-seg" style="width:${(r.weight * 100).toFixed(2)}%; background:${col(i)};" title="${esc(r.ticker)} · ${Math.round(r.weight * 100)}%"></span>`).join('');
+  const legend = rows.slice(0, 6).map((r, i) => `<span class="palloc-leg"><i style="background:${col(i)};"></i>${esc(r.ticker)} <b>${Math.round(r.weight * 100)}%</b></span>`).join('');
+  const rest = rows.length > 6 ? `<span class="palloc-leg palloc-leg-rest">+${rows.length - 6} más</span>` : '';
+  return `<div class="card palloc-card">
+    <div class="palloc-title">Composición de la cartera</div>
+    <div class="palloc-bar">${segs}</div>
+    <div class="palloc-legend">${legend}${rest}</div>
+  </div>`;
+}
+
+/** Resumen rápido de ganadores/perdedores + mejor y peor posición, en chips. */
+function portfolioWinnersSummaryHTML(stats) {
+  const withPnl = stats.rows.filter(r => r.gainPct != null);
+  if (!withPnl.length) return '';
+  const winners = withPnl.filter(r => r.gainPct > 0).length;
+  const losers = withPnl.filter(r => r.gainPct < 0).length;
+  const flat = withPnl.length - winners - losers;
+  const best = withPnl.slice().sort((a, b) => b.gainPct - a.gainPct)[0];
+  const worst = withPnl.slice().sort((a, b) => a.gainPct - b.gainPct)[0];
+  const chip = (cls, label) => `<span class="pwin-chip ${cls}">${label}</span>`;
+  return `<div class="pwin-summary">
+    ${chip('up', `▲ ${winners} en verde`)}
+    ${chip('down', `▼ ${losers} en rojo`)}
+    ${flat ? chip('flat', `• ${flat} sin cambio`) : ''}
+    ${best && best.gainPct > 0 ? chip('best', `Mejor: ${esc(best.ticker)} ${fmtPct(best.gainPct * 100)}`) : ''}
+    ${worst && worst.gainPct < 0 ? chip('worst', `Peor: ${esc(worst.ticker)} ${fmtPct(worst.gainPct * 100)}`) : ''}
+  </div>`;
 }
 
 function portfolioTotalsRowHTML(stats) {
@@ -10113,7 +10224,7 @@ function portfolioTotalsRowHTML(stats) {
   </tr></tfoot>`;
 }
 
-function portfolioRowHTML(r) {
+function portfolioRowHTML(r, maxAbsPnl = 1) {
   if (!r.d) {
     const skelCols = portState.compact ? 3 : 7;
     return `<tr data-port-ticker="${esc(r.ticker)}"><td>${esc(r.ticker)}</td><td colspan="${skelCols}"><span class="skel skel-line" style="width:80%; height:10px; display:inline-block;"></span></td><td></td><td><button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button></td></tr>`;
@@ -10125,7 +10236,12 @@ function portfolioRowHTML(r) {
     const realLine = r.realGainPct != null
       ? `<br><span class="port-pnl-real ${r.realGainPct >= 0 ? 'up' : 'down'}" title="Ajustado por inflación (IPC Argentina) desde ${esc(r.purchaseDate)} — ${r.inflationMonths} mes(es) de datos reales">real: ${fmtPct(r.realGainPct * 100)}</span>`
       : '';
-    pnlCell = `${fmtPct(r.gainPct * 100)}<br><span class="port-pnl-abs">${r.gainAbs >= 0 ? '+' : ''}${pv(fmtGain(r.gainAbs))}</span>${realLine}`;
+    // Micro-barra visual: magnitud del P&L% relativa al mayor movimiento de la
+    // cartera; crece a la derecha (verde) o a la izquierda (rojo) desde el centro.
+    const frac = Math.min(1, Math.abs(r.gainPct) / (maxAbsPnl || 1));
+    const up = r.gainPct >= 0;
+    const bar = `<span class="port-pnl-bar" aria-hidden="true"><i class="${up ? 'up' : 'down'}" style="width:${(frac * 50).toFixed(1)}%; ${up ? 'left:50%;' : `right:50%;`}"></i></span>`;
+    pnlCell = `${fmtPct(r.gainPct * 100)}<br><span class="port-pnl-abs">${r.gainAbs >= 0 ? '+' : ''}${pv(fmtGain(r.gainAbs))}</span>${realLine}${bar}`;
   } else if (r.gainUnavailableReason) {
     pnlCell = `<span title="${esc(r.gainUnavailableReason)}">N/D ⓘ</span>`;
   }
@@ -10323,6 +10439,19 @@ function wirePortfolioEvents() {
     portState.sortBy = sortSel.value;
     lsSetSafe('icp_port_sort', portState.sortBy);
     renderReport();
+  });
+  // Ordenar tocando la columna: si ya está activa, invierte la dirección;
+  // si no, la activa con su default (Ticker A-Z, el resto mayor a menor).
+  const applyHeaderSort = (key) => {
+    if (portState.sortBy === key) portState.sortDir = portState.sortDir === 'asc' ? 'desc' : 'asc';
+    else { portState.sortBy = key; portState.sortDir = key === 'ticker' ? 'asc' : 'desc'; }
+    lsSetSafe('icp_port_sort', portState.sortBy);
+    lsSetSafe('icp_port_sortdir', portState.sortDir);
+    renderReport();
+  };
+  els.report.querySelectorAll('[data-port-sort]').forEach(th => {
+    th.addEventListener('click', () => applyHeaderSort(th.dataset.portSort));
+    th.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applyHeaderSort(th.dataset.portSort); } });
   });
   const exportBtn = document.getElementById('port-export');
   if (exportBtn) exportBtn.addEventListener('click', () => {
