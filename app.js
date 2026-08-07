@@ -2477,6 +2477,141 @@ function scoreFactorReading(sb) {
   return { txt: `Lectura débil (${sb.pct}/100): este factor resta al score.`, cls: 'down' };
 }
 
+/* ── Precisión de compra/venta: confluencia de niveles, ladder escalonado,
+ *    objetivos por medición con probabilidad histórica, VWAP anclado y nodos
+ *    de alto volumen (HVN). Todo sobre las velas reales del activo. ── */
+function precisionLevels(candles, t) {
+  const h = candles.h, l = candles.l, c = candles.c, v = candles.v || [], dates = candles.t || [];
+  const n = c.length;
+  if (n < 30 || !(t.atr > 0)) return null;
+  const price = c[n - 1], atr = t.atr;
+  const tol = Math.max(price * 0.006, 0.4 * atr);
+  const hasVol = v.some(x => x > 0);
+
+  // 1) Confluencia: apilar niveles técnicos y agruparlos por cercanía.
+  const raw = [
+    ['EMA 20', t.ema20], ['EMA 50', t.ema50], ['EMA 200', t.ema200],
+    ['VWAP', t.vwap], ['POC (volumen)', t.volumeProfile?.hasData ? t.volumeProfile.poc : null],
+    ['Fib 0.382', t.fib?.levels?.['0.382']], ['Fib 0.5', t.fib?.levels?.['0.5']], ['Fib 0.618', t.fib?.levels?.['0.618']],
+    ['Soporte', t.support], ['Banda inf. Bollinger', t.bbLower], ['Banda media', t.bbMid],
+  ].filter(x => x[1] > 0 && Math.abs(x[1] - price) / price <= 0.15);
+  raw.sort((a, b) => a[1] - b[1]);
+  const clusters = [];
+  for (const [name, p] of raw) {
+    const last = clusters[clusters.length - 1];
+    if (last && Math.abs(p - last.center) <= tol) { last.members.push({ name, p }); last.center = last.members.reduce((s, m) => s + m.p, 0) / last.members.length; }
+    else clusters.push({ center: p, members: [{ name, p }] });
+  }
+  const scored = clusters.map(cl => ({ ...cl, lo: Math.min(...cl.members.map(m => m.p)), hi: Math.max(...cl.members.map(m => m.p)) }));
+  const buyCandidates = scored.filter(cl => cl.members.length >= 2 && cl.center <= price * 1.01);
+  const confl = (buyCandidates.length ? buyCandidates : scored.filter(cl => cl.members.length >= 2))
+    .sort((a, b) => b.members.length - a.members.length || Math.abs(a.center - price) - Math.abs(b.center - price))[0] || null;
+  let confluence = null;
+  if (confl) {
+    const cnt = confl.members.length;
+    confluence = { price: confl.center, lo: confl.lo, hi: confl.hi, count: cnt, members: confl.members.map(m => m.name), confidence: cnt >= 4 ? 'muy alta' : cnt >= 3 ? 'alta' : 'media', distPct: (confl.center - price) / price * 100 };
+  }
+
+  // 2) Ladder de compra escalonado (3 límites hacia abajo, con % de cantidad).
+  const base = confluence && confluence.price <= price ? confluence.price : (t.support > 0 && t.support < price ? t.support : price - 0.5 * atr);
+  const buyLadder = [
+    { price: base, qtyPct: 40 },
+    { price: base - 0.75 * atr, qtyPct: 35 },
+    { price: base - 1.5 * atr, qtyPct: 25 },
+  ].filter(x => x.price > 0);
+  const wTot = buyLadder.reduce((s, x) => s + x.qtyPct, 0);
+  const avgBuy = wTot ? buyLadder.reduce((s, x) => s + x.price * x.qtyPct, 0) / wTot : base;
+
+  // 3) Objetivos por medición + probabilidad histórica de alcanzarlos.
+  const swingRange = (t.fib?.hi && t.fib?.lo && t.fib.hi > t.fib.lo) ? (t.fib.hi - t.fib.lo) : 6 * atr;
+  const tps = [
+    { name: 'TP1', price: price + 1.5 * atr, note: '1,5 ATR' },
+    { name: 'TP2', price: price + 3 * atr, note: '3 ATR' },
+    { name: 'TP3', price: Math.max(t.fib?.hi ? t.fib.hi + swingRange * 0.272 : 0, price + 5 * atr), note: 'extensión Fib / medición' },
+  ];
+  const reachProb = (target, horizon = 20) => {
+    const pct = (target - price) / price;
+    if (!(pct > 0)) return null;
+    let hit = 0, sample = 0;
+    for (let i = 0; i < n - horizon; i++) { sample++; let mx = 0; for (let k = i + 1; k <= i + horizon; k++) { const g = c[k] / c[i] - 1; if (g > mx) mx = g; } if (mx >= pct) hit++; }
+    return sample >= 20 ? Math.round(hit / sample * 100) : null;
+  };
+  for (const tp of tps) { tp.pct = (tp.price - price) / price * 100; tp.prob = reachProb(tp.price); }
+
+  // 4) VWAP anclado al mínimo del swing reciente + nodos de alto volumen (HVN).
+  let anchoredVwap = null;
+  if (hasVol) {
+    let loIdx = n - 1; const from = Math.max(0, n - 60);
+    for (let i = from; i < n; i++) if (l[i] < l[loIdx]) loIdx = i;
+    let pv = 0, vol = 0; for (let i = loIdx; i < n; i++) { const tp = (h[i] + l[i] + c[i]) / 3; pv += tp * (v[i] || 0); vol += (v[i] || 0); }
+    if (vol > 0) anchoredVwap = { price: pv / vol, anchorDate: dates[loIdx] || null, bars: n - loIdx };
+  }
+  let hvns = [];
+  if (hasVol) {
+    const win = Math.min(n, 120), start = n - win;
+    const hi = Math.max(...h.slice(start)), lo = Math.min(...l.slice(start)), bins = 30, bs = (hi - lo) / bins;
+    if (bs > 0) {
+      const vb = new Array(bins).fill(0);
+      for (let i = start; i < n; i++) { const tp = (h[i] + l[i] + c[i]) / 3; let b = Math.floor((tp - lo) / bs); b = Math.max(0, Math.min(bins - 1, b)); vb[b] += v[i] || 0; }
+      const maxV = Math.max(...vb) || 1;
+      const nodes = [];
+      for (let b = 1; b < bins - 1; b++) if (vb[b] >= vb[b - 1] && vb[b] >= vb[b + 1] && vb[b] > maxV * 0.5) nodes.push({ price: lo + (b + 0.5) * bs, vol: vb[b] });
+      hvns = nodes.sort((a, b) => b.vol - a.vol).slice(0, 3).map(x => x.price).sort((a, b) => a - b);
+    }
+  }
+
+  return { price, atr, confluence, buyLadder, avgBuy, tps, anchoredVwap, hvns };
+}
+
+function precisionLevelsCardHTML(candles, t, ticker) {
+  const pl = precisionLevels(candles, t);
+  if (!pl) return '';
+  const f = (x) => fmtUsd(x);
+  const conf = pl.confluence;
+  const confColor = conf ? (conf.confidence === 'muy alta' ? GREEN : conf.confidence === 'alta' ? 'oklch(0.74 0.15 152)' : AMBER) : AMBER;
+  return `
+    ${sectionTitleHTML('🎯 Precisión de entrada / salida', 'target', 'margin-top:8px;')}
+    <div class="dash-intro">Precios <strong>concretos</strong> para operar mejor: dónde entrar por <strong>confluencia</strong> de niveles, cómo <strong>escalonar</strong> la compra, objetivos por <strong>medición</strong> con su probabilidad histórica, y las referencias de volumen (VWAP anclado + zonas de alto volumen). Todo sobre las velas reales de ${esc(ticker || 'este activo')}.</div>
+    <div class="card prec-card">
+      ${conf ? `
+      <div class="prec-block">
+        <div class="prec-h">📍 Mejor entrada por confluencia</div>
+        <div class="prec-confl">
+          <div class="prec-confl-price">${f(conf.price)} <span class="prec-confl-badge" style="color:${confColor};">confianza ${esc(conf.confidence)} · ${conf.count} niveles</span></div>
+          <div class="prec-confl-sub">${conf.distPct >= 0 ? 'a +' : 'a '}${conf.distPct.toFixed(1)}% del precio · rango ${f(conf.lo)}–${f(conf.hi)}</div>
+        </div>
+        <div class="prec-chips">${conf.members.map(m => `<span class="prec-chip">${esc(m)}</span>`).join('')}</div>
+        <div class="prec-note">Es el precio donde coinciden más niveles técnicos — la zona de reacción más probable. Cuantos más niveles se apilan, más fuerte el soporte.</div>
+      </div>` : ''}
+
+      <div class="prec-block">
+        <div class="prec-h">🪜 Compra escalonada <span class="prec-h-sub">precio promedio ${f(pl.avgBuy)}</span></div>
+        <div class="prec-ladder">
+          ${pl.buyLadder.map((x, i) => `<div class="prec-ladder-row"><span class="prec-ladder-n">${i + 1}ᵃ</span><span class="prec-ladder-p">${f(x.price)}</span><span class="prec-ladder-q">${x.qtyPct}% de la posición</span></div>`).join('')}
+        </div>
+        <div class="prec-note">En vez de entrar todo a un precio, dividís la compra en 3 límites hacia abajo. Si baja, comprás mejor; si arranca desde el primero, ya estás adentro. Ajustá las cantidades a tu gusto.</div>
+      </div>
+
+      <div class="prec-block">
+        <div class="prec-h">🎯 Objetivos por medición</div>
+        <div class="prec-tps">
+          ${pl.tps.map(tp => `<div class="prec-tp"><div class="prec-tp-name">${tp.name}</div><div class="prec-tp-price up">${f(tp.price)}</div><div class="prec-tp-pct">+${tp.pct.toFixed(1)}% · ${esc(tp.note)}</div>${tp.prob != null ? `<div class="prec-tp-prob">histórico: lo alcanzó el <b>${tp.prob}%</b> (20 ruedas)</div>` : ''}</div>`).join('')}
+        </div>
+        <div class="prec-note">Objetivos por múltiplos de ATR y extensión de Fibonacci, con la frecuencia histórica real de que el activo subiera ese % dentro de 20 ruedas — no una promesa.</div>
+      </div>
+
+      ${(pl.anchoredVwap || pl.hvns.length) ? `
+      <div class="prec-block">
+        <div class="prec-h">📊 Referencias de volumen</div>
+        <div class="prec-vol">
+          ${pl.anchoredVwap ? `<div class="prec-vol-item"><span class="prec-vol-k">VWAP anclado al mínimo${pl.anchoredVwap.anchorDate ? ' (' + esc(pl.anchoredVwap.anchorDate) + ')' : ''}</span><b>${f(pl.anchoredVwap.price)}</b><span class="prec-vol-sub">precio promedio real desde el piso del swing — referencia institucional</span></div>` : ''}
+          ${pl.hvns.length ? `<div class="prec-vol-item"><span class="prec-vol-k">Zonas de alto volumen (soporte/resistencia pesados)</span><b>${pl.hvns.map(f).join(' · ')}</b><span class="prec-vol-sub">los precios donde más se operó — el mercado suele reaccionar ahí</span></div>` : ''}
+        </div>
+      </div>` : ''}
+      <div class="prec-foot">Niveles determinísticos sobre datos reales para afinar el precio de entrada/salida. No es una orden ni asesoramiento — combinalo con tu criterio y siempre operá con stop.</div>
+    </div>`;
+}
+
 function renderReportImpl() {
   renderSidebar();
   if (state.loading) {
@@ -2866,6 +3001,8 @@ function renderReportImpl() {
         <span class="probability-value">${esc(plan.probability)}</span>
       </div>
     </div>
+
+    ${precisionLevelsCardHTML(r.candles, t, asset.ticker)}
 
     ${alertNarrativeCardHTML(priceAlert)}
     ${alertGradeCardHTML(priceAlert)}
