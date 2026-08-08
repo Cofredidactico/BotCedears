@@ -3142,6 +3142,9 @@ body::after {
 .prec-confl-sub { font-size:12px; color:var(--text-mute); margin-top:2px; }
 .prec-chips { display:flex; flex-wrap:wrap; gap:6px; margin:9px 0; }
 .prec-chip { font-size:11px; padding:3px 9px; border-radius:999px; background:oklch(0.72 0.14 199 / 0.14); border:1px solid oklch(0.72 0.14 199 / 0.4); color:oklch(0.82 0.11 199); font-family:'IBM Plex Mono', monospace; }
+.prec-chip.sell { background:oklch(0.70 0.16 30 / 0.14); border-color:oklch(0.70 0.16 30 / 0.4); color:oklch(0.80 0.13 40); }
+.prec-ladder-row.sell { border-color:oklch(0.70 0.16 30 / 0.25); }
+.prec-ladder-row.sell .prec-ladder-n { color:oklch(0.78 0.14 35); }
 .prec-note { font-size:11.5px; line-height:1.5; color:var(--text-faint); margin-top:6px; }
 .prec-ladder { display:flex; flex-direction:column; gap:5px; }
 .prec-ladder-row { display:grid; grid-template-columns:34px 1fr auto; align-items:center; gap:10px; padding:7px 11px; border-radius:9px; background:var(--surface-2, rgba(255,255,255,.03)); border:1px solid var(--border, rgba(255,255,255,.07)); }

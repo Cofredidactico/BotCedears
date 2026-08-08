@@ -2493,7 +2493,7 @@ function precisionLevels(candles, t) {
     ['EMA 20', t.ema20], ['EMA 50', t.ema50], ['EMA 200', t.ema200],
     ['VWAP', t.vwap], ['POC (volumen)', t.volumeProfile?.hasData ? t.volumeProfile.poc : null],
     ['Fib 0.382', t.fib?.levels?.['0.382']], ['Fib 0.5', t.fib?.levels?.['0.5']], ['Fib 0.618', t.fib?.levels?.['0.618']],
-    ['Soporte', t.support], ['Banda inf. Bollinger', t.bbLower], ['Banda media', t.bbMid],
+    ['Soporte', t.support], ['Resistencia', t.resistance], ['Banda inf. Bollinger', t.bbLower], ['Banda sup. Bollinger', t.bbUpper], ['Banda media', t.bbMid],
   ].filter(x => x[1] > 0 && Math.abs(x[1] - price) / price <= 0.15);
   raw.sort((a, b) => a[1] - b[1]);
   const clusters = [];
@@ -2521,6 +2521,24 @@ function precisionLevels(candles, t) {
   ].filter(x => x.price > 0);
   const wTot = buyLadder.reduce((s, x) => s + x.qtyPct, 0);
   const avgBuy = wTot ? buyLadder.reduce((s, x) => s + x.price * x.qtyPct, 0) / wTot : base;
+
+  // 2b) Lado VENDEDOR: confluencia de resistencias (cluster por encima del
+  // precio) + venta escalonada hacia arriba (tomar ganancias en tramos).
+  const sellCands = scored.filter(cl => cl.members.length >= 2 && cl.center >= price * 0.99);
+  const sellConfl = sellCands.sort((a, b) => b.members.length - a.members.length || Math.abs(a.center - price) - Math.abs(b.center - price))[0] || null;
+  let sellConfluence = null;
+  if (sellConfl) {
+    const cnt = sellConfl.members.length;
+    sellConfluence = { price: sellConfl.center, lo: sellConfl.lo, hi: sellConfl.hi, count: cnt, members: sellConfl.members.map(m => m.name), confidence: cnt >= 4 ? 'muy alta' : cnt >= 3 ? 'alta' : 'media', distPct: (sellConfl.center - price) / price * 100 };
+  }
+  const sellBase = sellConfluence && sellConfluence.price >= price ? sellConfluence.price : (t.resistance > 0 && t.resistance > price ? t.resistance : price + 1 * atr);
+  const sellLadder = [
+    { price: sellBase, qtyPct: 40 },
+    { price: sellBase + 0.75 * atr, qtyPct: 35 },
+    { price: sellBase + 1.5 * atr, qtyPct: 25 },
+  ].filter(x => x.price > 0);
+  const sTot = sellLadder.reduce((s, x) => s + x.qtyPct, 0);
+  const avgSell = sTot ? sellLadder.reduce((s, x) => s + x.price * x.qtyPct, 0) / sTot : sellBase;
 
   // 3) Objetivos por medición + probabilidad histórica de alcanzarlos.
   const swingRange = (t.fib?.hi && t.fib?.lo && t.fib.hi > t.fib.lo) ? (t.fib.hi - t.fib.lo) : 6 * atr;
@@ -2560,7 +2578,7 @@ function precisionLevels(candles, t) {
     }
   }
 
-  return { price, atr, confluence, buyLadder, avgBuy, tps, anchoredVwap, hvns };
+  return { price, atr, confluence, buyLadder, avgBuy, sellConfluence, sellLadder, avgSell, tps, anchoredVwap, hvns };
 }
 
 function precisionLevelsCardHTML(candles, t, ticker) {
@@ -2590,6 +2608,30 @@ function precisionLevelsCardHTML(candles, t, ticker) {
           ${pl.buyLadder.map((x, i) => `<div class="prec-ladder-row"><span class="prec-ladder-n">${i + 1}ᵃ</span><span class="prec-ladder-p">${f(x.price)}</span><span class="prec-ladder-q">${x.qtyPct}% de la posición</span></div>`).join('')}
         </div>
         <div class="prec-note">En vez de entrar todo a un precio, dividís la compra en 3 límites hacia abajo. Si baja, comprás mejor; si arranca desde el primero, ya estás adentro. Ajustá las cantidades a tu gusto.</div>
+      </div>
+
+      ${(() => {
+        const sc = pl.sellConfluence;
+        if (!sc) return '';
+        const scColor = sc.confidence === 'muy alta' ? RED : sc.confidence === 'alta' ? 'oklch(0.72 0.16 30)' : AMBER;
+        return `
+      <div class="prec-block">
+        <div class="prec-h">📌 Mejor salida por confluencia</div>
+        <div class="prec-confl">
+          <div class="prec-confl-price">${f(sc.price)} <span class="prec-confl-badge" style="color:${scColor};">confianza ${esc(sc.confidence)} · ${sc.count} niveles</span></div>
+          <div class="prec-confl-sub">a +${sc.distPct.toFixed(1)}% del precio · rango ${f(sc.lo)}–${f(sc.hi)}</div>
+        </div>
+        <div class="prec-chips">${sc.members.map(m => `<span class="prec-chip sell">${esc(m)}</span>`).join('')}</div>
+        <div class="prec-note">El precio donde se apilan más resistencias — la zona donde el activo tiene más chances de frenar y donde conviene tomar ganancias.</div>
+      </div>`;
+      })()}
+
+      <div class="prec-block">
+        <div class="prec-h">🪜 Venta escalonada <span class="prec-h-sub">precio promedio ${f(pl.avgSell)}</span></div>
+        <div class="prec-ladder">
+          ${pl.sellLadder.map((x, i) => `<div class="prec-ladder-row sell"><span class="prec-ladder-n">${i + 1}ᵃ</span><span class="prec-ladder-p">${f(x.price)}</span><span class="prec-ladder-q">vendé ${x.qtyPct}% de la posición</span></div>`).join('')}
+        </div>
+        <div class="prec-note">Tomá ganancias en 3 tramos a medida que sube, en vez de vender todo de una. Asegurás parte de la ganancia temprano y dejás correr el resto hacia los objetivos.</div>
       </div>
 
       <div class="prec-block">
