@@ -10937,12 +10937,12 @@ function portfolioRowHTML(r, maxAbsPnl = 1) {
   const _alertLine = r.d.alert && !r.d.alert.pending ? `<span class="port-row-alert" style="color:${ALERT_META[r.d.alert.type]?.color};"${alertTitleAttr(r.d.alert)}>⚡ ${esc(ALERT_META[r.d.alert.type]?.label ?? '')}</span>` : '';
   const _sub = r.d.sector ? `<span class="ptk-name">${esc(r.d.sector)}</span>` : (r.d.category ? `<span class="ptk-name">${esc(r.d.category)}</span>` : '');
   const tickerCell = `<td class="port-ticker-cell"><div class="ptk-wrap">${tickerAvatar(r.ticker)}<div class="ptk-main"><span class="ptk-sym">${esc(r.ticker)}${_badges}</span>${_sub}${_alertLine}</div></div></td>`;
-  const valueCell = `<td>${r.valueArs != null
+  const valueCell = `<td data-label="Valor">${r.valueArs != null
     ? `${pv(fmtArs(r.valueArs))}<br><span class="port-pnl-abs">${pv(fmtUsd(r.value))}</span>`
     : (r.value != null ? pv(fmtUsd(r.value)) : 'N/D')}</td>`;
-  const pnlTd = `<td class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${pnlCell}</td>`;
-  const signalTd = `<td><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>`;
-  const recoTd = `<td>${reco ? `<span class="watch-signal" style="background:${recoTone.bg}; color:${recoTone.color};" title="${esc(reco.detail)}">${esc(reco.label)}</span>` : 'N/D'}</td>`;
+  const pnlTd = `<td data-label="P&L" class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${pnlCell}</td>`;
+  const signalTd = `<td data-label="Señal"><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>`;
+  const recoTd = `<td data-label="Recom."><span>${reco ? `<span class="watch-signal" style="background:${recoTone.bg}; color:${recoTone.color};" title="${esc(reco.detail)}">${esc(reco.label)}</span>` : 'N/D'}</span></td>`;
   const actionsTd = `<td class="port-actions-cell">
       <button class="port-buy" data-port-buy="${esc(r.ticker)}" title="Comprar más" aria-label="Registrar una compra adicional de ${esc(r.ticker)}">＋</button>
       <button class="port-sell" data-port-sell="${esc(r.ticker)}" title="Registrar venta" aria-label="Registrar venta de ${esc(r.ticker)}">⤓</button>
@@ -10955,14 +10955,14 @@ function portfolioRowHTML(r, maxAbsPnl = 1) {
   }
   return `<tr class="port-row" data-port-ticker="${esc(r.ticker)}">
     ${tickerCell}
-    <td>${r.shares}</td>
-    <td>${r.d.cedearArs != null
+    <td data-label="Cantidad">${r.shares}</td>
+    <td data-label="Precio">${r.d.cedearArs != null
       ? `${pv(fmtArs(r.d.cedearArs))} <span title="${r.d.cedearSource === 'live' ? 'Precio real operado hoy en BYMA' : 'Estimado vía CCL — sin cotización real disponible para este símbolo'}">${r.d.cedearSource === 'live' ? '●' : '≈'}</span><br><span class="port-pnl-abs">subyacente ${pv(fmtUsd(r.d.price))}</span>`
       : pv(fmtUsd(r.d.price))}</td>
     ${valueCell}
-    <td class="port-weight-cell">${r.weight != null ? `<div class="port-weight"><span class="port-weight-bar"><i style="width:${Math.min(100, Math.round(r.weight * 100))}%;"></i></span><span class="port-weight-pct">${Math.round(r.weight * 100)}%</span></div>` : 'N/D'}</td>
+    <td class="port-weight-cell" data-label="Peso">${r.weight != null ? `<div class="port-weight"><span class="port-weight-bar"><i style="width:${Math.min(100, Math.round(r.weight * 100))}%;"></i></span><span class="port-weight-pct">${Math.round(r.weight * 100)}%</span></div>` : 'N/D'}</td>
     ${pnlTd}
-    <td>${stopCell}</td>
+    <td data-label="Stop / Obj">${stopCell}</td>
     ${signalTd}
     ${recoTd}
     ${actionsTd}
