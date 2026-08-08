@@ -346,6 +346,52 @@ a { color: inherit; }
 .ptk-name { font-size: 10.5px; color: var(--text-faint); text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
 .ptk-main .port-row-alert { font-size: 10px; margin-top: 1px; }
 .port-ticker-cell { vertical-align: middle; }
+
+/* ── Tenencias como TARJETAS en el celular (la tabla no entra bien) ── */
+@media (max-width: 640px) {
+  .port-table-wrap { border: none; overflow: visible; }
+  .port-table thead { display: none; }
+  .port-table, .port-table tbody { display: block; width: 100%; }
+  .port-table tfoot { display: none; }
+  .port-table tr.port-row { display: block; border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin-bottom: 11px; background: var(--bg-card); }
+  .port-table tr.port-row td { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 6px 0; border: none; text-align: right; font-size: 13px; }
+  .port-table tr.port-row td::before { content: attr(data-label); color: var(--text-mute); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; text-align: left; white-space: nowrap; }
+  .port-table tr.port-row td.port-ticker-cell { display: block; padding: 0 0 9px; margin-bottom: 5px; border-bottom: 1px solid var(--border-soft); }
+  .port-table tr.port-row td.port-ticker-cell::before { display: none; }
+  .port-table tr.port-row td.port-weight-cell .port-weight { min-width: 130px; }
+  .port-table tr.port-row td.port-actions-cell { justify-content: flex-end; gap: 4px; padding-top: 9px; margin-top: 3px; border-top: 1px solid var(--border-soft); }
+  .port-table tr.port-row td.port-actions-cell::before { display: none; }
+  .port-table tr.port-row td.port-actions-cell button { min-width: 40px; min-height: 36px; font-size: 16px; }
+  .port-pnl-bar { display: none; } /* la micro-barra no aporta en fila apilada */
+  .port-sort-hint { display: none; }
+}
+
+/* ── Pulido mobile general: filas de pestañas con scroll horizontal, targets
+ *    táctiles más grandes, cards más compactas ── */
+@media (max-width: 640px) {
+  .card { padding: 14px 15px; }
+  .port-tabs, .chart-tabs, .short-seg, .pwin-summary, .dash-chips { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .port-tabs::-webkit-scrollbar, .chart-tabs::-webkit-scrollbar, .short-seg::-webkit-scrollbar, .pwin-summary::-webkit-scrollbar, .dash-chips::-webkit-scrollbar { display: none; }
+  .port-tab, .chart-tab, .chart-mode-tab, .short-seg-btn { flex: 0 0 auto; min-height: 38px; }
+  .sec-title, .dash-hero-title { font-size: clamp(17px, 5vw, 22px); }
+  .prec-tp { flex: 1 1 100%; }
+}
+
+/* ── Scrollbar con estilo (coherente con la paleta) en todo el sitio ── */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong, rgba(255,255,255,.2)) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong, rgba(255,255,255,.2)); border-radius: 7px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint, rgba(255,255,255,.35)); }
+
+/* ── Foco accesible y visible al navegar con teclado ── */
+:focus-visible { outline: 2px solid var(--accent, #7c5cff); outline-offset: 2px; border-radius: 5px; }
+
+/* ── Micro-lift al pasar el mouse (solo dispositivos con puntero) ── */
+@media (hover: hover) {
+  .dcv-card, .short-card, .prec-tp, .scalc-tile { transition: transform 0.14s ease, border-color 0.14s ease; }
+  .dcv-card:hover, .short-card:hover { transform: translateY(-2px); }
+}
 .port-notes-card { padding: 18px 20px; margin-bottom: 24px; }
 .port-note { font-size: 13px; line-height: 1.6; padding: 6px 0; color: var(--text-dim); }
 .port-note.risk { color: var(--amber-text); }
