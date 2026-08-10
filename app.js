@@ -8390,6 +8390,28 @@ function deletePortFlow(id) {
   lsSetSafe(PORT_FLOWS_KEY, JSON.stringify(getPortFlows().filter(f => String(f.id) !== String(id))));
 }
 
+/** Ajusta el capital declarado según un movimiento de fondos: un APORTE suma y
+ *  un RETIRO resta, tanto en "Aportaste (lo que pusiste)" como en "Tenés hoy en
+ *  la cuenta" — así ambos siguen los movimientos de capital solos, sin editar a
+ *  mano. El capital aportado es acumulativo (se ajusta siempre); el valor de
+ *  cuenta solo se toca si ya lo declaraste (no se inventa un total). Reversible.
+ *  Devuelve un resumen de lo aplicado para el toast. */
+function applyCapitalDelta(type, amount) {
+  const delta = type === 'withdrawal' ? -Math.abs(amount) : Math.abs(amount);
+  const applied = { invested: false, account: false };
+  const inv = Math.max(0, (portState.investedArs ?? 0) + delta);
+  portState.investedArs = inv > 0 ? inv : null;
+  lsSetSafe('icp_port_invested', portState.investedArs != null ? String(portState.investedArs) : '');
+  applied.invested = true;
+  if (portState.accountTotalArs != null) {
+    const acc = Math.max(0, portState.accountTotalArs + delta);
+    portState.accountTotalArs = acc > 0 ? acc : null;
+    lsSetSafe('icp_port_account', portState.accountTotalArs != null ? String(portState.accountTotalArs) : '');
+    applied.account = true;
+  }
+  return applied;
+}
+
 /* ── Historial de patrimonio REAL (snapshot diario) ──────────────────────────
  * A diferencia de la "curva de valor" (que reconstruye el pasado con los precios
  * actuales asumiendo las mismas tenencias de siempre), esto guarda el valor
@@ -8509,8 +8531,8 @@ function cashFlowsCardHTML(stats) {
     <div class="card port-notes-card flows-card">
       <div class="dash-radar-title">Retorno real de tu dinero (TIR)</div>
       ${autoTirHtml}
-      <div class="autotir-sub">Aportes y Retiros — TIR precisa de toda la cuenta</div>
-      <div class="mc-intro">Opcional, para más precisión: registrá cuándo <strong>metiste</strong> (aporte) o <strong>sacaste</strong> (retiro) plata. Con eso el <strong>aporte neto</strong> es exacto —aún si moviste plata varias veces— y la <strong>TIR</strong> de abajo mide toda la cuenta (efectivo incluido), no solo lo invertido.</div>
+      <div class="autotir-sub">Aportes y Retiros</div>
+      <div class="mc-intro">Registrá cuándo <strong>metiste</strong> (aporte) o <strong>sacaste</strong> (retiro) plata. Cada movimiento <strong>ajusta solo</strong> tu capital: un aporte se <strong>suma</strong> y un retiro se <strong>resta</strong> de <em>"Aportaste (lo que pusiste)"</em> y de <em>"Tenés hoy en la cuenta"</em>. Así el <strong>aporte neto</strong> y la <strong>TIR</strong> quedan exactos sin editar nada a mano.</div>
       <div class="flows-form">
         <div class="flows-seg" role="group" aria-label="Tipo de movimiento">
           <button class="flows-seg-btn ${portState.flowType !== 'withdrawal' ? 'active' : ''}" data-flow-type="deposit">＋ Aporte</button>
@@ -11272,12 +11294,25 @@ function wirePortfolioEvents() {
     const date = dateEl?.value || new Date().toISOString().slice(0, 10);
     logPortFlow({ type: portState.flowType, amount, date });
     if (getPortFlows().length === 0) { showToast('No se pudo guardar — liberá espacio en el navegador y probá de nuevo.', 'info'); return; }
+    // El movimiento ajusta automáticamente tu capital declarado (aporte suma,
+    // retiro resta) en "Aportaste" y en "Tenés hoy en la cuenta".
+    const applied = applyCapitalDelta(portState.flowType, amount);
     if (amtEl) amtEl.value = '';
-    showToast(`${portState.flowType === 'withdrawal' ? 'Retiro' : 'Aporte'} de ${fmtArs(amount)} registrado`, 'success');
+    const isW = portState.flowType === 'withdrawal';
+    showToast(`${isW ? 'Retiro' : 'Aporte'} de ${fmtArs(amount)} registrado — ${isW ? 'restado de' : 'sumado a'} tu capital${applied.account ? ' y a tu total de cuenta' : ''}`, 'success');
     renderReport();
   });
   els.report.querySelectorAll('[data-flow-del]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); deletePortFlow(btn.dataset.flowDel); showToast('Movimiento borrado', 'info'); renderReport(); });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.flowDel;
+      const f = getPortFlows().find(x => String(x.id) === String(id));
+      deletePortFlow(id);
+      // Revertir el ajuste de capital del movimiento borrado (aporte↔retiro).
+      if (f) applyCapitalDelta(f.type === 'withdrawal' ? 'deposit' : 'withdrawal', f.amount);
+      showToast('Movimiento borrado — capital revertido', 'info');
+      renderReport();
+    });
   });
 
   // Comprar más: suma unidades a una posición con precio promedio ponderado
