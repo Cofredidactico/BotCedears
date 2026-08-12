@@ -94,11 +94,22 @@ async function setApproved(id, approved) {
 
 /* ══════════════════ Sync de datos del usuario en la nube ══════════════════
  * Espeja las claves de datos del usuario (icp_* salvo las cachés) a una fila
- * por usuario en la tabla user_data (JSON). Al entrar: la nube manda (o, si la
- * nube está vacía y este navegador ya tenía datos, sube esos como base). Cada
- * cambio en localStorage se guarda solo (debounce). Sin tocar los cientos de
- * lugares donde la app escribe: interceptamos localStorage.setItem una vez. */
+ * por usuario en la tabla user_data (JSON). Modelo simple pero robusto para un
+ * mismo usuario en varios dispositivos, editando en momentos distintos:
+ *   • Al entrar: baja la nube y, si es más nueva que lo local, la aplica.
+ *   • Cada cambio en localStorage se guarda solo (debounce) con un updated_at.
+ *   • Al VOLVER a la pestaña (o cada ~30s con la pestaña visible) se RE-BAJA la
+ *     nube y se aplica si otro dispositivo la dejó más nueva → así "abrir en la
+ *     otra compu" trae siempre lo último, aunque la pestaña ya estuviera abierta.
+ *   • Aplicamos la nube solo si su updated_at es MAYOR que el nuestro, para no
+ *     pisar una edición local todavía sin guardar.
+ * Sin tocar los cientos de lugares donde la app escribe: interceptamos
+ * localStorage.setItem una sola vez. */
 let syncStarted = false, _saveTimer = null, _accessToken = null;
+let _cloudStamp = 0;      // updated_at (ms) de lo último que aplicamos/guardamos
+let _pullTimer = null;    // sondeo periódico mientras la pestaña está visible
+let _applying = false;    // true mientras aplicamos la nube (no re-guardar)
+let _syncState = 'idle';  // idle | saving | saved | pulling | error
 const SYNC_DENY = (k) => k.startsWith('icp_cache_') || k === 'icp_ref_cache';
 const isSyncKey = (k) => typeof k === 'string' && k.startsWith('icp_') && !SYNC_DENY(k);
 function snapshotLocal() {
@@ -107,15 +118,33 @@ function snapshotLocal() {
   return out;
 }
 function applyToLocal(data) {
-  for (const [k, v] of Object.entries(data || {})) { if (isSyncKey(k) && typeof v === 'string') { try { localStorage.setItem(k, v); } catch { /* lleno */ } } }
+  _applying = true; // evita que la intercepción de setItem dispare un re-guardado
+  try { for (const [k, v] of Object.entries(data || {})) { if (isSyncKey(k) && typeof v === 'string') { try { localStorage.setItem(k, v); } catch { /* lleno */ } } } }
+  finally { _applying = false; }
 }
+function setSyncState(s) { _syncState = s; try { updateSyncChip(); } catch { /* el chip aún no existe */ } }
+// Lee la fila MÁS NUEVA del usuario. No usa maybeSingle (que EXPLOTA si por un
+// problema de constraint quedaron filas duplicadas y dejaba a la otra compu
+// "sin nube"): ordena por updated_at y toma la última. Devuelve { data, stamp }.
 async function loadCloud() {
-  try { const { data, error } = await sb.from('user_data').select('data').eq('id', currentUser.id).maybeSingle(); if (error) throw error; return data?.data ?? null; }
-  catch (err) { console.warn('[sync] no se pudo leer la nube:', err?.message); return null; }
+  try {
+    const { data, error } = await sb.from('user_data').select('data, updated_at').eq('id', currentUser.id).order('updated_at', { ascending: false }).limit(1);
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : null;
+    if (!row) return null;
+    return { data: row.data ?? null, stamp: row.updated_at ? Date.parse(row.updated_at) : 0 };
+  } catch (err) { console.warn('[sync] no se pudo leer la nube:', err?.message); return null; }
 }
 async function saveCloud() {
-  try { const { error } = await sb.from('user_data').upsert({ id: currentUser.id, data: snapshotLocal(), updated_at: new Date().toISOString() }, { onConflict: 'id' }); if (error) throw error; }
-  catch (err) { console.warn('[sync] no se pudo guardar en la nube:', err?.message); }
+  if (!currentUser) return;
+  setSyncState('saving');
+  const iso = new Date().toISOString();
+  try {
+    const { error } = await sb.from('user_data').upsert({ id: currentUser.id, data: snapshotLocal(), updated_at: iso }, { onConflict: 'id' });
+    if (error) throw error;
+    _cloudStamp = Date.parse(iso);
+    setSyncState('saved');
+  } catch (err) { console.warn('[sync] no se pudo guardar en la nube:', err?.message); setSyncState('error'); }
 }
 /** Guardado "a prueba de cierre". En el celular, al minimizar/cerrar la app o
  *  bloquear la pantalla el navegador CONGELA la página y aborta los fetch en
@@ -127,7 +156,8 @@ async function saveCloud() {
 function saveCloudBeacon() {
   if (!currentUser || !_accessToken) return;
   try {
-    const body = JSON.stringify({ id: currentUser.id, data: snapshotLocal(), updated_at: new Date().toISOString() });
+    const iso = new Date().toISOString();
+    const body = JSON.stringify({ id: currentUser.id, data: snapshotLocal(), updated_at: iso });
     fetch(`${SUPABASE_URL}/rest/v1/user_data`, {
       method: 'POST',
       keepalive: true,
@@ -139,34 +169,84 @@ function saveCloudBeacon() {
       },
       body,
     }).catch(() => { /* la página ya no está: no hay a quién avisar */ });
+    _cloudStamp = Date.parse(iso); // optimista: asumimos que el keepalive llega
   } catch { /* ignore */ }
 }
-function scheduleSave() { clearTimeout(_saveTimer); _saveTimer = setTimeout(saveCloud, 1500); }
+function scheduleSave() { clearTimeout(_saveTimer); _saveTimer = setTimeout(saveCloud, 1200); }
 // Al ocultarse/descargarse la página: cancelamos el debounce pendiente y
 // guardamos YA con keepalive, que sobrevive al congelamiento del móvil.
 function flushOnHide() { clearTimeout(_saveTimer); saveCloudBeacon(); }
+// Re-baja la nube y la aplica SOLO si es más nueva que lo último que vimos (o si
+// force=true). Así una pestaña ya abierta —o abrir la app en otra compu— recoge
+// los cambios hechos en otro dispositivo, sin pisar ediciones locales sin guardar.
+async function pullIfRemoteNewer(force = false, announce = false) {
+  if (!currentUser || _applying) return false;
+  if (announce) setSyncState('pulling');
+  const cloud = await loadCloud();
+  if (cloud && cloud.data && Object.keys(cloud.data).length && (force || cloud.stamp > _cloudStamp)) {
+    applyToLocal(cloud.data);
+    _cloudStamp = cloud.stamp || Date.now();
+    try { window.__vertexReload?.(); } catch { /* se re-renderiza en el próximo ciclo */ }
+    setSyncState('saved'); // sí anunciamos cuando de verdad trajimos algo nuevo
+    return true;
+  }
+  if (announce) setSyncState('saved');
+  return false; // sondeo silencioso: no tocamos el chip si no cambió nada
+}
+function startPullPolling() {
+  clearInterval(_pullTimer);
+  _pullTimer = setInterval(() => { if (document.visibilityState === 'visible') pullIfRemoteNewer(); }, 30000);
+}
 async function initCloudSync() {
   if (syncStarted || !currentUser) return; syncStarted = true;
   const cloud = await loadCloud();
-  const hasCloud = cloud && Object.keys(cloud).length > 0;
+  const hasCloud = cloud && cloud.data && Object.keys(cloud.data).length > 0;
   if (hasCloud) {
-    applyToLocal(cloud);
+    applyToLocal(cloud.data);
+    _cloudStamp = cloud.stamp || Date.now();
     try { window.__vertexReload?.(); } catch { /* la app se re-renderiza sola en el próximo ciclo */ }
+    setSyncState('saved');
   } else {
     // Nube vacía: subimos lo que ya había en este navegador como base inicial.
     const snap = snapshotLocal();
-    if (Object.keys(snap).length) await saveCloud();
+    if (Object.keys(snap).length) await saveCloud(); else setSyncState('saved');
   }
   // Auto-guardado: interceptamos setItem UNA vez (después de aplicar la nube,
   // para no disparar un guardado redundante al escribir los datos entrantes).
   const orig = localStorage.setItem.bind(localStorage);
-  localStorage.setItem = (k, v) => { orig(k, v); if (isSyncKey(k)) scheduleSave(); };
-  // 'pagehide' es la señal MÁS confiable de descarga en el celular (Safari iOS
-  // ni siquiera dispara 'beforeunload'); 'visibilitychange:hidden' cubre el
-  // caso de cambiar de app o bloquear la pantalla. Ambos hacen el flush con
-  // keepalive para que el último cambio sí llegue a la nube.
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushOnHide(); });
+  localStorage.setItem = (k, v) => { orig(k, v); if (!_applying && isSyncKey(k)) { setSyncState('saving'); scheduleSave(); } };
+  // Al VOLVER a la pestaña (visibilitychange visible / focus): re-bajamos la nube
+  // por si editaste en otro dispositivo. Al ocultarse/descargarse: flush con
+  // keepalive (Safari iOS ni dispara 'beforeunload', por eso 'pagehide').
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushOnHide();
+    else { pullIfRemoteNewer(); startPullPolling(); }
+  });
+  window.addEventListener('focus', () => pullIfRemoteNewer());
   window.addEventListener('pagehide', flushOnHide);
+  startPullPolling();
+}
+
+/* ── Indicador de sincronización (chip de cuenta) ── */
+const SYNC_LABELS = {
+  idle: '☁ sync', saving: '⟳ guardando…', saved: '✓ sincronizado',
+  pulling: '⟳ actualizando…', error: '⚠ sin sincronizar',
+};
+function syncChipLabel() { return SYNC_LABELS[_syncState] ?? SYNC_LABELS.idle; }
+function updateSyncChip() {
+  const el = document.getElementById('auth-chip-sync');
+  if (!el) return;
+  el.textContent = syncChipLabel();
+  el.classList.toggle('is-error', _syncState === 'error');
+  el.classList.toggle('is-busy', _syncState === 'saving' || _syncState === 'pulling');
+}
+// Sincronización manual: sube lo local YA y baja lo último de la nube. Útil como
+// botón de "asegurate de guardar/traer" antes de cambiar de dispositivo.
+async function syncNow() {
+  if (!currentUser) return;
+  clearTimeout(_saveTimer);
+  await saveCloud();
+  await pullIfRemoteNewer(true, true);
 }
 
 /* ── UI: overlay ── */
@@ -266,10 +346,12 @@ function renderAccountChip() {
   if (!chip) { chip = document.createElement('div'); chip.id = 'auth-chip'; chip.className = 'auth-chip'; document.body.appendChild(chip); }
   chip.innerHTML = `
     <span class="auth-chip-email" title="${esc(currentUser.email)}">${esc(currentUser.email)}</span>
+    <button class="auth-chip-btn auth-sync" id="auth-chip-sync" title="Estado de sincronización — tocá para sincronizar ahora">${syncChipLabel()}</button>
     ${isAdmin() ? `<button class="auth-chip-btn" id="auth-admin-open" title="Panel de administración">⚙ Admin</button>` : ''}
     <button class="auth-chip-btn" id="auth-chip-pass" title="Definir o cambiar tu contraseña">🔑</button>
     <button class="auth-chip-btn" id="auth-chip-logout" title="Cerrar sesión">Salir</button>`;
   chip.querySelector('#auth-chip-logout').addEventListener('click', signOut);
+  chip.querySelector('#auth-chip-sync').addEventListener('click', syncNow);
   chip.querySelector('#auth-admin-open')?.addEventListener('click', openAdminPanel);
   chip.querySelector('#auth-chip-pass').addEventListener('click', async () => {
     const pw = window.prompt('Definí una contraseña para entrar directo la próxima vez (mín. 6 caracteres):');
