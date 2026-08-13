@@ -1602,6 +1602,10 @@ a.news-headline:hover { color: var(--accent-text); }
 .swx-bar { height: 6px; border-radius: 5px; background: var(--surface-3); overflow: hidden; margin-top: 9px; }
 .swx-bar i { display: block; height: 100%; border-radius: 5px; }
 .swx-take { margin-top: 10px; }
+.swx-fired { box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--swx-color) 45%, transparent), 0 0 16px -6px var(--swx-color); }
+.swx-fired-badge { font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: 12px; color: var(--swx-color);
+  background: color-mix(in oklch, var(--swx-color) 14%, transparent); white-space: nowrap; }
+@media (max-width: 560px) { .swx-fired-badge { order: 3; margin-top: 4px; } }
 
 /* ── Centro de alertas ── */
 .alertc-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin: 4px 0 16px; }
