@@ -616,131 +616,6 @@ function clearAlertHistory() {
   renderReport();
 }
 
-/* ─────────────────── alertas personalizadas del usuario ───────────────────
- * El usuario define su propia condición (precio USD, precio del CEDEAR en
- * pesos, RSI, variación del día o score) por ticker y la ve cumplirse en vivo
- * contra los mismos datos que ya tiene cargados la app (dashboard, watchlist,
- * cartera). Todo en localStorage — sin backend, y se sincroniza a la nube junto
- * con el resto de las claves icp_* del usuario. */
-const USER_ALERTS_KEY = 'icp_user_alerts';
-const USER_ALERTS_MAX = 60;
-const UALERT_METRICS = {
-  price:  { label: 'Precio (USD)', get: d => d?.price ?? null, fmt: v => fmtUsd(v) },
-  ars:    { label: 'Precio CEDEAR (ARS)', get: d => d?.cedearArs ?? null, fmt: v => fmtArs(v) },
-  rsi:    { label: 'RSI (0-100)', get: d => (d?.rsi != null && isFinite(d.rsi)) ? d.rsi : null, fmt: v => v == null ? '—' : v.toFixed(0) },
-  change: { label: 'Variación del día (%)', get: d => d?.changePct ?? null, fmt: v => v == null ? '—' : fmtPct(v) },
-  score:  { label: 'Score técnico (0-100)', get: d => d?.score ?? null, fmt: v => v == null ? '—' : String(Math.round(v)) },
-};
-function getUserAlerts() {
-  try { const a = JSON.parse(localStorage.getItem(USER_ALERTS_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
-}
-function saveUserAlerts(list) { lsSetSafe(USER_ALERTS_KEY, JSON.stringify(list.slice(0, USER_ALERTS_MAX))); }
-function addUserAlert(a) {
-  const list = getUserAlerts();
-  if (list.length >= USER_ALERTS_MAX) { showToast(`Llegaste al máximo de ${USER_ALERTS_MAX} alertas personalizadas.`, 'info'); return list; }
-  list.unshift({ id: `ua-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), triggeredAt: null, ...a });
-  saveUserAlerts(list);
-  return list;
-}
-function deleteUserAlert(id) { saveUserAlerts(getUserAlerts().filter(a => String(a.id) !== String(id))); }
-// Datos en vivo de un ticker, mirando todos los stores ya cargados.
-function liveDataFor(ticker) {
-  return dashState.data[ticker] || watchState.data[ticker] || portState.data[ticker] || divState.signal?.[ticker] || null;
-}
-function userAlertText(a) {
-  const m = UALERT_METRICS[a.metric];
-  return `${a.ticker} · ${m ? m.label : a.metric} ${a.op === 'above' ? '≥' : '≤'} ${m ? m.fmt(a.value) : a.value}`;
-}
-// Carga en vivo un ticker que no está en ningún store (p. ej. una alerta
-// personalizada sobre un activo que no está en el dashboard ni la watchlist),
-// para poder evaluar su condición. Sin requests si ya está cargado o cargando.
-async function ensureTickerLoaded(ticker) {
-  if (!ticker || liveDataFor(ticker) || dashState.loading.has(ticker)) return;
-  dashState.loading.add(ticker);
-  try {
-    const macro = dashState.macro ?? await getMacro();
-    dashState.macro = macro;
-    dashState.data[ticker] = await computeLightSignal(ticker, macro);
-    checkUserAlerts();
-  } catch (_) { /* se reintenta en el próximo ciclo */ }
-  finally {
-    dashState.loading.delete(ticker);
-    if (!state.asset && state.view === 'alerts') renderReport();
-  }
-}
-// Carga los tickers de alertas personalizadas que todavía no tengan datos.
-function loadUserAlertTickers() {
-  for (const t of new Set(getUserAlerts().map(a => a.ticker))) ensureTickerLoaded(t);
-}
-// ¿La condición se cumple ahora? {met:true|false, current} o {met:null} sin dato.
-function evalUserAlert(a) {
-  const m = UALERT_METRICS[a.metric];
-  const cur = m ? m.get(liveDataFor(a.ticker)) : null;
-  if (cur == null || !isFinite(cur)) return { met: null, current: null };
-  return { met: a.op === 'above' ? cur >= a.value : cur <= a.value, current: cur };
-}
-// Marca las que se cumplieron (una sola vez por cruce), las registra en el
-// historial y — si están activadas las notificaciones — avisa. Se re-arma sola
-// cuando la condición deja de cumplirse (alerta recurrente, no de un solo uso).
-function checkUserAlerts() {
-  const list = getUserAlerts();
-  let changed = false;
-  for (const a of list) {
-    const { met } = evalUserAlert(a);
-    if (met === null) continue; // sin dato en vivo todavía
-    if (met && !a.triggeredAt) {
-      a.triggeredAt = Date.now(); changed = true;
-      logAlertHistory(a.ticker, 'custom', null, [userAlertText(a)]);
-      if (alertsEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        try { new Notification(`${a.ticker}: alerta personalizada`, { body: userAlertText(a), tag: `icp-ua-${a.id}` }); } catch { /* no-op */ }
-      }
-    } else if (!met && a.triggeredAt) {
-      a.triggeredAt = null; changed = true;
-    }
-  }
-  if (changed) saveUserAlerts(list);
-}
-
-/* ─────────────────── cambio de grado / flip de señal ───────────────────
- * Guarda una foto de la última alerta firme (tipo compra/venta + grado A/B/C)
- * por ticker y registra cuándo cambia: sube o baja de grado (B→A), la señal se
- * da vuelta (compra↔venta) o aparece una señal nueva donde no había. Alimenta
- * la sección "Cambios recientes" del Centro de alertas — para no perderse un
- * activo que mejoró o se dio vuelta entre una visita y otra. */
-const ALERT_SNAP_KEY = 'icp_alert_snap';
-const ALERT_CHANGES_KEY = 'icp_alert_changes';
-const ALERT_CHANGES_MAX = 40;
-const GRADE_ORDER = { A: 3, B: 2, C: 1 };
-function getAlertSnap() { try { return JSON.parse(localStorage.getItem(ALERT_SNAP_KEY) || '{}') || {}; } catch { return {}; } }
-function getAlertChanges() { try { const a = JSON.parse(localStorage.getItem(ALERT_CHANGES_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
-function clearAlertChanges() { lsSetSafe(ALERT_CHANGES_KEY, '[]'); showToast('Cambios recientes borrados', 'info'); renderReport(); }
-function logAlertChange(ev) {
-  const list = getAlertChanges();
-  list.unshift({ ...ev, ts: Date.now() });
-  lsSetSafe(ALERT_CHANGES_KEY, JSON.stringify(list.slice(0, ALERT_CHANGES_MAX)));
-}
-// Compara la alerta actual de un ticker con la foto previa y registra el cambio.
-function trackAlertChange(ticker, signal) {
-  const a = signal?.alert;
-  const type = (a && !a.pending && (a.type === 'buy' || a.type === 'sell')) ? a.type : null;
-  const grade = type ? (a.grade ?? null) : null;
-  const snap = getAlertSnap();
-  const prev = snap[ticker] || null;
-  if (prev) {
-    if (type && prev.type && type !== prev.type) {
-      logAlertChange({ ticker, kind: 'flip', fromType: prev.type, toType: type, toGrade: grade });
-    } else if (type && !prev.type) {
-      logAlertChange({ ticker, kind: 'new', toType: type, toGrade: grade });
-    } else if (type && prev.type === type && grade && prev.grade && grade !== prev.grade) {
-      logAlertChange({ ticker, kind: 'grade', type, fromGrade: prev.grade, toGrade: grade, up: (GRADE_ORDER[grade] || 0) > (GRADE_ORDER[prev.grade] || 0) });
-    }
-  }
-  if (!prev || prev.type !== type || prev.grade !== grade) {
-    snap[ticker] = { type, grade, ts: Date.now() };
-    lsSetSafe(ALERT_SNAP_KEY, JSON.stringify(snap));
-  }
-}
-
 function notifyIfNewAlert(ticker, priceAlert) {
   const curr = priceAlert?.type ?? null;
   const isStrong = curr && !priceAlert.pending && (priceAlert.confidence === 'alta' || priceAlert.confidence === 'media');
@@ -2476,11 +2351,11 @@ const VIEW_PAGES = {
   simulator: { html: simulatorHTML, wire: wireSimulatorEvents, load: loadSimulatorData },
   watchlist: { html: watchlistPageHTML, wire: wireWatchlistEvents, load: () => {} },
   macro: { html: macroNewsPageHTML, wire: wireMacroNewsEvents, load: loadMacroNewsData },
-  alerts: { html: alertsPageHTML, wire: wireAlertsEvents, load: () => { if (!dashState.started) loadDashboardData(); loadWatchlistData(); loadUserAlertTickers(); checkUserAlerts(); if (telegramState.chatId && !telegramState.subsLoaded && !telegramState.subsLoading) loadTelegramSubscriptions(); } },
+  alerts: { html: alertsPageHTML, wire: wireAlertsEvents, load: () => { if (telegramState.chatId && !telegramState.subsLoaded && !telegramState.subsLoading) loadTelegramSubscriptions(); } },
   backtest: { html: backtestPageHTML, wire: wireBacktestEvents, load: () => {} },
   calendar: { html: calendarPageHTML, wire: wireCalendarEvents, load: loadCalendarData },
   screener: { html: screenerPageHTML, wire: wireScreenerEvents, load: () => { if (!dashState.started) loadDashboardData(); } },
-  shorttrades: { html: shortTradesPageHTML, wire: wireShortTradesEvents, load: () => { if (!dashState.started) loadDashboardData(); loadWatchlistData(); loadShortWatchTickers(); checkShortWatchAlerts(); } },
+  shorttrades: { html: shortTradesPageHTML, wire: wireShortTradesEvents, load: () => { if (!dashState.started) loadDashboardData(); loadWatchlistData(); } },
   gaps: { html: gapsPageHTML, wire: wireGapsEvents, load: () => { if (!dashState.started) loadDashboardData(); loadWatchlistData(); } },
   trackrecord: { html: trackRecordPageHTML, wire: wireTrackRecordEvents, load: () => { if (!trackState.started) loadTrackRecord(); } },
   dividends: { html: dividendsPageHTML, wire: wireDividendsEvents, load: loadDividendsData },
@@ -5726,95 +5601,6 @@ const SHORT_CLOSED_MAX = 200;  // historial de trades cerrados que se guarda
 const SHORT_MAX_HEAT_R = 6;    // riesgo total abierto recomendado (en R) — aviso si se supera
 const SHORT_DAILY_LOSS_R = -3; // límite de pérdida diaria (en R) — circuit breaker
 const SHORT_TIME_STOP_DAYS = 3;// vigencia por defecto de un setup corto (ruedas)
-/* ── Watchlist de setups (trade cortos): fijás un setup y ves su estado en vivo ──
- * A diferencia de "tomar el trade" (que asume que ya entraste), acá solo lo
- * vigilás: el estado se recalcula con el precio del momento — "a punto" (todavía
- * no gatilló la entrada), "activo" (superó/cruzó el nivel de entrada), "falló"
- * (tocó el stop) o "objetivo" (llegó al target). Guarda solo el plan. */
-const SHORT_WATCH_KEY = 'icp_short_watch';
-const SHORT_WATCH_MAX = 40;
-function getShortWatch() { try { const a = JSON.parse(localStorage.getItem(SHORT_WATCH_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
-function saveShortWatch(list) { lsSetSafe(SHORT_WATCH_KEY, JSON.stringify(list.slice(0, SHORT_WATCH_MAX))); }
-function addShortWatch(w) {
-  const list = getShortWatch();
-  if (list.some(x => x.ticker === w.ticker && x.kind === w.kind)) { showToast(`${w.ticker} (${w.kind}) ya está en tu watchlist de setups`, 'info'); return list; }
-  if (list.length >= SHORT_WATCH_MAX) { showToast(`Llegaste al máximo de ${SHORT_WATCH_MAX} setups vigilados.`, 'info'); return list; }
-  const item = { id: `sw-${w.ticker}-${w.kind}-${Date.now()}`, pinnedAt: Date.now(), firedKeys: [], ...w };
-  // Foto del estado al fijarlo, para que las alertas de transición solo avisen
-  // de cambios REALES a partir de acá (si ya estaba activo al fijarlo, no dispara
-  // un "gatilló" falso — ese estado es la línea de base).
-  item.lastStatus = shortWatchStatus(item).key;
-  list.unshift(item);
-  saveShortWatch(list);
-  return list;
-}
-function deleteShortWatch(id) { saveShortWatch(getShortWatch().filter(x => String(x.id) !== String(id))); }
-// Precio en vivo del ticker mirando todos los stores cargados.
-function shortWatchPrice(ticker) {
-  return dashState.data[ticker]?.price ?? watchState.data[ticker]?.price ?? portState.data[ticker]?.price ?? null;
-}
-// Estado en vivo de un setup fijado con el precio actual. Simétrico long/short.
-function shortWatchStatus(w) {
-  const price = shortWatchPrice(w.ticker);
-  if (price == null) return { key: 'sindato', label: 'Sin dato en vivo', color: 'var(--text-faint)', price: null, progress: null };
-  const long = w.direction !== 'short';
-  const hitTarget = long ? price >= w.target : price <= w.target;
-  const hitStop = long ? price <= w.stop : price >= w.stop;
-  const triggered = long ? price >= w.entry : price <= w.entry;
-  if (hitTarget) return { key: 'objetivo', label: '🎯 Llegó al objetivo', color: GREEN, price, progress: 1 };
-  if (hitStop) return { key: 'fallo', label: '✖ Falló (tocó el stop)', color: RED, price, progress: 0 };
-  if (triggered) {
-    const denom = (w.target - w.entry) || 1;
-    return { key: 'activo', label: '● Activo', color: BLUE, price, progress: Math.max(0, Math.min(1, (price - w.entry) / denom)) };
-  }
-  return { key: 'apunto', label: '○ A punto', color: AMBER, price, progress: null };
-}
-
-/* ── Alertas automáticas de los setups vigilados ──────────────────────────────
- * Convierte la Watchlist de setups en algo PROACTIVO: en cada refresco de datos
- * (dashboard/watchlist/cartera) revisa cada setup fijado y, si cruzó un umbral
- * importante desde la última vez, avisa — aunque no estés en la página de Trades
- * Cortos. Dispara una sola vez por transición (firedKeys), así que no molesta si
- * el precio oscila alrededor del nivel. */
-const SHORT_WATCH_ALERT_META = {
-  activo:   { emoji: '⚡', label: 'gatilló — cruzó la entrada', tone: 'success' },
-  objetivo: { emoji: '🎯', label: 'llegó al objetivo', tone: 'success' },
-  fallo:    { emoji: '🛑', label: 'tocó el stop', tone: 'error' },
-};
-function checkShortWatchAlerts() {
-  const list = getShortWatch();
-  let changed = false;
-  for (const w of list) {
-    const stx = shortWatchStatus(w);
-    if (stx.key === 'sindato') continue; // sin precio en vivo, no evaluamos
-    const prev = w.lastStatus ?? null;
-    if (stx.key !== prev) {
-      const meta = SHORT_WATCH_ALERT_META[stx.key];
-      const fired = w.firedKeys || (w.firedKeys = []);
-      // Avisamos solo en transiciones reales (prev ya conocido) y una vez por estado.
-      if (meta && prev !== null && !fired.includes(stx.key)) {
-        fired.push(stx.key);
-        w.firedAt = Date.now(); w.firedKey = stx.key;
-        const dir = w.direction === 'short' ? '▼ corto' : '▲ largo';
-        const kindLbl = SHORT_WATCH_KIND_LABEL[w.kind] ?? w.kind;
-        logAlertHistory(w.ticker, 'setup', null, [`${kindLbl} ${dir}: ${meta.label}`]);
-        showToast(`${meta.emoji} ${w.ticker}: tu setup ${meta.label} (${fmtUsd(stx.price)})`, meta.tone, 6000);
-        if (alertsEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          try { new Notification(`${w.ticker}: setup ${meta.label}`, { body: `Vertex Signal — ${kindLbl} ${dir} · entrada ${fmtUsd(w.entry)}, ahora ${fmtUsd(stx.price)}`, tag: `icp-sw-${w.id}` }); } catch { /* no-op */ }
-        }
-      }
-      w.lastStatus = stx.key;
-      changed = true;
-    }
-  }
-  if (changed) saveShortWatch(list);
-}
-// Trae en vivo los tickers de setups vigilados que no estén cargados, para que
-// sus alertas puedan evaluarse aunque no estés en el radar de Trades Cortos.
-function loadShortWatchTickers() {
-  for (const t of new Set(getShortWatch().map(w => w.ticker))) ensureTickerLoaded(t);
-}
-
 function getShortTrades() {
   try { const a = JSON.parse(localStorage.getItem(SHORT_TRADES_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
 }
@@ -5915,11 +5701,7 @@ function earningsSoonBadge(ticker) {
 // Botón "Tomar este trade" → guarda el trade en el seguimiento.
 function shortTakeBtn(ticker, kind, dir, entry, target, stop, strat = '') {
   if (entry == null || target == null || stop == null) return '';
-  const watched = getShortWatch().some(x => x.ticker === ticker && x.kind === kind);
-  return `<div class="short-cta-row">
-    <button class="short-take" data-short-take="${esc(ticker)}" data-take-kind="${kind}" data-take-dir="${esc(dir)}" data-take-entry="${entry}" data-take-target="${target}" data-take-stop="${stop}" data-take-strat="${esc(strat)}">📌 Tomar este trade (seguimiento)</button>
-    <button class="short-watch-btn ${watched ? 'on' : ''}" data-short-watch="${esc(ticker)}" data-watch-kind="${kind}" data-watch-dir="${esc(dir)}" data-watch-entry="${entry}" data-watch-target="${target}" data-watch-stop="${stop}" title="${watched ? 'Ya está en tu watchlist de setups' : 'Vigilar este setup sin entrar todavía — verás su estado en vivo (a punto / activo / falló)'}">${watched ? '👁 En la watchlist' : '👁 Vigilar setup'}</button>
-  </div>`;
+  return `<button class="short-take" data-short-take="${esc(ticker)}" data-take-kind="${kind}" data-take-dir="${esc(dir)}" data-take-entry="${entry}" data-take-target="${target}" data-take-stop="${stop}" data-take-strat="${esc(strat)}">📌 Tomar este trade (seguimiento)</button>`;
 }
 // Carga perezosa de earnings de los tickers visibles (para el aviso de balance cercano).
 async function loadShortEarnings() {
@@ -6530,59 +6312,6 @@ function shortTakenTradesHTML() {
     </div>`;
 }
 
-/* Watchlist de setups: setups que fijaste para vigilar (sin haber entrado).
- * El estado se recalcula en vivo con el precio del momento — "a punto" (todavía
- * no gatilló), "activo" (cruzó la entrada), "falló" (tocó el stop) u "objetivo".
- * Un setup "activo" muestra el botón para tomarlo (pasarlo a seguimiento). */
-const SHORT_WATCH_KIND_LABEL = { setup: 'Setup', rebound: 'Rebote', pullback: 'Pullback', squeeze: 'Squeeze', intraday: 'Intradía', breakout: 'Ruptura' };
-function shortWatchSectionHTML() {
-  const list = getShortWatch();
-  if (!list.length) return '';
-  // Ordena por urgencia: activos primero, después a punto, y al final resueltos.
-  const rank = { activo: 0, apunto: 1, objetivo: 2, fallo: 3, sindato: 4 };
-  const rows = list.map(w => ({ w, st: shortWatchStatus(w) })).sort((a, b) => (rank[a.st.key] ?? 9) - (rank[b.st.key] ?? 9));
-  const counts = rows.reduce((acc, { st }) => { acc[st.key] = (acc[st.key] || 0) + 1; return acc; }, {});
-  const chip = (n, label, cls) => n ? `<div class="radar-therm-chip"><span class="radar-therm-n ${cls}">${n}</span><span class="radar-therm-l">${label}</span></div>` : '';
-  const rowHTML = ({ w, st }) => {
-    const long = w.direction !== 'short';
-    const dist = st.price != null && w.entry ? ((st.price - w.entry) / w.entry) * 100 : null;
-    const canTake = st.key === 'activo';
-    // Aviso reciente: si una transición disparó una alerta hace poco, se marca.
-    const firedMeta = w.firedKey ? SHORT_WATCH_ALERT_META[w.firedKey] : null;
-    const firedRecent = firedMeta && w.firedAt && (Date.now() - w.firedAt) < 12 * 3600 * 1000;
-    return `<div class="swx-row${firedRecent ? ' swx-fired' : ''}" style="--swx-color:${st.color};">
-      <div class="swx-head">
-        <span class="swx-tk" data-short-ticker="${esc(w.ticker)}">${esc(w.ticker)}</span>
-        <span class="swx-kind">${SHORT_WATCH_KIND_LABEL[w.kind] ?? esc(w.kind)} ${long ? '▲' : '▼'}</span>
-        <span class="swx-status" style="color:${st.color};">${st.label}</span>
-        ${firedRecent ? `<span class="swx-fired-badge" title="Alerta disparada">🔔 ${esc(firedMeta.label)} · ${esc(relativeTime(w.firedAt))}</span>` : ''}
-        <button class="swx-del" data-short-watch-del="${esc(w.id)}" title="Quitar de la watchlist de setups" aria-label="Quitar ${esc(w.ticker)}">×</button>
-      </div>
-      <div class="swx-metrics">
-        <span>Entrada <b>${fmtUsd(w.entry)}</b></span>
-        <span>Ahora <b>${st.price != null ? fmtUsd(st.price) : 'N/D'}</b>${dist != null ? ` <small class="${dist >= 0 ? 'up' : 'down'}">(${dist >= 0 ? '+' : ''}${dist.toFixed(1)}%)</small>` : ''}</span>
-        <span>Objetivo <b class="up">${fmtUsd(w.target)}</b></span>
-        <span>Stop <b class="down">${fmtUsd(w.stop)}</b></span>
-      </div>
-      ${st.progress != null ? `<div class="swx-bar"><i style="width:${Math.round(st.progress * 100)}%; background:${st.color};"></i></div>` : ''}
-      ${canTake ? `<button class="short-take swx-take" data-short-take="${esc(w.ticker)}" data-take-kind="${esc(w.kind)}" data-take-dir="${esc(w.direction)}" data-take-entry="${w.entry}" data-take-target="${w.target}" data-take-stop="${w.stop}" data-take-strat="${esc(w.kind)}">📌 Gatilló — tomar este trade</button>` : ''}
-    </div>`;
-  };
-  return `
-    ${sectionTitleHTML('👁 Watchlist de setups', 'radar')}
-    <div class="dash-intro">Setups que fijaste para <strong>vigilar sin entrar</strong>. El estado se recalcula con el precio del momento: <strong>○ a punto</strong> (todavía no cruzó la entrada), <strong>● activo</strong> (ya la cruzó), <strong>🎯 objetivo</strong> o <strong>✖ falló</strong> (tocó el stop). <strong>🔔 Te avisa solo</strong> cuando un setup gatilla, llega al objetivo o toca el stop — aunque no estés en esta página (activá las notificaciones del navegador desde Watchlist para el aviso fuera de la pestaña). Cuando uno se activa, aparece el botón para pasarlo a seguimiento.</div>
-    <div class="card swx-card">
-      <div class="radar-therm-chips" style="margin-bottom:12px;">
-        ${chip(counts.activo, '● Activos', 'up')}
-        ${chip(counts.apunto, '○ A punto', 'amber')}
-        ${chip(counts.objetivo, '🎯 En objetivo', 'up')}
-        ${chip(counts.fallo, '✖ Fallidos', 'down')}
-      </div>
-      ${rows.map(rowHTML).join('')}
-      <div class="stk-foot">Vigilancia guardada en este navegador. Los niveles son los del setup al momento de fijarlo; el estado usa el último precio real. No es asesoramiento.</div>
-    </div>`;
-}
-
 /* Historial de trades cerrados: desempeño REAL del usuario (win rate, R
  * promedio, profit factor, expectativa), curva de equity y desglose por
  * estrategia — lo que separa a quien improvisa de quien mejora. */
@@ -6814,8 +6543,6 @@ function shortTradesPageHTML() {
     ${shortCalculatorHTML()}
 
     ${intradayCardHTML()}
-
-    ${shortWatchSectionHTML()}
 
     ${shortTakenTradesHTML()}
 
@@ -7242,21 +6969,6 @@ function wireShortTradesEvents() {
   document.getElementById('short-clear-hist')?.addEventListener('click', (e) => {
     e.stopPropagation();
     if (window.confirm('¿Borrar todo el historial de trades cerrados? No se puede deshacer.')) { clearClosedShortTrades(); rerender(); }
-  });
-  // Fijar un setup para vigilar (sin entrar) → watchlist de setups.
-  els.report.querySelectorAll('[data-short-watch]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      addShortWatch({
-        ticker: btn.dataset.shortWatch, kind: btn.dataset.watchKind, direction: btn.dataset.watchDir,
-        entry: parseFloat(btn.dataset.watchEntry), target: parseFloat(btn.dataset.watchTarget), stop: parseFloat(btn.dataset.watchStop),
-      });
-      showToast(`${btn.dataset.shortWatch} agregado a tu watchlist de setups`, 'success');
-      rerender();
-    });
-  });
-  els.report.querySelectorAll('[data-short-watch-del]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); deleteShortWatch(btn.dataset.shortWatchDel); rerender(); });
   });
   // Tomar un trade → seguimiento; cerrar seguimiento.
   els.report.querySelectorAll('[data-short-take]').forEach(btn => {
@@ -11727,9 +11439,6 @@ async function loadPortfolioData() {
       // (lastAlertByTicker) evita avisos duplicados si el ticker está en ambas.
       notifyIfNewAlert(h.ticker, signal.alert);
       notifyStructureChange(h.ticker, signal.structure);
-      trackAlertChange(h.ticker, signal);
-      checkUserAlerts();
-      checkShortWatchAlerts();
     } catch (e) {
       console.warn('[portfolio] no se pudo cargar', h.ticker, e.message);
     } finally {
@@ -12343,220 +12052,20 @@ function alertHistoryCardHTML() {
     </div>`}`;
 }
 
-/* ───────────────────────── Centro de alertas ─────────────────────────
- * Agrega TODAS las alertas activas ahora mismo en un solo panel filtrable:
- * las del motor técnico (zonas de compra/venta/stop) de todo lo cargado
- * (dashboard curado + tu Watchlist + tu cartera) y tus alertas personalizadas
- * que ya se cumplieron. Filtros por tipo y alcance. */
-const alertsState = {
-  filter: lsGetSafe('icp_alerts_filter', 'all'),   // all | buy | sell | stop | custom
-  scope: lsGetSafe('icp_alerts_scope', 'all'),     // all | watch (solo tu watchlist)
-};
-const ALERT_FILTERS = [
-  { key: 'all', label: 'Todas' },
-  { key: 'buy', label: '🟢 Compra' },
-  { key: 'sell', label: '🟡 Venta' },
-  { key: 'stop', label: '🔴 Stop' },
-  { key: 'custom', label: '⭐ Personalizadas' },
-];
-// Reúne las alertas del motor de todos los stores cargados (sin duplicar ticker).
-function collectEngineAlerts() {
-  const out = new Map();
-  const watch = new Set(getWatchlist());
-  const holdings = new Set(getPortfolio().map(h => h.ticker));
-  for (const map of [dashState.data, watchState.data, portState.data]) {
-    for (const [ticker, d] of Object.entries(map)) {
-      if (!d || !d.alert || d.alert.pending || out.has(ticker)) continue;
-      const type = d.alert.type;
-      if (type !== 'buy' && type !== 'sell' && type !== 'stop') continue;
-      out.set(ticker, { ticker, d, alert: d.alert, inWatch: watch.has(ticker), inPort: holdings.has(ticker) });
-    }
-  }
-  return [...out.values()];
-}
-function alertCenterCardHTML() {
-  let engine = collectEngineAlerts();
-  const custom = getUserAlerts().map(a => ({ a, ...evalUserAlert(a) })).filter(x => x.met === true);
-  // Alcance
-  if (alertsState.scope === 'watch') engine = engine.filter(e => e.inWatch);
-  // Filtro por tipo
-  const showEngine = alertsState.filter === 'all' || ['buy', 'sell', 'stop'].includes(alertsState.filter);
-  const showCustom = alertsState.filter === 'all' || alertsState.filter === 'custom';
-  const engineShown = showEngine ? engine.filter(e => alertsState.filter === 'all' || e.alert.type === alertsState.filter) : [];
-  const customShown = (showCustom && alertsState.scope !== 'watch') ? custom : (showCustom ? custom.filter(x => new Set(getWatchlist()).has(x.a.ticker)) : []);
-  // Orden del motor: grado (A→C) y luego score.
-  const gradeRk = a => a.gradeRank ?? (GRADE_ORDER[a.grade] ? 4 - GRADE_ORDER[a.grade] : 3);
-  engineShown.sort((x, y) => gradeRk(x.alert) - gradeRk(y.alert) || (y.d.score ?? 0) - (x.d.score ?? 0));
-  const total = engineShown.length + customShown.length;
-  const counts = { buy: engine.filter(e => e.alert.type === 'buy').length, sell: engine.filter(e => e.alert.type === 'sell').length, stop: engine.filter(e => e.alert.type === 'stop').length, custom: custom.length };
-  const filterBtns = ALERT_FILTERS.map(f => {
-    const n = f.key === 'all' ? (engine.length + custom.length) : (counts[f.key] ?? 0);
-    return `<button class="alertc-chip ${alertsState.filter === f.key ? 'on' : ''}" data-alertc-filter="${f.key}">${f.label}${n ? ` <span class="alertc-chip-n">${n}</span>` : ''}</button>`;
-  }).join('');
-  const engineItem = (e) => {
-    const m = ALERT_META[e.alert.type];
-    const badges = `${e.inWatch ? '<span class="alertc-tag watch">★ Watchlist</span>' : ''}${e.inPort ? '<span class="alertc-tag port">◈ Cartera</span>' : ''}`;
-    const narr = alertNarrative(e.alert);
-    return `<div class="alertc-item" data-alertc-ticker="${esc(e.ticker)}" style="--ac:${m?.color ?? 'var(--text-faint)'};">
-      <div class="alertc-dot" style="background:${m?.color ?? 'var(--text-faint)'};"></div>
-      <div class="alertc-body">
-        <div class="alertc-top">
-          <span class="alertc-tk">${esc(e.ticker)}</span>
-          <span class="alertc-label" style="color:${m?.color};">${esc(m?.label ?? e.alert.type)}${alertConfidenceSuffix(e.alert)}</span>
-          ${badges}
-        </div>
-        <div class="alertc-sub">${esc(e.d.name ?? '')} · ${fmtUsd(e.d.price)} <span class="${e.d.changePct >= 0 ? 'up' : 'down'}">${fmtPct(e.d.changePct)}</span> · ${esc(e.d.scoreLabel ?? '')} ${e.d.score ?? ''}</div>
-        ${narr ? `<div class="alertc-narr">${narr}</div>` : ''}
-      </div>
-    </div>`;
-  };
-  const customItem = (x) => {
-    const m = UALERT_METRICS[x.a.metric];
-    return `<div class="alertc-item" data-alertc-ticker="${esc(x.a.ticker)}" style="--ac:${GOLD};">
-      <div class="alertc-dot" style="background:${GOLD};"></div>
-      <div class="alertc-body">
-        <div class="alertc-top">
-          <span class="alertc-tk">${esc(x.a.ticker)}</span>
-          <span class="alertc-label" style="color:${GOLD};">⭐ Personalizada cumplida</span>
-        </div>
-        <div class="alertc-sub">${esc(m ? m.label : x.a.metric)} ${x.a.op === 'above' ? '≥' : '≤'} <b>${m ? m.fmt(x.a.value) : x.a.value}</b> · ahora <b>${m ? m.fmt(x.current) : x.current}</b></div>
-      </div>
-    </div>`;
-  };
-  const loading = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
-  return `
-    ${sectionTitleHTML('Centro de alertas', 'radar')}
-    <div class="dash-intro">Todas las alertas activas <strong>ahora mismo</strong> en un solo lugar: las del análisis técnico (zonas de compra/venta/stop) de todo lo que tenés cargado — dashboard, tu Watchlist y tu cartera — más tus <strong>alertas personalizadas</strong> ya cumplidas. ${loading ? 'Terminando de cargar el universo…' : ''}</div>
-    <div class="alertc-controls">
-      <div class="alertc-chips">${filterBtns}</div>
-      <div class="alertc-scope">
-        <button class="alertc-chip ${alertsState.scope === 'all' ? 'on' : ''}" data-alertc-scope="all">Todo el universo</button>
-        <button class="alertc-chip ${alertsState.scope === 'watch' ? 'on' : ''}" data-alertc-scope="watch">★ Solo Watchlist</button>
-      </div>
-    </div>
-    ${!total ? `<div class="card watch-empty">${loading ? 'Analizando el universo…' : 'No hay alertas activas con este filtro en este momento.'}</div>` : `
-    <div class="card alertc-list">
-      ${engineShown.map(engineItem).join('')}
-      ${customShown.map(customItem).join('')}
-    </div>`}`;
-}
-
-/* ─────────────────── Alertas personalizadas (form + lista) ─────────────────── */
-function userAlertsCardHTML() {
-  const list = getUserAlerts();
-  const metricOpts = Object.entries(UALERT_METRICS).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
-  const rows = list.map(a => {
-    const { met, current } = evalUserAlert(a);
-    const m = UALERT_METRICS[a.metric];
-    const stateCls = met === null ? 'ua-wait' : met ? 'ua-met' : 'ua-wait';
-    const stateTxt = met === null ? 'Sin dato en vivo' : met ? '✓ Cumplida' : 'Esperando';
-    const stateColor = met === null ? 'var(--text-faint)' : met ? GREEN : AMBER;
-    return `<div class="ua-row">
-      <div class="ua-row-main">
-        <span class="ua-tk" data-alertc-ticker="${esc(a.ticker)}">${esc(a.ticker)}</span>
-        <span class="ua-cond">${esc(m ? m.label : a.metric)} ${a.op === 'above' ? '≥' : '≤'} <b>${m ? m.fmt(a.value) : a.value}</b></span>
-        <span class="ua-state ${stateCls}" style="color:${stateColor};">${stateTxt}${current != null && m ? ` · ahora ${m.fmt(current)}` : ''}</span>
-      </div>
-      <button class="ua-del" data-ua-del="${esc(a.id)}" title="Borrar alerta" aria-label="Borrar alerta de ${esc(a.ticker)}">×</button>
-    </div>`;
-  }).join('');
-  return `
-    ${sectionTitleHTML('⭐ Alertas personalizadas', 'warning', 'margin-top:26px;')}
-    <div class="dash-intro">Definí tu propia condición por activo y la ves cumplirse en vivo. Se evalúa contra los datos que ya carga la app (dashboard, Watchlist y cartera). Se guarda en este navegador y se sincroniza con tu cuenta. Con las notificaciones activadas, además te avisa cuando se cumple.</div>
-    <div class="card ua-form-card">
-      <div class="ua-form">
-        <input list="ua-ticker-list" id="ua-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" aria-label="Ticker de la alerta" autocomplete="off" style="text-transform:uppercase;" />
-        <datalist id="ua-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
-        <select id="ua-metric" class="watch-select" aria-label="Métrica">${metricOpts}</select>
-        <select id="ua-op" class="watch-select" aria-label="Condición">
-          <option value="above">≥ mayor o igual a</option>
-          <option value="below">≤ menor o igual a</option>
-        </select>
-        <input id="ua-value" class="port-input" type="number" step="any" placeholder="Valor" aria-label="Valor umbral" style="max-width:120px;" />
-        <button class="port-add-btn" id="ua-add">＋ Crear alerta</button>
-      </div>
-    </div>
-    ${list.length ? `<div class="card ua-list">${rows}</div>` : `<div class="card watch-empty">Todavía no creaste ninguna alerta personalizada.</div>`}`;
-}
-
-/* ─────────────────── Cambios recientes (grado / flip) ─────────────────── */
-function alertChangesCardHTML() {
-  const changes = getAlertChanges();
-  if (!changes.length) return '';
-  const item = (c) => {
-    let icon, color, text;
-    if (c.kind === 'flip') {
-      const to = ALERT_META[c.toType];
-      color = to?.color ?? BLUE;
-      icon = '🔄';
-      text = `Se dio vuelta: pasó de <b style="color:${ALERT_META[c.fromType]?.color};">${esc(ALERT_META[c.fromType]?.label ?? c.fromType)}</b> a <b style="color:${to?.color};">${esc(to?.label ?? c.toType)}</b>${c.toGrade ? ` (grado ${esc(c.toGrade)})` : ''}`;
-    } else if (c.kind === 'grade') {
-      color = c.up ? GREEN : AMBER;
-      icon = c.up ? '⬆' : '⬇';
-      text = `${c.up ? 'Mejoró' : 'Bajó'} de grado en ${esc(ALERT_META[c.type]?.label ?? c.type)}: <b>${esc(c.fromGrade)}</b> → <b style="color:${color};">${esc(c.toGrade)}</b>`;
-    } else {
-      const to = ALERT_META[c.toType];
-      color = to?.color ?? GREEN;
-      icon = '✨';
-      text = `Nueva señal: <b style="color:${to?.color};">${esc(to?.label ?? c.toType)}</b>${c.toGrade ? ` (grado ${esc(c.toGrade)})` : ''}`;
-    }
-    return `<div class="alertch-row" data-alertc-ticker="${esc(c.ticker)}" style="--ac:${color};">
-      <span class="alertch-icon">${icon}</span>
-      <span class="alertch-tk">${esc(c.ticker)}</span>
-      <span class="alertch-text">${text}</span>
-      <span class="alertch-time">${esc(relativeTime(c.ts))}</span>
-    </div>`;
-  };
-  return `
-    <div class="panel-header" style="margin-top:26px;">
-      ${sectionTitleHTML('Cambios recientes de señal', 'trend', 'margin-bottom:0;')}
-      <button class="link-btn" id="alert-changes-clear">Borrar</button>
-    </div>
-    <div class="dash-intro" style="margin-bottom:14px;">Cuando un activo <strong>sube o baja de grado</strong> (B→A) o su señal <strong>se da vuelta</strong> (compra↔venta), queda registrado acá — para no perderte los que mejoraron o giraron entre una visita y otra. Se detecta cada vez que la app refresca los datos con la pestaña abierta.</div>
-    <div class="card alertch-list">${changes.map(item).join('')}</div>`;
-}
-
 function alertsPageHTML() {
+  const tickers = getWatchlist().filter(t => watchState.data[t]?.alert);
   return `
     ${sectionTitleHTML('Alertas', 'warning')}
-    ${alertCenterCardHTML()}
-    ${userAlertsCardHTML()}
-    ${alertChangesCardHTML()}
     ${telegramCardHTML()}
+    <div class="dash-intro" style="margin-top:22px;">Activos en tu Watchlist que están, ahora mismo, en zona de compra, zona de venta o tocaron el stop loss según el análisis técnico. Activá las notificaciones del navegador desde Watchlist para recibir un aviso apenas cambie una señal (solo con la pestaña abierta).</div>
+    ${!tickers.length ? `<div class="card watch-empty">Ningún activo en seguimiento tiene una alerta activa en este momento.</div>` : `
+    <div class="watch-grid">${tickers.map(watchCardHTML).join('')}</div>`}
     ${alertHistoryCardHTML()}`;
 }
 function wireAlertsEvents() {
   els.report.querySelectorAll('.watch-card').forEach(el => {
     el.addEventListener('click', (e) => { if (e.target.closest('.watch-remove')) return; selectTicker(el.dataset.ticker); });
   });
-  // Centro de alertas: filtros por tipo / alcance, y navegar a la ficha.
-  els.report.querySelectorAll('[data-alertc-filter]').forEach(btn => {
-    btn.addEventListener('click', () => { alertsState.filter = btn.dataset.alertcFilter; lsSetSafe('icp_alerts_filter', alertsState.filter); renderReport(); });
-  });
-  els.report.querySelectorAll('[data-alertc-scope]').forEach(btn => {
-    btn.addEventListener('click', () => { alertsState.scope = btn.dataset.alertcScope; lsSetSafe('icp_alerts_scope', alertsState.scope); renderReport(); });
-  });
-  els.report.querySelectorAll('[data-alertc-ticker]').forEach(el => {
-    el.addEventListener('click', (e) => { if (e.target.closest('.ua-del')) return; selectTicker(el.dataset.alertcTicker); });
-  });
-  // Alertas personalizadas: crear / borrar.
-  document.getElementById('ua-add')?.addEventListener('click', () => {
-    const ticker = (document.getElementById('ua-ticker')?.value || '').trim().toUpperCase();
-    const metric = document.getElementById('ua-metric')?.value;
-    const op = document.getElementById('ua-op')?.value;
-    const value = parseFloat((document.getElementById('ua-value')?.value || '').replace(',', '.'));
-    if (!ticker) { showToast('Ingresá un ticker.', 'info'); return; }
-    if (!universe.some(a => a.ticker === ticker)) { showToast(`No conozco el ticker ${ticker}.`, 'info'); return; }
-    if (!isFinite(value)) { showToast('Ingresá un valor numérico para la condición.', 'info'); return; }
-    addUserAlert({ ticker, metric, op, value });
-    showToast(`Alerta creada para ${ticker}.`, 'success');
-    ensureTickerLoaded(ticker); // trae datos en vivo si el activo no estaba cargado
-    renderReport();
-  });
-  els.report.querySelectorAll('[data-ua-del]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); deleteUserAlert(btn.dataset.uaDel); renderReport(); });
-  });
-  document.getElementById('alert-changes-clear')?.addEventListener('click', clearAlertChanges);
   document.getElementById('alert-history-clear')?.addEventListener('click', clearAlertHistory);
   els.report.querySelectorAll('.watch-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -13627,10 +13136,7 @@ async function loadWatchlistData() {
       notifyIfNewAlert(ticker, signal.alert);
       notifyStructureChange(ticker, signal.structure);
       notifySetupTrigger(ticker, signal.setup);
-      trackAlertChange(ticker, signal);
       watchState.data[ticker] = signal;
-      checkUserAlerts();
-      checkShortWatchAlerts();
     } catch (e) {
       console.warn('[watchlist] no se pudo cargar', ticker, e.message);
     } finally {
@@ -13727,9 +13233,7 @@ async function loadDashboardData() {
       dashState.loading.add(ticker);
       if (!state.asset) renderReport(); // el dashboard solo se ve en la pantalla de inicio
       try {
-        const signal = await computeLightSignal(ticker, macro);
-        dashState.data[ticker] = signal;
-        trackAlertChange(ticker, signal);
+        dashState.data[ticker] = await computeLightSignal(ticker, macro);
       } catch (e) {
         console.warn('[dashboard] no se pudo cargar', ticker, e.message);
       } finally {
@@ -13737,8 +13241,6 @@ async function loadDashboardData() {
         if (!state.asset) renderReport();
       }
     }));
-    checkUserAlerts(); // evalúa las alertas personalizadas contra lo recién cargado
-    checkShortWatchAlerts(); // y las transiciones de los setups vigilados
     if (i + DASHBOARD_BATCH_SIZE < pending.length) await new Promise(res => setTimeout(res, DASHBOARD_BATCH_DELAY_MS));
   }
 }
@@ -13792,10 +13294,6 @@ setInterval(() => { if (state.asset) renderReport(); }, 30 * 1000); // refresca 
 setInterval(() => { if (state.asset) loadReport(state.asset.ticker); }, 180 * 1000);
 setInterval(loadWatchlistData, 180 * 1000);
 setInterval(() => { if (!state.asset) loadDashboardData(); }, 180 * 1000);
-// Setups vigilados: los mantenemos cargados y chequeamos sus transiciones en
-// segundo plano, así las alertas de "gatilló / objetivo / stop" llegan aunque
-// no estés en la página de Trades Cortos.
-setInterval(() => { loadShortWatchTickers(); checkShortWatchAlerts(); }, 120 * 1000);
 setInterval(() => { if (!state.asset && state.view === 'portfolio') { portState.data = {}; loadPortfolioData(); } }, 180 * 1000);
 setInterval(() => { if (!state.asset && state.view === 'macro') loadMacroNewsData(); }, 180 * 1000);
 // Pre-market: en horario de pre-market cambia rápido, así que se refresca cada
