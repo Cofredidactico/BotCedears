@@ -3,7 +3,7 @@
   "ticker": "MSFT",
   "name": "Microsoft",
   "sector": "Tecnología",
-  "refPriceUsd": 467.2,
+  "refPriceUsd": 484.37,
   "ratio": 30,
   "category": "CEDEAR"
  },
@@ -11,7 +11,7 @@
   "ticker": "AAPL",
   "name": "Apple",
   "sector": "Tecnología",
-  "refPriceUsd": 214.3,
+  "refPriceUsd": 311.5,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -19,7 +19,7 @@
   "ticker": "NVDA",
   "name": "Nvidia",
   "sector": "Semiconductores",
-  "refPriceUsd": 126.4,
+  "refPriceUsd": 215.52,
   "ratio": 24,
   "category": "CEDEAR"
  },
@@ -27,7 +27,7 @@
   "ticker": "AMZN",
   "name": "Amazon",
   "sector": "Consumo",
-  "refPriceUsd": 247.49,
+  "refPriceUsd": 259.15,
   "ratio": 150,
   "category": "CEDEAR"
  },
@@ -35,7 +35,7 @@
   "ticker": "GOOGL",
   "name": "Alphabet",
   "sector": "Tecnología",
-  "refPriceUsd": 359.51,
+  "refPriceUsd": 345.33,
   "ratio": 60,
   "category": "CEDEAR"
  },
@@ -43,7 +43,7 @@
   "ticker": "META",
   "name": "Meta Platforms",
   "sector": "Tecnología",
-  "refPriceUsd": 498.2,
+  "refPriceUsd": 552.49,
   "ratio": 24,
   "category": "CEDEAR"
  },
@@ -51,7 +51,7 @@
   "ticker": "TSLA",
   "name": "Tesla",
   "sector": "Automotriz",
-  "refPriceUsd": 248.5,
+  "refPriceUsd": 363.25,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -59,7 +59,7 @@
   "ticker": "KO",
   "name": "Coca-Cola",
   "sector": "Consumo",
-  "refPriceUsd": 62.4,
+  "refPriceUsd": 90.91,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -67,7 +67,7 @@
   "ticker": "MELI",
   "name": "MercadoLibre",
   "sector": "Tecnología",
-  "refPriceUsd": 1873.88,
+  "refPriceUsd": 1944.7,
   "ratio": 120,
   "category": "CEDEAR"
  },
@@ -75,7 +75,7 @@
   "ticker": "BABA",
   "name": "Alibaba",
   "sector": "Consumo",
-  "refPriceUsd": 78.9,
+  "refPriceUsd": 120.97,
   "ratio": 9,
   "category": "CEDEAR"
  },
@@ -83,7 +83,7 @@
   "ticker": "AMD",
   "name": "Adv. Micro Devices",
   "sector": "Semiconductores",
-  "refPriceUsd": 162.7,
+  "refPriceUsd": 469.99,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -91,7 +91,7 @@
   "ticker": "JNJ",
   "name": "Johnson & Johnson",
   "sector": "Salud",
-  "refPriceUsd": 253.85,
+  "refPriceUsd": 271.02,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -99,7 +99,7 @@
   "ticker": "WMT",
   "name": "Walmart",
   "sector": "Consumo",
-  "refPriceUsd": 113.7,
+  "refPriceUsd": 102.67,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -107,7 +107,7 @@
   "ticker": "DIS",
   "name": "Disney",
   "sector": "Comunicación",
-  "refPriceUsd": 101.4,
+  "refPriceUsd": 107.38,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -115,7 +115,7 @@
   "ticker": "PYPL",
   "name": "PayPal",
   "sector": "Fintech",
-  "refPriceUsd": 47.37,
+  "refPriceUsd": 61.92,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -123,7 +123,7 @@
   "ticker": "NFLX",
   "name": "Netflix",
   "sector": "Comunicación",
-  "refPriceUsd": 73.53,
+  "refPriceUsd": 80.39,
   "ratio": 50,
   "category": "CEDEAR"
  },
@@ -131,7 +131,7 @@
   "ticker": "V",
   "name": "Visa",
   "sector": "Fintech",
-  "refPriceUsd": 356.02,
+  "refPriceUsd": 370.71,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -139,7 +139,7 @@
   "ticker": "JPM",
   "name": "JPMorgan",
   "sector": "Bancos",
-  "refPriceUsd": 342.89,
+  "refPriceUsd": 350.73,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -147,7 +147,7 @@
   "ticker": "XOM",
   "name": "Exxon Mobil",
   "sector": "Energía",
-  "refPriceUsd": 145.09,
+  "refPriceUsd": 165.62,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -155,7 +155,7 @@
   "ticker": "PFE",
   "name": "Pfizer",
   "sector": "Salud",
-  "refPriceUsd": 24.25,
+  "refPriceUsd": 28.09,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -163,7 +163,7 @@
   "ticker": "BA",
   "name": "Boeing",
   "sector": "Industrial",
-  "refPriceUsd": 217.11,
+  "refPriceUsd": 213.54,
   "ratio": 24,
   "category": "CEDEAR"
  },
@@ -171,7 +171,7 @@
   "ticker": "INTC",
   "name": "Intel",
   "sector": "Semiconductores",
-  "refPriceUsd": 107.76,
+  "refPriceUsd": 90.06,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -179,7 +179,7 @@
   "ticker": "QCOM",
   "name": "Qualcomm",
   "sector": "Semiconductores",
-  "refPriceUsd": 201.6,
+  "refPriceUsd": 160.68,
   "ratio": 9,
   "category": "CEDEAR"
  },
@@ -187,7 +187,7 @@
   "ticker": "NKE",
   "name": "Nike",
   "sector": "Consumo",
-  "refPriceUsd": 42.86,
+  "refPriceUsd": 40.77,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -195,7 +195,7 @@
   "ticker": "SBUX",
   "name": "Starbucks",
   "sector": "Consumo",
-  "refPriceUsd": 106.17,
+  "refPriceUsd": 105.75,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -203,7 +203,7 @@
   "ticker": "GOLD",
   "name": "Barrick Gold",
   "sector": "Materiales",
-  "refPriceUsd": 16.4,
+  "refPriceUsd": 45.6,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -211,7 +211,7 @@
   "ticker": "GGAL",
   "name": "Grupo Galicia",
   "sector": "Bancos",
-  "refPriceUsd": 48.6,
+  "refPriceUsd": 41.81,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -219,7 +219,7 @@
   "ticker": "YPF",
   "name": "YPF",
   "sector": "Energía",
-  "refPriceUsd": 23.8,
+  "refPriceUsd": 50.99,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -227,7 +227,7 @@
   "ticker": "PAM",
   "name": "Pampa Energía",
   "sector": "Energía",
-  "refPriceUsd": 68.4,
+  "refPriceUsd": 79.63,
   "ratio": 25,
   "category": "CEDEAR"
  },
@@ -235,7 +235,7 @@
   "ticker": "BMA",
   "name": "Banco Macro",
   "sector": "Bancos",
-  "refPriceUsd": 82.1,
+  "refPriceUsd": 73.93,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -243,7 +243,7 @@
   "ticker": "CEPU",
   "name": "Central Puerto",
   "sector": "Energía",
-  "refPriceUsd": 14.87,
+  "refPriceUsd": 13.04,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -251,7 +251,7 @@
   "ticker": "TX",
   "name": "Ternium",
   "sector": "Materiales",
-  "refPriceUsd": 44.78,
+  "refPriceUsd": 55.35,
   "ratio": null,
   "category": "CEDEAR"
  },
@@ -259,7 +259,7 @@
   "ticker": "BBD",
   "name": "Banco Bradesco",
   "sector": "Bancos",
-  "refPriceUsd": 2.7,
+  "refPriceUsd": 3.1,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -267,7 +267,7 @@
   "ticker": "VALE",
   "name": "Vale",
   "sector": "Materiales",
-  "refPriceUsd": 14.59,
+  "refPriceUsd": 14.57,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -275,7 +275,7 @@
   "ticker": "VIST",
   "name": "Vista Energy",
   "sector": "Energía",
-  "refPriceUsd": 65.73,
+  "refPriceUsd": 69.81,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -283,7 +283,7 @@
   "ticker": "SUPV",
   "name": "Grupo Supervielle",
   "sector": "Bancos",
-  "refPriceUsd": 12.4,
+  "refPriceUsd": 8.2,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -291,7 +291,7 @@
   "ticker": "CRM",
   "name": "Salesforce",
   "sector": "Tecnología",
-  "refPriceUsd": 167.56,
+  "refPriceUsd": 209.96,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -299,7 +299,7 @@
   "ticker": "ORCL",
   "name": "Oracle",
   "sector": "Tecnología",
-  "refPriceUsd": 127.94,
+  "refPriceUsd": 147.28,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -307,7 +307,7 @@
   "ticker": "CSCO",
   "name": "Cisco",
   "sector": "Tecnología",
-  "refPriceUsd": 117.09,
+  "refPriceUsd": 111.7,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -315,7 +315,7 @@
   "ticker": "IBM",
   "name": "IBM",
   "sector": "Tecnología",
-  "refPriceUsd": 217.07,
+  "refPriceUsd": 237.03,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -323,7 +323,7 @@
   "ticker": "ADBE",
   "name": "Adobe",
   "sector": "Tecnología",
-  "refPriceUsd": 548.7,
+  "refPriceUsd": 276.22,
   "ratio": 24,
   "category": "CEDEAR"
  },
@@ -331,7 +331,7 @@
   "ticker": "PG",
   "name": "Procter & Gamble",
   "sector": "Consumo",
-  "refPriceUsd": 146.08,
+  "refPriceUsd": 145.19,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -339,7 +339,7 @@
   "ticker": "MCD",
   "name": "McDonald’s",
   "sector": "Consumo",
-  "refPriceUsd": 268.94,
+  "refPriceUsd": 270.9,
   "ratio": 24,
   "category": "CEDEAR"
  },
@@ -347,7 +347,7 @@
   "ticker": "PEP",
   "name": "PepsiCo",
   "sector": "Consumo",
-  "refPriceUsd": 135.45,
+  "refPriceUsd": 143.5,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -355,7 +355,7 @@
   "ticker": "ABBV",
   "name": "AbbVie",
   "sector": "Salud",
-  "refPriceUsd": 244.78,
+  "refPriceUsd": 266.0,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -363,7 +363,7 @@
   "ticker": "MRK",
   "name": "Merck",
   "sector": "Salud",
-  "refPriceUsd": 120.78,
+  "refPriceUsd": 151.98,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -371,7 +371,7 @@
   "ticker": "UNH",
   "name": "UnitedHealth",
   "sector": "Salud",
-  "refPriceUsd": 492.1,
+  "refPriceUsd": 389.41,
   "ratio": 30,
   "category": "CEDEAR"
  },
@@ -379,7 +379,7 @@
   "ticker": "LLY",
   "name": "Eli Lilly",
   "sector": "Salud",
-  "refPriceUsd": 812.4,
+  "refPriceUsd": 1264.0,
   "ratio": 40,
   "category": "CEDEAR"
  },
@@ -387,7 +387,7 @@
   "ticker": "BAC",
   "name": "Bank of America",
   "sector": "Bancos",
-  "refPriceUsd": 39.8,
+  "refPriceUsd": 61.6,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -395,7 +395,7 @@
   "ticker": "C",
   "name": "Citigroup",
   "sector": "Bancos",
-  "refPriceUsd": 133.27,
+  "refPriceUsd": 130.44,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -403,7 +403,7 @@
   "ticker": "GS",
   "name": "Goldman Sachs",
   "sector": "Bancos",
-  "refPriceUsd": 468.2,
+  "refPriceUsd": 1018.2,
   "ratio": 30,
   "category": "CEDEAR"
  },
@@ -411,7 +411,7 @@
   "ticker": "MS",
   "name": "Morgan Stanley",
   "sector": "Bancos",
-  "refPriceUsd": 98.7,
+  "refPriceUsd": 210.93,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -419,7 +419,7 @@
   "ticker": "WFC",
   "name": "Wells Fargo",
   "sector": "Bancos",
-  "refPriceUsd": 59.4,
+  "refPriceUsd": 83.56,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -427,7 +427,7 @@
   "ticker": "MA",
   "name": "Mastercard",
   "sector": "Fintech",
-  "refPriceUsd": 452.8,
+  "refPriceUsd": 581.55,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -435,7 +435,7 @@
   "ticker": "CVX",
   "name": "Chevron",
   "sector": "Energía",
-  "refPriceUsd": 181.76,
+  "refPriceUsd": 205.78,
   "ratio": 16,
   "category": "CEDEAR"
  },
@@ -443,7 +443,7 @@
   "ticker": "T",
   "name": "AT&T",
   "sector": "Comunicación",
-  "refPriceUsd": 21.28,
+  "refPriceUsd": 25.38,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -451,7 +451,7 @@
   "ticker": "VZ",
   "name": "Verizon",
   "sector": "Comunicación",
-  "refPriceUsd": 42.47,
+  "refPriceUsd": 49.4,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -459,7 +459,7 @@
   "ticker": "CAT",
   "name": "Caterpillar",
   "sector": "Industrial",
-  "refPriceUsd": 342.7,
+  "refPriceUsd": 825.1,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -467,7 +467,7 @@
   "ticker": "GE",
   "name": "General Electric",
   "sector": "Industrial",
-  "refPriceUsd": 353.73,
+  "refPriceUsd": 349.8,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -475,7 +475,7 @@
   "ticker": "MMM",
   "name": "3M",
   "sector": "Industrial",
-  "refPriceUsd": 156.58,
+  "refPriceUsd": 179.18,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -483,7 +483,7 @@
   "ticker": "F",
   "name": "Ford",
   "sector": "Automotriz",
-  "refPriceUsd": 12.1,
+  "refPriceUsd": 14.44,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -491,7 +491,7 @@
   "ticker": "GM",
   "name": "General Motors",
   "sector": "Automotriz",
-  "refPriceUsd": 76.87,
+  "refPriceUsd": 87.51,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -499,7 +499,7 @@
   "ticker": "MU",
   "name": "Micron",
   "sector": "Semiconductores",
-  "refPriceUsd": 983.12,
+  "refPriceUsd": 963.76,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -507,7 +507,7 @@
   "ticker": "TSM",
   "name": "Taiwan Semi",
   "sector": "Semiconductores",
-  "refPriceUsd": 420.39,
+  "refPriceUsd": 417.91,
   "ratio": 9,
   "category": "CEDEAR"
  },
@@ -515,7 +515,7 @@
   "ticker": "AVGO",
   "name": "Broadcom",
   "sector": "Semiconductores",
-  "refPriceUsd": 389.11,
+  "refPriceUsd": 366.5,
   "ratio": 40,
   "category": "CEDEAR"
  },
@@ -523,7 +523,7 @@
   "ticker": "TGT",
   "name": "Target",
   "sector": "Consumo",
-  "refPriceUsd": 134,
+  "refPriceUsd": 163.34,
   "ratio": 24,
   "category": "CEDEAR"
  },
@@ -531,7 +531,7 @@
   "ticker": "COST",
   "name": "Costco",
   "sector": "Consumo",
-  "refPriceUsd": 921.75,
+  "refPriceUsd": 948.31,
   "ratio": 50,
   "category": "CEDEAR"
  },
@@ -539,7 +539,7 @@
   "ticker": "HD",
   "name": "Home Depot",
   "sector": "Consumo",
-  "refPriceUsd": 358.1,
+  "refPriceUsd": 335.77,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -547,7 +547,7 @@
   "ticker": "SHOP",
   "name": "Shopify",
   "sector": "Tecnología",
-  "refPriceUsd": 64.5,
+  "refPriceUsd": 148.72,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -555,7 +555,7 @@
   "ticker": "UBER",
   "name": "Uber",
   "sector": "Tecnología",
-  "refPriceUsd": 72.08,
+  "refPriceUsd": 78.98,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -563,7 +563,7 @@
   "ticker": "SPOT",
   "name": "Spotify",
   "sector": "Comunicación",
-  "refPriceUsd": 481.06,
+  "refPriceUsd": 537.37,
   "ratio": 29,
   "category": "CEDEAR"
  },
@@ -571,7 +571,7 @@
   "ticker": "ABNB",
   "name": "Airbnb",
   "sector": "Tecnología",
-  "refPriceUsd": 146.54,
+  "refPriceUsd": 187.29,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -579,7 +579,7 @@
   "ticker": "COIN",
   "name": "Coinbase",
   "sector": "Fintech",
-  "refPriceUsd": 242.7,
+  "refPriceUsd": 187.25,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -587,7 +587,7 @@
   "ticker": "SPY",
   "name": "SPDR S&P 500",
   "sector": "ETF",
-  "refPriceUsd": 751.83,
+  "refPriceUsd": 766.25,
   "ratio": 60,
   "category": "ETF"
  },
@@ -595,7 +595,7 @@
   "ticker": "QQQ",
   "name": "Invesco Nasdaq 100",
   "sector": "ETF",
-  "refPriceUsd": 478.5,
+  "refPriceUsd": 713.69,
   "ratio": 20,
   "category": "ETF"
  },
@@ -603,7 +603,7 @@
   "ticker": "DIA",
   "name": "SPDR Dow Jones",
   "sector": "ETF",
-  "refPriceUsd": 392.4,
+  "refPriceUsd": 531.15,
   "ratio": 20,
   "category": "ETF"
  },
@@ -611,7 +611,7 @@
   "ticker": "EEM",
   "name": "iShares Emerging Mkts",
   "sector": "ETF",
-  "refPriceUsd": 65.67,
+  "refPriceUsd": 67.22,
   "ratio": 5,
   "category": "ETF"
  },
@@ -619,7 +619,7 @@
   "ticker": "ARKK",
   "name": "ARK Innovation",
   "sector": "ETF",
-  "refPriceUsd": 79.52,
+  "refPriceUsd": 86.18,
   "ratio": 10,
   "category": "ETF"
  },
@@ -627,7 +627,7 @@
   "ticker": "NOW",
   "name": "ServiceNow",
   "sector": "Tecnología",
-  "refPriceUsd": 104.85,
+  "refPriceUsd": 129.62,
   "ratio": 180,
   "category": "CEDEAR"
  },
@@ -635,7 +635,7 @@
   "ticker": "INTU",
   "name": "Intuit",
   "sector": "Tecnología",
-  "refPriceUsd": 648.2,
+  "refPriceUsd": 368.37,
   "ratio": 24,
   "category": "CEDEAR"
  },
@@ -643,7 +643,7 @@
   "ticker": "WDAY",
   "name": "Workday",
   "sector": "Tecnología",
-  "refPriceUsd": 232.6,
+  "refPriceUsd": 200.16,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -651,7 +651,7 @@
   "ticker": "TEAM",
   "name": "Atlassian",
   "sector": "Tecnología",
-  "refPriceUsd": 188.4,
+  "refPriceUsd": 171.66,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -659,7 +659,7 @@
   "ticker": "PANW",
   "name": "Palo Alto Networks",
   "sector": "Tecnología",
-  "refPriceUsd": 352.89,
+  "refPriceUsd": 356.56,
   "ratio": 50,
   "category": "CEDEAR"
  },
@@ -667,7 +667,7 @@
   "ticker": "CRWD",
   "name": "CrowdStrike",
   "sector": "Tecnología",
-  "refPriceUsd": 210.73,
+  "refPriceUsd": 190.15,
   "ratio": 80,
   "category": "CEDEAR"
  },
@@ -675,7 +675,7 @@
   "ticker": "FTNT",
   "name": "Fortinet",
   "sector": "Tecnología",
-  "refPriceUsd": 62.8,
+  "refPriceUsd": 152.16,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -683,7 +683,7 @@
   "ticker": "NET",
   "name": "Cloudflare",
   "sector": "Tecnología",
-  "refPriceUsd": 82.4,
+  "refPriceUsd": 289.62,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -691,7 +691,7 @@
   "ticker": "DDOG",
   "name": "Datadog",
   "sector": "Tecnología",
-  "refPriceUsd": 128.9,
+  "refPriceUsd": 232.55,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -699,7 +699,7 @@
   "ticker": "ZS",
   "name": "Zscaler",
   "sector": "Tecnología",
-  "refPriceUsd": 192.3,
+  "refPriceUsd": 178.75,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -707,7 +707,7 @@
   "ticker": "SNOW",
   "name": "Snowflake",
   "sector": "Tecnología",
-  "refPriceUsd": 275.94,
+  "refPriceUsd": 325.83,
   "ratio": 30,
   "category": "CEDEAR"
  },
@@ -715,7 +715,7 @@
   "ticker": "PLTR",
   "name": "Palantir",
   "sector": "Tecnología",
-  "refPriceUsd": 133.72,
+  "refPriceUsd": 180.24,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -723,7 +723,7 @@
   "ticker": "DELL",
   "name": "Dell",
   "sector": "Tecnología",
-  "refPriceUsd": 138.2,
+  "refPriceUsd": 438.13,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -731,7 +731,7 @@
   "ticker": "HPQ",
   "name": "HP",
   "sector": "Tecnología",
-  "refPriceUsd": 24.63,
+  "refPriceUsd": 30.02,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -739,7 +739,7 @@
   "ticker": "WDC",
   "name": "Western Digital",
   "sector": "Tecnología",
-  "refPriceUsd": 68.9,
+  "refPriceUsd": 463.3,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -747,7 +747,7 @@
   "ticker": "DOCU",
   "name": "DocuSign",
   "sector": "Tecnología",
-  "refPriceUsd": 58.3,
+  "refPriceUsd": 62.07,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -755,7 +755,7 @@
   "ticker": "ZM",
   "name": "Zoom",
   "sector": "Tecnología",
-  "refPriceUsd": 68.7,
+  "refPriceUsd": 107.75,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -763,7 +763,7 @@
   "ticker": "HOOD",
   "name": "Robinhood",
   "sector": "Fintech",
-  "refPriceUsd": 113.45,
+  "refPriceUsd": 107.88,
   "ratio": 29,
   "category": "CEDEAR"
  },
@@ -771,7 +771,7 @@
   "ticker": "ROKU",
   "name": "Roku",
   "sector": "Comunicación",
-  "refPriceUsd": 62.5,
+  "refPriceUsd": 158.54,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -779,7 +779,7 @@
   "ticker": "SNAP",
   "name": "Snap",
   "sector": "Comunicación",
-  "refPriceUsd": 14.2,
+  "refPriceUsd": 5.21,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -787,7 +787,7 @@
   "ticker": "PINS",
   "name": "Pinterest",
   "sector": "Comunicación",
-  "refPriceUsd": 38.6,
+  "refPriceUsd": 23.48,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -795,7 +795,7 @@
   "ticker": "EA",
   "name": "Electronic Arts",
   "sector": "Comunicación",
-  "refPriceUsd": 142.8,
+  "refPriceUsd": 209.7,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -803,7 +803,7 @@
   "ticker": "TTWO",
   "name": "Take-Two",
   "sector": "Comunicación",
-  "refPriceUsd": 158.4,
+  "refPriceUsd": 245.39,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -811,7 +811,7 @@
   "ticker": "TXN",
   "name": "Texas Instruments",
   "sector": "Semiconductores",
-  "refPriceUsd": 305.55,
+  "refPriceUsd": 262.5,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -819,7 +819,7 @@
   "ticker": "AMAT",
   "name": "Applied Materials",
   "sector": "Semiconductores",
-  "refPriceUsd": 595.7,
+  "refPriceUsd": 487.02,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -827,7 +827,7 @@
   "ticker": "ADI",
   "name": "Analog Devices",
   "sector": "Semiconductores",
-  "refPriceUsd": 392.75,
+  "refPriceUsd": 373.54,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -835,7 +835,7 @@
   "ticker": "LRCX",
   "name": "Lam Research",
   "sector": "Semiconductores",
-  "refPriceUsd": 92.3,
+  "refPriceUsd": 311.39,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -843,7 +843,7 @@
   "ticker": "KLAC",
   "name": "KLA Corp",
   "sector": "Semiconductores",
-  "refPriceUsd": 748.2,
+  "refPriceUsd": 183.08,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -851,7 +851,7 @@
   "ticker": "MRVL",
   "name": "Marvell",
   "sector": "Semiconductores",
-  "refPriceUsd": 72.6,
+  "refPriceUsd": 234.37,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -859,7 +859,7 @@
   "ticker": "NXPI",
   "name": "NXP Semiconductors",
   "sector": "Semiconductores",
-  "refPriceUsd": 242.8,
+  "refPriceUsd": 223.96,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -867,7 +867,7 @@
   "ticker": "MCHP",
   "name": "Microchip",
   "sector": "Semiconductores",
-  "refPriceUsd": 88.4,
+  "refPriceUsd": 75.25,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -875,7 +875,7 @@
   "ticker": "ON",
   "name": "ON Semiconductor",
   "sector": "Semiconductores",
-  "refPriceUsd": 74.2,
+  "refPriceUsd": 73.74,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -883,7 +883,7 @@
   "ticker": "SNPS",
   "name": "Synopsys",
   "sector": "Semiconductores",
-  "refPriceUsd": 562.3,
+  "refPriceUsd": 397.73,
   "ratio": 16,
   "category": "CEDEAR"
  },
@@ -891,7 +891,7 @@
   "ticker": "AMGN",
   "name": "Amgen",
   "sector": "Salud",
-  "refPriceUsd": 355.25,
+  "refPriceUsd": 439.17,
   "ratio": 30,
   "category": "CEDEAR"
  },
@@ -899,7 +899,7 @@
   "ticker": "GILD",
   "name": "Gilead",
   "sector": "Salud",
-  "refPriceUsd": 130.04,
+  "refPriceUsd": 147.11,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -907,7 +907,7 @@
   "ticker": "BMY",
   "name": "Bristol Myers Squibb",
   "sector": "Salud",
-  "refPriceUsd": 56.95,
+  "refPriceUsd": 67.34,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -915,7 +915,7 @@
   "ticker": "TMO",
   "name": "Thermo Fisher",
   "sector": "Salud",
-  "refPriceUsd": 548.6,
+  "refPriceUsd": 627.2,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -923,7 +923,7 @@
   "ticker": "DHR",
   "name": "Danaher",
   "sector": "Salud",
-  "refPriceUsd": 252.4,
+  "refPriceUsd": 219.56,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -931,7 +931,7 @@
   "ticker": "MDT",
   "name": "Medtronic",
   "sector": "Salud",
-  "refPriceUsd": 82.3,
+  "refPriceUsd": 92.95,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -939,7 +939,7 @@
   "ticker": "CVS",
   "name": "CVS Health",
   "sector": "Salud",
-  "refPriceUsd": 106.18,
+  "refPriceUsd": 92.59,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -947,7 +947,7 @@
   "ticker": "BSX",
   "name": "Boston Scientific",
   "sector": "Salud",
-  "refPriceUsd": 78.6,
+  "refPriceUsd": 50.66,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -955,7 +955,7 @@
   "ticker": "SYK",
   "name": "Stryker",
   "sector": "Salud",
-  "refPriceUsd": 342.7,
+  "refPriceUsd": 331.72,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -963,7 +963,7 @@
   "ticker": "ISRG",
   "name": "Intuitive Surgical",
   "sector": "Salud",
-  "refPriceUsd": 379.5,
+  "refPriceUsd": 381.81,
   "ratio": 90,
   "category": "CEDEAR"
  },
@@ -971,7 +971,7 @@
   "ticker": "REGN",
   "name": "Regeneron",
   "sector": "Salud",
-  "refPriceUsd": 1042.3,
+  "refPriceUsd": 841.8,
   "ratio": 40,
   "category": "CEDEAR"
  },
@@ -979,7 +979,7 @@
   "ticker": "VRTX",
   "name": "Vertex Pharma",
   "sector": "Salud",
-  "refPriceUsd": 476.31,
+  "refPriceUsd": 550.24,
   "ratio": 100,
   "category": "CEDEAR"
  },
@@ -987,7 +987,7 @@
   "ticker": "BIIB",
   "name": "Biogen",
   "sector": "Salud",
-  "refPriceUsd": 218.4,
+  "refPriceUsd": 217.99,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -995,7 +995,7 @@
   "ticker": "MRNA",
   "name": "Moderna",
   "sector": "Salud",
-  "refPriceUsd": 102.6,
+  "refPriceUsd": 149.42,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1003,7 +1003,7 @@
   "ticker": "ZTS",
   "name": "Zoetis",
   "sector": "Salud",
-  "refPriceUsd": 172.5,
+  "refPriceUsd": 77.61,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -1011,7 +1011,7 @@
   "ticker": "AXP",
   "name": "American Express",
   "sector": "Fintech",
-  "refPriceUsd": 355.06,
+  "refPriceUsd": 334.73,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -1019,7 +1019,7 @@
   "ticker": "BLK",
   "name": "BlackRock",
   "sector": "Bancos",
-  "refPriceUsd": 842.3,
+  "refPriceUsd": 1153.6,
   "ratio": 40,
   "category": "CEDEAR"
  },
@@ -1027,7 +1027,7 @@
   "ticker": "SCHW",
   "name": "Charles Schwab",
   "sector": "Bancos",
-  "refPriceUsd": 101.1,
+  "refPriceUsd": 111.53,
   "ratio": 16,
   "category": "CEDEAR"
  },
@@ -1035,7 +1035,7 @@
   "ticker": "USB",
   "name": "US Bancorp",
   "sector": "Bancos",
-  "refPriceUsd": 62.14,
+  "refPriceUsd": 61.75,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -1043,7 +1043,7 @@
   "ticker": "PNC",
   "name": "PNC Financial",
   "sector": "Bancos",
-  "refPriceUsd": 178.3,
+  "refPriceUsd": 242.31,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -1051,7 +1051,7 @@
   "ticker": "COF",
   "name": "Capital One",
   "sector": "Bancos",
-  "refPriceUsd": 142.8,
+  "refPriceUsd": 217.79,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -1067,7 +1067,7 @@
   "ticker": "SPGI",
   "name": "S&P Global",
   "sector": "Fintech",
-  "refPriceUsd": 452.6,
+  "refPriceUsd": 431.5,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -1075,7 +1075,7 @@
   "ticker": "CB",
   "name": "Chubb",
   "sector": "Bancos",
-  "refPriceUsd": 262.4,
+  "refPriceUsd": 342.0,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -1083,7 +1083,7 @@
   "ticker": "PGR",
   "name": "Progressive",
   "sector": "Bancos",
-  "refPriceUsd": 218.6,
+  "refPriceUsd": 219.5,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -1091,7 +1091,7 @@
   "ticker": "MET",
   "name": "MetLife",
   "sector": "Bancos",
-  "refPriceUsd": 74.3,
+  "refPriceUsd": 94.36,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1099,7 +1099,7 @@
   "ticker": "BRKB",
   "name": "Berkshire Hathaway",
   "sector": "Bancos",
-  "refPriceUsd": 428.5,
+  "refPriceUsd": 497.41,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -1107,7 +1107,7 @@
   "ticker": "DE",
   "name": "John Deere",
   "sector": "Industrial",
-  "refPriceUsd": 584.4,
+  "refPriceUsd": 639.59,
   "ratio": 40,
   "category": "CEDEAR"
  },
@@ -1115,7 +1115,7 @@
   "ticker": "LMT",
   "name": "Lockheed Martin",
   "sector": "Industrial",
-  "refPriceUsd": 514.99,
+  "refPriceUsd": 566.38,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -1123,7 +1123,7 @@
   "ticker": "RTX",
   "name": "RTX Corp",
   "sector": "Industrial",
-  "refPriceUsd": 193.39,
+  "refPriceUsd": 210.64,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -1131,7 +1131,7 @@
   "ticker": "NOC",
   "name": "Northrop Grumman",
   "sector": "Industrial",
-  "refPriceUsd": 482.6,
+  "refPriceUsd": 551.61,
   "ratio": 24,
   "category": "CEDEAR"
  },
@@ -1139,7 +1139,7 @@
   "ticker": "GD",
   "name": "General Dynamics",
   "sector": "Industrial",
-  "refPriceUsd": 288.5,
+  "refPriceUsd": 382.62,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -1147,7 +1147,7 @@
   "ticker": "UPS",
   "name": "United Parcel",
   "sector": "Industrial",
-  "refPriceUsd": 138.7,
+  "refPriceUsd": 102.11,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -1155,7 +1155,7 @@
   "ticker": "FDX",
   "name": "FedEx",
   "sector": "Industrial",
-  "refPriceUsd": 313.66,
+  "refPriceUsd": 326.93,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -1163,7 +1163,7 @@
   "ticker": "UNP",
   "name": "Union Pacific",
   "sector": "Industrial",
-  "refPriceUsd": 288.3,
+  "refPriceUsd": 304.91,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -1171,7 +1171,7 @@
   "ticker": "CSX",
   "name": "CSX Corp",
   "sector": "Industrial",
-  "refPriceUsd": 33.8,
+  "refPriceUsd": 51.41,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -1179,7 +1179,7 @@
   "ticker": "EMR",
   "name": "Emerson Electric",
   "sector": "Industrial",
-  "refPriceUsd": 112.4,
+  "refPriceUsd": 156.07,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -1187,7 +1187,7 @@
   "ticker": "ITW",
   "name": "Illinois Tool Works",
   "sector": "Industrial",
-  "refPriceUsd": 248.7,
+  "refPriceUsd": 281.93,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -1195,7 +1195,7 @@
   "ticker": "ETN",
   "name": "Eaton",
   "sector": "Industrial",
-  "refPriceUsd": 312.5,
+  "refPriceUsd": 419.78,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -1203,7 +1203,7 @@
   "ticker": "HON",
   "name": "Honeywell",
   "sector": "Industrial",
-  "refPriceUsd": 222.68,
+  "refPriceUsd": 217.86,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -1211,7 +1211,7 @@
   "ticker": "COP",
   "name": "ConocoPhillips",
   "sector": "Energía",
-  "refPriceUsd": 111.87,
+  "refPriceUsd": 135.26,
   "ratio": 25,
   "category": "CEDEAR"
  },
@@ -1219,7 +1219,7 @@
   "ticker": "SLB",
   "name": "Schlumberger",
   "sector": "Energía",
-  "refPriceUsd": 47.54,
+  "refPriceUsd": 53.7,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1227,7 +1227,7 @@
   "ticker": "EOG",
   "name": "EOG Resources",
   "sector": "Energía",
-  "refPriceUsd": 128.4,
+  "refPriceUsd": 152.88,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -1235,7 +1235,7 @@
   "ticker": "OXY",
   "name": "Occidental",
   "sector": "Energía",
-  "refPriceUsd": 54.57,
+  "refPriceUsd": 61.51,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -1243,7 +1243,7 @@
   "ticker": "PSX",
   "name": "Phillips 66",
   "sector": "Energía",
-  "refPriceUsd": 138.5,
+  "refPriceUsd": 242.88,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -1251,7 +1251,7 @@
   "ticker": "VLO",
   "name": "Valero",
   "sector": "Energía",
-  "refPriceUsd": 152.4,
+  "refPriceUsd": 350.0,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -1259,7 +1259,7 @@
   "ticker": "MPC",
   "name": "Marathon Petroleum",
   "sector": "Energía",
-  "refPriceUsd": 172.6,
+  "refPriceUsd": 363.46,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -1267,7 +1267,7 @@
   "ticker": "KMI",
   "name": "Kinder Morgan",
   "sector": "Energía",
-  "refPriceUsd": 20.4,
+  "refPriceUsd": 30.98,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1275,7 +1275,7 @@
   "ticker": "DUK",
   "name": "Duke Energy",
   "sector": "Energía",
-  "refPriceUsd": 102.6,
+  "refPriceUsd": 120.39,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -1283,7 +1283,7 @@
   "ticker": "SO",
   "name": "Southern Co",
   "sector": "Energía",
-  "refPriceUsd": 82.4,
+  "refPriceUsd": 90.01,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1291,7 +1291,7 @@
   "ticker": "NEE",
   "name": "NextEra Energy",
   "sector": "Energía",
-  "refPriceUsd": 72.8,
+  "refPriceUsd": 84.14,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1299,7 +1299,7 @@
   "ticker": "D",
   "name": "Dominion Energy",
   "sector": "Energía",
-  "refPriceUsd": 52.6,
+  "refPriceUsd": 66.97,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1307,7 +1307,7 @@
   "ticker": "AEP",
   "name": "American Electric",
   "sector": "Energía",
-  "refPriceUsd": 92.4,
+  "refPriceUsd": 121.91,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1315,7 +1315,7 @@
   "ticker": "MO",
   "name": "Altria",
   "sector": "Consumo",
-  "refPriceUsd": 70.16,
+  "refPriceUsd": 66.17,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1323,7 +1323,7 @@
   "ticker": "PM",
   "name": "Philip Morris",
   "sector": "Consumo",
-  "refPriceUsd": 175.95,
+  "refPriceUsd": 188.59,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -1331,7 +1331,7 @@
   "ticker": "CL",
   "name": "Colgate-Palmolive",
   "sector": "Consumo",
-  "refPriceUsd": 91.03,
+  "refPriceUsd": 91.23,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1339,7 +1339,7 @@
   "ticker": "KMB",
   "name": "Kimberly-Clark",
   "sector": "Consumo",
-  "refPriceUsd": 138.4,
+  "refPriceUsd": 109.73,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -1347,7 +1347,7 @@
   "ticker": "GIS",
   "name": "General Mills",
   "sector": "Consumo",
-  "refPriceUsd": 68.5,
+  "refPriceUsd": 39.91,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1355,7 +1355,7 @@
   "ticker": "MDLZ",
   "name": "Mondelez",
   "sector": "Consumo",
-  "refPriceUsd": 58.8,
+  "refPriceUsd": 64.39,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -1363,7 +1363,7 @@
   "ticker": "KHC",
   "name": "Kraft Heinz",
   "sector": "Consumo",
-  "refPriceUsd": 34.6,
+  "refPriceUsd": 25.59,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -1371,7 +1371,7 @@
   "ticker": "HSY",
   "name": "Hershey",
   "sector": "Consumo",
-  "refPriceUsd": 171.46,
+  "refPriceUsd": 186.67,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -1379,7 +1379,7 @@
   "ticker": "STZ",
   "name": "Constellation Brands",
   "sector": "Consumo",
-  "refPriceUsd": 248.6,
+  "refPriceUsd": 135.57,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -1387,7 +1387,7 @@
   "ticker": "EL",
   "name": "Estee Lauder",
   "sector": "Consumo",
-  "refPriceUsd": 102.7,
+  "refPriceUsd": 100.81,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1395,7 +1395,7 @@
   "ticker": "KR",
   "name": "Kroger",
   "sector": "Consumo",
-  "refPriceUsd": 56.8,
+  "refPriceUsd": 57.85,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1403,7 +1403,7 @@
   "ticker": "SYY",
   "name": "Sysco",
   "sector": "Consumo",
-  "refPriceUsd": 82.85,
+  "refPriceUsd": 83.67,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -1411,7 +1411,7 @@
   "ticker": "LOW",
   "name": "Lowe",
   "sector": "Consumo",
-  "refPriceUsd": 242.6,
+  "refPriceUsd": 216.2,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -1419,7 +1419,7 @@
   "ticker": "TJX",
   "name": "TJX Companies",
   "sector": "Consumo",
-  "refPriceUsd": 112.4,
+  "refPriceUsd": 141.12,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -1427,7 +1427,7 @@
   "ticker": "ROST",
   "name": "Ross Stores",
   "sector": "Consumo",
-  "refPriceUsd": 220.93,
+  "refPriceUsd": 242.41,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1435,7 +1435,7 @@
   "ticker": "LULU",
   "name": "Lululemon",
   "sector": "Consumo",
-  "refPriceUsd": 312.5,
+  "refPriceUsd": 120.39,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -1443,7 +1443,7 @@
   "ticker": "MAR",
   "name": "Marriott",
   "sector": "Consumo",
-  "refPriceUsd": 248.7,
+  "refPriceUsd": 355.96,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -1451,7 +1451,7 @@
   "ticker": "HLT",
   "name": "Hilton",
   "sector": "Consumo",
-  "refPriceUsd": 218.4,
+  "refPriceUsd": 327.25,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -1459,7 +1459,7 @@
   "ticker": "BKNG",
   "name": "Booking Holdings",
   "sector": "Consumo",
-  "refPriceUsd": 3842.5,
+  "refPriceUsd": 210.39,
   "ratio": 150,
   "category": "CEDEAR"
  },
@@ -1467,7 +1467,7 @@
   "ticker": "DAL",
   "name": "Delta Air Lines",
   "sector": "Industrial",
-  "refPriceUsd": 85.51,
+  "refPriceUsd": 82.43,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -1475,7 +1475,7 @@
   "ticker": "UAL",
   "name": "United Airlines",
   "sector": "Industrial",
-  "refPriceUsd": 120.35,
+  "refPriceUsd": 112.82,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -1483,7 +1483,7 @@
   "ticker": "CCL",
   "name": "Carnival",
   "sector": "Consumo",
-  "refPriceUsd": 26.5,
+  "refPriceUsd": 25.7,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1491,7 +1491,7 @@
   "ticker": "RCL",
   "name": "Royal Caribbean",
   "sector": "Consumo",
-  "refPriceUsd": 162.8,
+  "refPriceUsd": 291.32,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -1499,7 +1499,7 @@
   "ticker": "LVS",
   "name": "Las Vegas Sands",
   "sector": "Consumo",
-  "refPriceUsd": 46.7,
+  "refPriceUsd": 46.84,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -1507,7 +1507,7 @@
   "ticker": "MGM",
   "name": "MGM Resorts",
   "sector": "Consumo",
-  "refPriceUsd": 42.8,
+  "refPriceUsd": 43.5,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -1515,7 +1515,7 @@
   "ticker": "YUM",
   "name": "Yum Brands",
   "sector": "Consumo",
-  "refPriceUsd": 132.6,
+  "refPriceUsd": 151.03,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -1523,7 +1523,7 @@
   "ticker": "CMG",
   "name": "Chipotle",
   "sector": "Consumo",
-  "refPriceUsd": 58.4,
+  "refPriceUsd": 36.45,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -1531,7 +1531,7 @@
   "ticker": "ORLY",
   "name": "OReilly Automotive",
   "sector": "Consumo",
-  "refPriceUsd": 1042.3,
+  "refPriceUsd": 89.45,
   "ratio": 40,
   "category": "CEDEAR"
  },
@@ -1539,7 +1539,7 @@
   "ticker": "CMCSA",
   "name": "Comcast",
   "sector": "Comunicación",
-  "refPriceUsd": 38.6,
+  "refPriceUsd": 26.89,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -1547,7 +1547,7 @@
   "ticker": "CHTR",
   "name": "Charter Comms",
   "sector": "Comunicación",
-  "refPriceUsd": 342.7,
+  "refPriceUsd": 151.54,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -1555,7 +1555,7 @@
   "ticker": "TMUS",
   "name": "T-Mobile US",
   "sector": "Comunicación",
-  "refPriceUsd": 182.4,
+  "refPriceUsd": 183.94,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -1563,7 +1563,7 @@
   "ticker": "WBD",
   "name": "Warner Bros Discovery",
   "sector": "Comunicación",
-  "refPriceUsd": 8.4,
+  "refPriceUsd": 28.51,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1571,7 +1571,7 @@
   "ticker": "PDD",
   "name": "PDD Holdings",
   "sector": "Consumo",
-  "refPriceUsd": 83.91,
+  "refPriceUsd": 89.19,
   "ratio": 25,
   "category": "CEDEAR"
  },
@@ -1579,7 +1579,7 @@
   "ticker": "JD",
   "name": "JD.com",
   "sector": "Consumo",
-  "refPriceUsd": 28.84,
+  "refPriceUsd": 29.5,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1587,7 +1587,7 @@
   "ticker": "BIDU",
   "name": "Baidu",
   "sector": "Tecnología",
-  "refPriceUsd": 92.4,
+  "refPriceUsd": 94.32,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1595,7 +1595,7 @@
   "ticker": "NTES",
   "name": "NetEase",
   "sector": "Comunicación",
-  "refPriceUsd": 98.6,
+  "refPriceUsd": 128.57,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1603,7 +1603,7 @@
   "ticker": "SE",
   "name": "Sea Limited",
   "sector": "Tecnología",
-  "refPriceUsd": 72.8,
+  "refPriceUsd": 118.1,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1611,7 +1611,7 @@
   "ticker": "NIO",
   "name": "Nio",
   "sector": "Automotriz",
-  "refPriceUsd": 5.01,
+  "refPriceUsd": 4.63,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1619,7 +1619,7 @@
   "ticker": "XPEV",
   "name": "XPeng",
   "sector": "Automotriz",
-  "refPriceUsd": 13.36,
+  "refPriceUsd": 12.19,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1627,7 +1627,7 @@
   "ticker": "LI",
   "name": "Li Auto",
   "sector": "Automotriz",
-  "refPriceUsd": 22.4,
+  "refPriceUsd": 13.1,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1635,7 +1635,7 @@
   "ticker": "ABEV",
   "name": "Ambev",
   "sector": "Consumo",
-  "refPriceUsd": 2.4,
+  "refPriceUsd": 2.87,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1643,7 +1643,7 @@
   "ticker": "ITUB",
   "name": "Itau Unibanco",
   "sector": "Bancos",
-  "refPriceUsd": 6.2,
+  "refPriceUsd": 7.46,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1651,7 +1651,7 @@
   "ticker": "PBR",
   "name": "Petrobras",
   "sector": "Energía",
-  "refPriceUsd": 14.6,
+  "refPriceUsd": 19.11,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1659,7 +1659,7 @@
   "ticker": "SID",
   "name": "Cia Siderurgica",
   "sector": "Materiales",
-  "refPriceUsd": 3.8,
+  "refPriceUsd": 0.9548,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1667,7 +1667,7 @@
   "ticker": "GGB",
   "name": "Gerdau",
   "sector": "Materiales",
-  "refPriceUsd": 3.2,
+  "refPriceUsd": 4.34,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1683,7 +1683,7 @@
   "ticker": "BSBR",
   "name": "Santander Brasil",
   "sector": "Bancos",
-  "refPriceUsd": 4.8,
+  "refPriceUsd": 5.74,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1691,7 +1691,7 @@
   "ticker": "GLOB",
   "name": "Globant",
   "sector": "Tecnología",
-  "refPriceUsd": 30.92,
+  "refPriceUsd": 40.2,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -1707,7 +1707,7 @@
   "ticker": "BIOX",
   "name": "Bioceres Crop",
   "sector": "Materiales",
-  "refPriceUsd": 8.4,
+  "refPriceUsd": 0.425,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1715,7 +1715,7 @@
   "ticker": "CRESY",
   "name": "Cresud",
   "sector": "Consumo",
-  "refPriceUsd": 10.91,
+  "refPriceUsd": 11.05,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -1723,7 +1723,7 @@
   "ticker": "LOMA",
   "name": "Loma Negra",
   "sector": "Materiales",
-  "refPriceUsd": 11.37,
+  "refPriceUsd": 9.38,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -1731,7 +1731,7 @@
   "ticker": "TGS",
   "name": "Transportadora Gas Sur",
   "sector": "Energía",
-  "refPriceUsd": 31.33,
+  "refPriceUsd": 28.28,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -1739,7 +1739,7 @@
   "ticker": "EDN",
   "name": "Edenor",
   "sector": "Energía",
-  "refPriceUsd": 25.2,
+  "refPriceUsd": 22.63,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -1747,7 +1747,7 @@
   "ticker": "IRS",
   "name": "IRSA",
   "sector": "Consumo",
-  "refPriceUsd": 15.36,
+  "refPriceUsd": 14.71,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -1755,7 +1755,7 @@
   "ticker": "TEO",
   "name": "Telecom Argentina",
   "sector": "Comunicación",
-  "refPriceUsd": 13.85,
+  "refPriceUsd": 13.36,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -1763,7 +1763,7 @@
   "ticker": "AGRO",
   "name": "Adecoagro",
   "sector": "Consumo",
-  "refPriceUsd": 11.2,
+  "refPriceUsd": 11.01,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1771,7 +1771,7 @@
   "ticker": "CAAP",
   "name": "Corp America Airports",
   "sector": "Industrial",
-  "refPriceUsd": 19.4,
+  "refPriceUsd": 23.45,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1779,7 +1779,7 @@
   "ticker": "IWM",
   "name": "iShares Russell 2000",
   "sector": "ETF",
-  "refPriceUsd": 218.6,
+  "refPriceUsd": 299.53,
   "ratio": 10,
   "category": "ETF"
  },
@@ -1787,7 +1787,7 @@
   "ticker": "EFA",
   "name": "iShares MSCI EAFE",
   "sector": "ETF",
-  "refPriceUsd": 103.96,
+  "refPriceUsd": 108.2,
   "ratio": 18,
   "category": "ETF"
  },
@@ -1795,7 +1795,7 @@
   "ticker": "GLD",
   "name": "SPDR Gold",
   "sector": "ETF",
-  "refPriceUsd": 372.15,
+  "refPriceUsd": 424.75,
   "ratio": 50,
   "category": "ETF"
  },
@@ -1803,7 +1803,7 @@
   "ticker": "XLF",
   "name": "Financial Select",
   "sector": "ETF",
-  "refPriceUsd": 44.6,
+  "refPriceUsd": 57.38,
   "ratio": 2,
   "category": "ETF"
  },
@@ -1811,7 +1811,7 @@
   "ticker": "XLE",
   "name": "Energy Select",
   "sector": "ETF",
-  "refPriceUsd": 56.95,
+  "refPriceUsd": 63.8,
   "ratio": 2,
   "category": "ETF"
  },
@@ -1819,7 +1819,7 @@
   "ticker": "XLK",
   "name": "Technology Select",
   "sector": "ETF",
-  "refPriceUsd": 232.4,
+  "refPriceUsd": 183.34,
   "ratio": 10,
   "category": "ETF"
  },
@@ -1827,7 +1827,7 @@
   "ticker": "EWZ",
   "name": "iShares Brazil",
   "sector": "ETF",
-  "refPriceUsd": 32.6,
+  "refPriceUsd": 35.12,
   "ratio": 2,
   "category": "ETF"
  },
@@ -1835,7 +1835,7 @@
   "ticker": "BTC",
   "name": "Bitcoin",
   "sector": "Cripto",
-  "refPriceUsd": 60000,
+  "refPriceUsd": 77621.0,
   "ratio": null,
   "category": "Cripto"
  },
@@ -1843,7 +1843,7 @@
   "ticker": "ETH",
   "name": "Ethereum",
   "sector": "Cripto",
-  "refPriceUsd": 3000,
+  "refPriceUsd": 2417.8,
   "ratio": null,
   "category": "Cripto"
  },
@@ -1851,7 +1851,7 @@
   "ticker": "IBIT",
   "name": "iShares Bitcoin Trust ETF",
   "sector": "ETF",
-  "refPriceUsd": 36.23,
+  "refPriceUsd": 43.98,
   "ratio": 10,
   "category": "ETF"
  },
@@ -1859,7 +1859,7 @@
   "ticker": "ETHA",
   "name": "iShares Ethereum Trust ETF",
   "sector": "ETF",
-  "refPriceUsd": 13.53,
+  "refPriceUsd": 18.25,
   "ratio": 5,
   "category": "ETF"
  },
@@ -1867,7 +1867,7 @@
   "ticker": "SPXL",
   "name": "Direxion Daily S&P500 Bull 3X",
   "sector": "ETF",
-  "refPriceUsd": 279.2,
+  "refPriceUsd": 287.28,
   "ratio": 25,
   "category": "ETF"
  },
@@ -1875,7 +1875,7 @@
   "ticker": "TQQQ",
   "name": "ProShares UltraPro QQQ",
   "sector": "ETF",
-  "refPriceUsd": 77.03,
+  "refPriceUsd": 71.23,
   "ratio": 25,
   "category": "ETF"
  },
@@ -1883,7 +1883,7 @@
   "ticker": "SPCX",
   "name": "Space Exploration Technologies Corp.",
   "sector": "Tecnología",
-  "refPriceUsd": 145.3,
+  "refPriceUsd": 135.83,
   "ratio": 50,
   "category": "CEDEAR"
  },
@@ -1891,7 +1891,7 @@
   "ticker": "RBLX",
   "name": "Roblox Corporation",
   "sector": "Tecnología",
-  "refPriceUsd": 55.37,
+  "refPriceUsd": 38.74,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -1899,7 +1899,7 @@
   "ticker": "MSTR",
   "name": "Strategy (MicroStrategy)",
   "sector": "Cripto (acciones)",
-  "refPriceUsd": 97.58,
+  "refPriceUsd": 120.56,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -1907,7 +1907,7 @@
   "ticker": "RIOT",
   "name": "Riot Platforms",
   "sector": "Cripto (acciones)",
-  "refPriceUsd": 20.19,
+  "refPriceUsd": 19.77,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1915,7 +1915,7 @@
   "ticker": "HUT",
   "name": "Hut 8",
   "sector": "Cripto (acciones)",
-  "refPriceUsd": 98.33,
+  "refPriceUsd": 79.32,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -1923,7 +1923,7 @@
   "ticker": "IREN",
   "name": "IREN (Iris Energy)",
   "sector": "Cripto (acciones)",
-  "refPriceUsd": 38.59,
+  "refPriceUsd": 41.09,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -1931,7 +1931,7 @@
   "ticker": "BBAR",
   "name": "BBVA Argentina",
   "sector": "Bancos",
-  "refPriceUsd": 20.05,
+  "refPriceUsd": 14.25,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -1939,7 +1939,7 @@
   "ticker": "TS",
   "name": "Tenaris",
   "sector": "Energía",
-  "refPriceUsd": 56.31,
+  "refPriceUsd": 52.43,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -1947,7 +1947,7 @@
   "ticker": "ARCO",
   "name": "Arcos Dorados",
   "sector": "Consumo",
-  "refPriceUsd": 8.2,
+  "refPriceUsd": 7.88,
   "ratio": 0.5,
   "category": "CEDEAR"
  },
@@ -1955,7 +1955,7 @@
   "ticker": "SATL",
   "name": "Satellogic",
   "sector": "Tecnología",
-  "refPriceUsd": 4.31,
+  "refPriceUsd": 5.64,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -1963,7 +1963,7 @@
   "ticker": "AAL",
   "name": "American Airlines",
   "sector": "Industrial",
-  "refPriceUsd": 14.98,
+  "refPriceUsd": 13.75,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -1971,7 +1971,7 @@
   "ticker": "AAP",
   "name": "Advance Auto Parts",
   "sector": "Consumo",
-  "refPriceUsd": 53.16,
+  "refPriceUsd": 42.52,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -1979,7 +1979,7 @@
   "ticker": "ABT",
   "name": "Abbott Laboratories",
   "sector": "Salud",
-  "refPriceUsd": 100.68,
+  "refPriceUsd": 116.24,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -1987,7 +1987,7 @@
   "ticker": "ACN",
   "name": "Accenture",
   "sector": "Tecnología",
-  "refPriceUsd": 143.57,
+  "refPriceUsd": 185.91,
   "ratio": 72,
   "category": "CEDEAR"
  },
@@ -1995,7 +1995,7 @@
   "ticker": "ACWI",
   "name": "Mundo (iShares)",
   "sector": "ETF",
-  "refPriceUsd": 155,
+  "refPriceUsd": 160.92,
   "ratio": 25,
   "category": "ETF"
  },
@@ -2003,7 +2003,7 @@
   "ticker": "ADP",
   "name": "Automatic Data Processing",
   "sector": "Tecnología",
-  "refPriceUsd": 255.26,
+  "refPriceUsd": 280.79,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -2011,7 +2011,7 @@
   "ticker": "AEM",
   "name": "Agnico Eagle Mines",
   "sector": "Minería",
-  "refPriceUsd": 136.97,
+  "refPriceUsd": 217.54,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -2019,7 +2019,7 @@
   "ticker": "AI",
   "name": "C3.ai",
   "sector": "Tecnología",
-  "refPriceUsd": 8.82,
+  "refPriceUsd": 10.36,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -2027,7 +2027,7 @@
   "ticker": "AIG",
   "name": "AIG",
   "sector": "Financiero",
-  "refPriceUsd": 80.5,
+  "refPriceUsd": 76.45,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -2035,7 +2035,7 @@
   "ticker": "ALAB",
   "name": "Astera Labs",
   "sector": "Semiconductores",
-  "refPriceUsd": 303.62,
+  "refPriceUsd": 282.65,
   "ratio": 44,
   "category": "CEDEAR"
  },
@@ -2043,7 +2043,7 @@
   "ticker": "AMX",
   "name": "América Móvil",
   "sector": "Comunicación",
-  "refPriceUsd": 26.27,
+  "refPriceUsd": 23.73,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2051,7 +2051,7 @@
   "ticker": "ANET",
   "name": "Arista Networks",
   "sector": "Tecnología",
-  "refPriceUsd": 168.61,
+  "refPriceUsd": 189.06,
   "ratio": 30,
   "category": "CEDEAR"
  },
@@ -2059,7 +2059,7 @@
   "ticker": "ANF",
   "name": "Abercrombie & Fitch",
   "sector": "Consumo",
-  "refPriceUsd": 95.24,
+  "refPriceUsd": 107.97,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2067,7 +2067,7 @@
   "ticker": "ARM",
   "name": "Arm Holdings",
   "sector": "Semiconductores",
-  "refPriceUsd": 267.19,
+  "refPriceUsd": 244.28,
   "ratio": 25,
   "category": "CEDEAR"
  },
@@ -2075,7 +2075,7 @@
   "ticker": "ASML",
   "name": "ASML",
   "sector": "Semiconductores",
-  "refPriceUsd": 1747.58,
+  "refPriceUsd": 1755.4,
   "ratio": 144,
   "category": "CEDEAR"
  },
@@ -2083,7 +2083,7 @@
   "ticker": "ASTS",
   "name": "AST SpaceMobile",
   "sector": "Comunicación",
-  "refPriceUsd": 57.8,
+  "refPriceUsd": 67.96,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -2091,7 +2091,7 @@
   "ticker": "AVY",
   "name": "Avery Dennison",
   "sector": "Industrial",
-  "refPriceUsd": 160.41,
+  "refPriceUsd": 183.75,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -2099,7 +2099,7 @@
   "ticker": "AZN",
   "name": "AstraZeneca",
   "sector": "Salud",
-  "refPriceUsd": 168.9,
+  "refPriceUsd": 166.02,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -2107,7 +2107,7 @@
   "ticker": "BB",
   "name": "BlackBerry",
   "sector": "Tecnología",
-  "refPriceUsd": 8.99,
+  "refPriceUsd": 7.97,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2115,7 +2115,7 @@
   "ticker": "BHP",
   "name": "BHP Group",
   "sector": "Minería",
-  "refPriceUsd": 80.64,
+  "refPriceUsd": 96.65,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2123,7 +2123,7 @@
   "ticker": "BKR",
   "name": "Baker Hughes",
   "sector": "Energía",
-  "refPriceUsd": 55.95,
+  "refPriceUsd": 62.58,
   "ratio": 7,
   "category": "CEDEAR"
  },
@@ -2131,7 +2131,7 @@
   "ticker": "BMNR",
   "name": "Bitmine Immersion",
   "sector": "Cripto (acciones)",
-  "refPriceUsd": 15.69,
+  "refPriceUsd": 22.95,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -2139,7 +2139,7 @@
   "ticker": "BP",
   "name": "BP",
   "sector": "Energía",
-  "refPriceUsd": 41.9,
+  "refPriceUsd": 44.85,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -2147,7 +2147,7 @@
   "ticker": "BX",
   "name": "Blackstone",
   "sector": "Financiero",
-  "refPriceUsd": 126.91,
+  "refPriceUsd": 143.35,
   "ratio": 30,
   "category": "CEDEAR"
  },
@@ -2155,7 +2155,7 @@
   "ticker": "CAH",
   "name": "Cardinal Health",
   "sector": "Salud",
-  "refPriceUsd": 228.52,
+  "refPriceUsd": 228.28,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2163,7 +2163,7 @@
   "ticker": "CAR",
   "name": "Avis Budget Group",
   "sector": "Consumo",
-  "refPriceUsd": 160.57,
+  "refPriceUsd": 148.44,
   "ratio": 25,
   "category": "CEDEAR"
  },
@@ -2171,7 +2171,7 @@
   "ticker": "CCJ",
   "name": "Cameco",
   "sector": "Energía",
-  "refPriceUsd": 85.62,
+  "refPriceUsd": 101.44,
   "ratio": 24,
   "category": "CEDEAR"
  },
@@ -2179,7 +2179,7 @@
   "ticker": "CDE",
   "name": "Coeur Mining",
   "sector": "Minería",
-  "refPriceUsd": 14.35,
+  "refPriceUsd": 21.34,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2187,7 +2187,7 @@
   "ticker": "CEG",
   "name": "Constellation Energy",
   "sector": "Energía",
-  "refPriceUsd": 252.39,
+  "refPriceUsd": 275.93,
   "ratio": 48,
   "category": "CEDEAR"
  },
@@ -2195,7 +2195,7 @@
   "ticker": "CIBR",
   "name": "Ciberseguridad (First Trust)",
   "sector": "ETF",
-  "refPriceUsd": 92.36,
+  "refPriceUsd": 94.42,
   "ratio": 10,
   "category": "ETF"
  },
@@ -2203,7 +2203,7 @@
   "ticker": "CLS",
   "name": "Celestica",
   "sector": "Tecnología",
-  "refPriceUsd": 301.34,
+  "refPriceUsd": 298.12,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -2211,7 +2211,7 @@
   "ticker": "COPX",
   "name": "Mineras de cobre (Global X)",
   "sector": "ETF",
-  "refPriceUsd": 73.35,
+  "refPriceUsd": 94.4,
   "ratio": 15,
   "category": "ETF"
  },
@@ -2219,7 +2219,7 @@
   "ticker": "CRWV",
   "name": "CoreWeave",
   "sector": "Tecnología",
-  "refPriceUsd": 73.21,
+  "refPriceUsd": 89.21,
   "ratio": 25,
   "category": "CEDEAR"
  },
@@ -2227,7 +2227,7 @@
   "ticker": "CX",
   "name": "Cemex",
   "sector": "Materiales",
-  "refPriceUsd": 12.97,
+  "refPriceUsd": 10.86,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2235,7 +2235,7 @@
   "ticker": "DD",
   "name": "DuPont",
   "sector": "Materiales",
-  "refPriceUsd": 135.29,
+  "refPriceUsd": 139.46,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -2243,7 +2243,7 @@
   "ticker": "DECK",
   "name": "Deckers Outdoor",
   "sector": "Consumo",
-  "refPriceUsd": 106.49,
+  "refPriceUsd": 91.44,
   "ratio": 25,
   "category": "CEDEAR"
  },
@@ -2251,7 +2251,7 @@
   "ticker": "DEO",
   "name": "Diageo",
   "sector": "Consumo",
-  "refPriceUsd": 84,
+  "refPriceUsd": 93.91,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -2259,7 +2259,7 @@
   "ticker": "DOW",
   "name": "Dow",
   "sector": "Materiales",
-  "refPriceUsd": 29.92,
+  "refPriceUsd": 33.04,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -2267,7 +2267,7 @@
   "ticker": "E",
   "name": "Eni",
   "sector": "Energía",
-  "refPriceUsd": 49.77,
+  "refPriceUsd": 56.55,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -2275,7 +2275,7 @@
   "ticker": "EBAY",
   "name": "eBay",
   "sector": "Consumo",
-  "refPriceUsd": 112.06,
+  "refPriceUsd": 104.6,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2283,7 +2283,7 @@
   "ticker": "EC",
   "name": "Ecopetrol",
   "sector": "Energía",
-  "refPriceUsd": 16.09,
+  "refPriceUsd": 17.47,
   "ratio": 1815,
   "category": "CEDEAR"
  },
@@ -2291,7 +2291,7 @@
   "ticker": "ECL",
   "name": "Ecolab",
   "sector": "Materiales",
-  "refPriceUsd": 272.83,
+  "refPriceUsd": 278.76,
   "ratio": 60,
   "category": "CEDEAR"
  },
@@ -2299,7 +2299,7 @@
   "ticker": "EFX",
   "name": "Equifax",
   "sector": "Financiero",
-  "refPriceUsd": 177.08,
+  "refPriceUsd": 193.83,
   "ratio": 16,
   "category": "CEDEAR"
  },
@@ -2307,7 +2307,7 @@
   "ticker": "EQNR",
   "name": "Equinor",
   "sector": "Energía",
-  "refPriceUsd": 37.37,
+  "refPriceUsd": 42.85,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -2315,7 +2315,7 @@
   "ticker": "ERIC",
   "name": "Ericsson",
   "sector": "Comunicación",
-  "refPriceUsd": 9.82,
+  "refPriceUsd": 10.2,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2323,7 +2323,7 @@
   "ticker": "ETSY",
   "name": "Etsy",
   "sector": "Consumo",
-  "refPriceUsd": 84.1,
+  "refPriceUsd": 81.47,
   "ratio": 16,
   "category": "CEDEAR"
  },
@@ -2331,7 +2331,7 @@
   "ticker": "EWJ",
   "name": "Japón (iShares)",
   "sector": "ETF",
-  "refPriceUsd": 90.49,
+  "refPriceUsd": 95.18,
   "ratio": 15,
   "category": "ETF"
  },
@@ -2339,7 +2339,7 @@
   "ticker": "EWY",
   "name": "Corea (iShares)",
   "sector": "ETF",
-  "refPriceUsd": 162.54,
+  "refPriceUsd": 179.64,
   "ratio": 50,
   "category": "ETF"
  },
@@ -2347,7 +2347,7 @@
   "ticker": "FCX",
   "name": "Freeport-McMoRan",
   "sector": "Minería",
-  "refPriceUsd": 58.38,
+  "refPriceUsd": 76.6,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2355,7 +2355,7 @@
   "ticker": "FMX",
   "name": "FEMSA",
   "sector": "Consumo",
-  "refPriceUsd": 129.02,
+  "refPriceUsd": 120.01,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -2363,7 +2363,7 @@
   "ticker": "FSLR",
   "name": "First Solar",
   "sector": "Energía",
-  "refPriceUsd": 211.99,
+  "refPriceUsd": 216.26,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -2371,7 +2371,7 @@
   "ticker": "FXI",
   "name": "China Large-Cap (iShares)",
   "sector": "ETF",
-  "refPriceUsd": 34.13,
+  "refPriceUsd": 35.9,
   "ratio": 5,
   "category": "ETF"
  },
@@ -2379,7 +2379,7 @@
   "ticker": "GDX",
   "name": "Mineras de oro (VanEck)",
   "sector": "ETF",
-  "refPriceUsd": 71.32,
+  "refPriceUsd": 103.02,
   "ratio": 10,
   "category": "ETF"
  },
@@ -2387,7 +2387,7 @@
   "ticker": "GFI",
   "name": "Gold Fields",
   "sector": "Minería",
-  "refPriceUsd": 31.99,
+  "refPriceUsd": 47.87,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2395,7 +2395,7 @@
   "ticker": "GLNG",
   "name": "Golar LNG",
   "sector": "Energía",
-  "refPriceUsd": 49.65,
+  "refPriceUsd": 52.2,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -2403,7 +2403,7 @@
   "ticker": "GLW",
   "name": "Corning",
   "sector": "Tecnología",
-  "refPriceUsd": 154.61,
+  "refPriceUsd": 149.63,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -2411,7 +2411,7 @@
   "ticker": "GPRK",
   "name": "GeoPark",
   "sector": "Energía",
-  "refPriceUsd": 9.68,
+  "refPriceUsd": 9.74,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2419,7 +2419,7 @@
   "ticker": "GRMN",
   "name": "Garmin",
   "sector": "Tecnología",
-  "refPriceUsd": 249.56,
+  "refPriceUsd": 294.71,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2427,7 +2427,7 @@
   "ticker": "GSK",
   "name": "GSK",
   "sector": "Salud",
-  "refPriceUsd": 51.76,
+  "refPriceUsd": 52.37,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -2435,7 +2435,7 @@
   "ticker": "GT",
   "name": "Goodyear",
   "sector": "Consumo",
-  "refPriceUsd": 7.29,
+  "refPriceUsd": 5.94,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2443,7 +2443,7 @@
   "ticker": "HAL",
   "name": "Halliburton",
   "sector": "Energía",
-  "refPriceUsd": 35.22,
+  "refPriceUsd": 35.36,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2451,7 +2451,7 @@
   "ticker": "HDB",
   "name": "HDFC Bank",
   "sector": "Financiero",
-  "refPriceUsd": 26.38,
+  "refPriceUsd": 23.61,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2459,7 +2459,7 @@
   "ticker": "HIMS",
   "name": "Hims & Hers Health",
   "sector": "Salud",
-  "refPriceUsd": 32.84,
+  "refPriceUsd": 33.87,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -2467,7 +2467,7 @@
   "ticker": "HL",
   "name": "Hecla Mining",
   "sector": "Minería",
-  "refPriceUsd": 14.33,
+  "refPriceUsd": 20.93,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2475,7 +2475,7 @@
   "ticker": "HMC",
   "name": "Honda Motor",
   "sector": "Automotriz",
-  "refPriceUsd": 28.16,
+  "refPriceUsd": 33.34,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2483,7 +2483,7 @@
   "ticker": "HMY",
   "name": "Harmony Gold",
   "sector": "Minería",
-  "refPriceUsd": 14.65,
+  "refPriceUsd": 23.59,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2491,7 +2491,7 @@
   "ticker": "HOG",
   "name": "Harley-Davidson",
   "sector": "Consumo",
-  "refPriceUsd": 26.58,
+  "refPriceUsd": 28.35,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2499,7 +2499,7 @@
   "ticker": "HSBC",
   "name": "HSBC",
   "sector": "Financiero",
-  "refPriceUsd": 100.61,
+  "refPriceUsd": 103.75,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2507,7 +2507,7 @@
   "ticker": "HWM",
   "name": "Howmet Aerospace",
   "sector": "Industrial",
-  "refPriceUsd": 272.43,
+  "refPriceUsd": 272.35,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2515,7 +2515,7 @@
   "ticker": "IBB",
   "name": "Biotecnología (iShares)",
   "sector": "ETF",
-  "refPriceUsd": 189.76,
+  "refPriceUsd": 214.5,
   "ratio": 25,
   "category": "ETF"
  },
@@ -2523,7 +2523,7 @@
   "ticker": "IBN",
   "name": "ICICI Bank",
   "sector": "Financiero",
-  "refPriceUsd": 29.76,
+  "refPriceUsd": 30.02,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2531,7 +2531,7 @@
   "ticker": "ICLN",
   "name": "Energía limpia (iShares)",
   "sector": "ETF",
-  "refPriceUsd": 18.37,
+  "refPriceUsd": 17.62,
   "ratio": 5,
   "category": "ETF"
  },
@@ -2539,7 +2539,7 @@
   "ticker": "IFF",
   "name": "Intl. Flavors & Fragrances",
   "sector": "Materiales",
-  "refPriceUsd": 78.2,
+  "refPriceUsd": 84.11,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -2547,7 +2547,7 @@
   "ticker": "ILF",
   "name": "Latinoamérica 40 (iShares)",
   "sector": "ETF",
-  "refPriceUsd": 34.07,
+  "refPriceUsd": 34.55,
   "ratio": 6,
   "category": "ETF"
  },
@@ -2555,7 +2555,7 @@
   "ticker": "INFY",
   "name": "Infosys",
   "sector": "Tecnología",
-  "refPriceUsd": 11.49,
+  "refPriceUsd": 12.04,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2563,7 +2563,7 @@
   "ticker": "ING",
   "name": "ING Group",
   "sector": "Financiero",
-  "refPriceUsd": 32.33,
+  "refPriceUsd": 34.78,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2571,7 +2571,7 @@
   "ticker": "IP",
   "name": "International Paper",
   "sector": "Materiales",
-  "refPriceUsd": 37.56,
+  "refPriceUsd": 41.34,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -2579,7 +2579,7 @@
   "ticker": "ITA",
   "name": "Aeroespacial y defensa (iShares)",
   "sector": "ETF",
-  "refPriceUsd": 230.73,
+  "refPriceUsd": 237.9,
   "ratio": 50,
   "category": "ETF"
  },
@@ -2587,7 +2587,7 @@
   "ticker": "JCI",
   "name": "Johnson Controls",
   "sector": "Industrial",
-  "refPriceUsd": 140.46,
+  "refPriceUsd": 143.44,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2595,7 +2595,7 @@
   "ticker": "JMIA",
   "name": "Jumia",
   "sector": "Consumo",
-  "refPriceUsd": 6.5,
+  "refPriceUsd": 6.71,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2603,7 +2603,7 @@
   "ticker": "KB",
   "name": "KB Financial",
   "sector": "Financiero",
-  "refPriceUsd": 119.37,
+  "refPriceUsd": 117.73,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2611,7 +2611,7 @@
   "ticker": "KEP",
   "name": "Korea Electric Power",
   "sector": "Energía",
-  "refPriceUsd": 11.37,
+  "refPriceUsd": 11.28,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2619,7 +2619,7 @@
   "ticker": "KGC",
   "name": "Kinross Gold",
   "sector": "Minería",
-  "refPriceUsd": 22.57,
+  "refPriceUsd": 32.84,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2627,7 +2627,7 @@
   "ticker": "LAC",
   "name": "Lithium Americas",
   "sector": "Minería",
-  "refPriceUsd": 2.95,
+  "refPriceUsd": 3.18,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2635,7 +2635,7 @@
   "ticker": "LYG",
   "name": "Lloyds Banking",
   "sector": "Financiero",
-  "refPriceUsd": 5.96,
+  "refPriceUsd": 6.01,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2643,7 +2643,7 @@
   "ticker": "MOS",
   "name": "Mosaic",
   "sector": "Materiales",
-  "refPriceUsd": 22.13,
+  "refPriceUsd": 24.61,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -2651,7 +2651,7 @@
   "ticker": "MP",
   "name": "MP Materials",
   "sector": "Minería",
-  "refPriceUsd": 45.24,
+  "refPriceUsd": 60.05,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -2659,7 +2659,7 @@
   "ticker": "MSI",
   "name": "Motorola Solutions",
   "sector": "Tecnología",
-  "refPriceUsd": 413.31,
+  "refPriceUsd": 479.2,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -2667,7 +2667,7 @@
   "ticker": "MUFG",
   "name": "Mitsubishi UFJ",
   "sector": "Financiero",
-  "refPriceUsd": 21.32,
+  "refPriceUsd": 22.03,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2675,7 +2675,7 @@
   "ticker": "MUX",
   "name": "McEwen Mining",
   "sector": "Minería",
-  "refPriceUsd": 16.37,
+  "refPriceUsd": 21.0,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2683,7 +2683,7 @@
   "ticker": "NBIS",
   "name": "Nebius Group",
   "sector": "Tecnología",
-  "refPriceUsd": 177.71,
+  "refPriceUsd": 221.07,
   "ratio": 25,
   "category": "CEDEAR"
  },
@@ -2691,7 +2691,7 @@
   "ticker": "NEM",
   "name": "Newmont",
   "sector": "Minería",
-  "refPriceUsd": 89.7,
+  "refPriceUsd": 131.89,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2699,7 +2699,7 @@
   "ticker": "NG",
   "name": "NovaGold",
   "sector": "Minería",
-  "refPriceUsd": 5.18,
+  "refPriceUsd": 8.77,
   "ratio": 0.25,
   "category": "CEDEAR"
  },
@@ -2707,7 +2707,7 @@
   "ticker": "NGG",
   "name": "National Grid",
   "sector": "Energía",
-  "refPriceUsd": 83.99,
+  "refPriceUsd": 79.97,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2715,7 +2715,7 @@
   "ticker": "NMR",
   "name": "Nomura",
   "sector": "Financiero",
-  "refPriceUsd": 9.4,
+  "refPriceUsd": 9.69,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2723,7 +2723,7 @@
   "ticker": "NU",
   "name": "Nu Holdings",
   "sector": "Financiero",
-  "refPriceUsd": 13.59,
+  "refPriceUsd": 14.7,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2731,7 +2731,7 @@
   "ticker": "NUE",
   "name": "Nucor",
   "sector": "Materiales",
-  "refPriceUsd": 236.61,
+  "refPriceUsd": 243.86,
   "ratio": 16,
   "category": "CEDEAR"
  },
@@ -2739,7 +2739,7 @@
   "ticker": "NVO",
   "name": "Novo Nordisk",
   "sector": "Salud",
-  "refPriceUsd": 50.32,
+  "refPriceUsd": 47.05,
   "ratio": 7,
   "category": "CEDEAR"
  },
@@ -2747,7 +2747,7 @@
   "ticker": "NVS",
   "name": "Novartis",
   "sector": "Salud",
-  "refPriceUsd": 153.76,
+  "refPriceUsd": 159.01,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -2755,7 +2755,7 @@
   "ticker": "NXE",
   "name": "NexGen Energy",
   "sector": "Energía",
-  "refPriceUsd": 8.8,
+  "refPriceUsd": 10.74,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2763,7 +2763,7 @@
   "ticker": "O",
   "name": "Realty Income",
   "sector": "Real Estate",
-  "refPriceUsd": 65.71,
+  "refPriceUsd": 62.71,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -2771,7 +2771,7 @@
   "ticker": "OKLO",
   "name": "Oklo",
   "sector": "Energía",
-  "refPriceUsd": 41.11,
+  "refPriceUsd": 42.8,
   "ratio": 30,
   "category": "CEDEAR"
  },
@@ -2779,7 +2779,7 @@
   "ticker": "ONDS",
   "name": "Ondas Holdings",
   "sector": "Tecnología",
-  "refPriceUsd": 6.53,
+  "refPriceUsd": 8.71,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2787,7 +2787,7 @@
   "ticker": "PAAS",
   "name": "Pan American Silver",
   "sector": "Minería",
-  "refPriceUsd": 41.77,
+  "refPriceUsd": 52.88,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2795,7 +2795,7 @@
   "ticker": "PAC",
   "name": "Grupo Aeroportuario del Pacífico",
   "sector": "Industrial",
-  "refPriceUsd": 220.91,
+  "refPriceUsd": 211.77,
   "ratio": 16,
   "category": "CEDEAR"
  },
@@ -2803,7 +2803,7 @@
   "ticker": "PAGS",
   "name": "PagSeguro",
   "sector": "Financiero",
-  "refPriceUsd": 9.04,
+  "refPriceUsd": 8.64,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2811,7 +2811,7 @@
   "ticker": "PATH",
   "name": "UiPath",
   "sector": "Tecnología",
-  "refPriceUsd": 12.15,
+  "refPriceUsd": 16.38,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2819,7 +2819,7 @@
   "ticker": "PBI",
   "name": "Pitney Bowes",
   "sector": "Industrial",
-  "refPriceUsd": 18.51,
+  "refPriceUsd": 16.22,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2827,7 +2827,7 @@
   "ticker": "PCAR",
   "name": "PACCAR",
   "sector": "Automotriz",
-  "refPriceUsd": 126.2,
+  "refPriceUsd": 131.03,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2835,7 +2835,7 @@
   "ticker": "PHG",
   "name": "Philips",
   "sector": "Salud",
-  "refPriceUsd": 26.95,
+  "refPriceUsd": 27.48,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -2843,7 +2843,7 @@
   "ticker": "RACE",
   "name": "Ferrari",
   "sector": "Automotriz",
-  "refPriceUsd": 376.83,
+  "refPriceUsd": 433.48,
   "ratio": 80,
   "category": "CEDEAR"
  },
@@ -2851,7 +2851,7 @@
   "ticker": "RGTI",
   "name": "Rigetti Computing",
   "sector": "Tecnología",
-  "refPriceUsd": 14.11,
+  "refPriceUsd": 17.62,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2859,7 +2859,7 @@
   "ticker": "RIO",
   "name": "Rio Tinto",
   "sector": "Minería",
-  "refPriceUsd": 90.15,
+  "refPriceUsd": 104.89,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -2867,7 +2867,7 @@
   "ticker": "RKLB",
   "name": "Rocket Lab",
   "sector": "Industrial",
-  "refPriceUsd": 67.62,
+  "refPriceUsd": 73.86,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -2875,7 +2875,7 @@
   "ticker": "RSP",
   "name": "S&P 500 Equal Weight",
   "sector": "ETF",
-  "refPriceUsd": 213.37,
+  "refPriceUsd": 221.79,
   "ratio": 30,
   "category": "ETF"
  },
@@ -2883,7 +2883,7 @@
   "ticker": "SAN",
   "name": "Banco Santander",
   "sector": "Financiero",
-  "refPriceUsd": 13.55,
+  "refPriceUsd": 14.54,
   "ratio": 0.25,
   "category": "CEDEAR"
  },
@@ -2891,7 +2891,7 @@
   "ticker": "SAP",
   "name": "SAP",
   "sector": "Tecnología",
-  "refPriceUsd": 159.04,
+  "refPriceUsd": 219.55,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -2899,7 +2899,7 @@
   "ticker": "SBS",
   "name": "Sabesp",
   "sector": "Energía",
-  "refPriceUsd": 5.75,
+  "refPriceUsd": 4.62,
   "ratio": 0.5,
   "category": "CEDEAR"
  },
@@ -2907,7 +2907,7 @@
   "ticker": "SCCO",
   "name": "Southern Copper",
   "sector": "Minería",
-  "refPriceUsd": 172.48,
+  "refPriceUsd": 211.9,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2915,7 +2915,7 @@
   "ticker": "SHEL",
   "name": "Shell",
   "sector": "Energía",
-  "refPriceUsd": 87.32,
+  "refPriceUsd": 93.29,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -2923,7 +2923,7 @@
   "ticker": "SLV",
   "name": "Plata (iShares)",
   "sector": "ETF",
-  "refPriceUsd": 50.78,
+  "refPriceUsd": 63.09,
   "ratio": 6,
   "category": "ETF"
  },
@@ -2931,7 +2931,7 @@
   "ticker": "SMH",
   "name": "Semiconductores (VanEck)",
   "sector": "ETF",
-  "refPriceUsd": 556.53,
+  "refPriceUsd": 558.61,
   "ratio": 50,
   "category": "ETF"
  },
@@ -2939,7 +2939,7 @@
   "ticker": "SNA",
   "name": "Snap-on",
   "sector": "Industrial",
-  "refPriceUsd": 410.99,
+  "refPriceUsd": 391.48,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -2947,7 +2947,7 @@
   "ticker": "SNDK",
   "name": "SanDisk",
   "sector": "Tecnología",
-  "refPriceUsd": 1354.82,
+  "refPriceUsd": 1602.7,
   "ratio": 170,
   "category": "CEDEAR"
  },
@@ -2955,7 +2955,7 @@
   "ticker": "SONY",
   "name": "Sony",
   "sector": "Tecnología",
-  "refPriceUsd": 21.12,
+  "refPriceUsd": 23.93,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -2963,7 +2963,7 @@
   "ticker": "SPCE",
   "name": "Virgin Galactic",
   "sector": "Industrial",
-  "refPriceUsd": 2.56,
+  "refPriceUsd": 3.1,
   "ratio": 0.5,
   "category": "CEDEAR"
  },
@@ -2971,7 +2971,7 @@
   "ticker": "STLA",
   "name": "Stellantis",
   "sector": "Automotriz",
-  "refPriceUsd": 5.79,
+  "refPriceUsd": 5.42,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -2979,7 +2979,7 @@
   "ticker": "STNE",
   "name": "StoneCo",
   "sector": "Financiero",
-  "refPriceUsd": 11.15,
+  "refPriceUsd": 9.43,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -2987,7 +2987,7 @@
   "ticker": "SUZ",
   "name": "Suzano",
   "sector": "Materiales",
-  "refPriceUsd": 8.21,
+  "refPriceUsd": 8.7,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -2995,7 +2995,7 @@
   "ticker": "SWKS",
   "name": "Skyworks Solutions",
   "sector": "Semiconductores",
-  "refPriceUsd": 59.35,
+  "refPriceUsd": 66.55,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -3003,7 +3003,7 @@
   "ticker": "TCOM",
   "name": "Trip.com",
   "sector": "Consumo",
-  "refPriceUsd": 42.45,
+  "refPriceUsd": 46.3,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -3011,7 +3011,7 @@
   "ticker": "TEM",
   "name": "Tempus AI",
   "sector": "Salud",
-  "refPriceUsd": 52.47,
+  "refPriceUsd": 72.27,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -3019,7 +3019,7 @@
   "ticker": "TIMB",
   "name": "TIM Brasil",
   "sector": "Comunicación",
-  "refPriceUsd": 22.14,
+  "refPriceUsd": 17.77,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -3027,7 +3027,7 @@
   "ticker": "TM",
   "name": "Toyota Motor",
   "sector": "Automotriz",
-  "refPriceUsd": 177.61,
+  "refPriceUsd": 197.35,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -3035,7 +3035,7 @@
   "ticker": "TRIP",
   "name": "TripAdvisor",
   "sector": "Consumo",
-  "refPriceUsd": 14.58,
+  "refPriceUsd": 10.06,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -3043,7 +3043,7 @@
   "ticker": "TTE",
   "name": "TotalEnergies",
   "sector": "Energía",
-  "refPriceUsd": 81.39,
+  "refPriceUsd": 90.5,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -3051,7 +3051,7 @@
   "ticker": "TV",
   "name": "Grupo Televisa",
   "sector": "Comunicación",
-  "refPriceUsd": 2.71,
+  "refPriceUsd": 2.76,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -3059,7 +3059,7 @@
   "ticker": "TWLO",
   "name": "Twilio",
   "sector": "Tecnología",
-  "refPriceUsd": 206.78,
+  "refPriceUsd": 220.42,
   "ratio": 36,
   "category": "CEDEAR"
  },
@@ -3067,7 +3067,7 @@
   "ticker": "UGP",
   "name": "Ultrapar",
   "sector": "Energía",
-  "refPriceUsd": 6.25,
+  "refPriceUsd": 6.78,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -3075,7 +3075,7 @@
   "ticker": "UL",
   "name": "Unilever",
   "sector": "Consumo",
-  "refPriceUsd": 62.39,
+  "refPriceUsd": 63.98,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -3083,7 +3083,7 @@
   "ticker": "UPST",
   "name": "Upstart",
   "sector": "Financiero",
-  "refPriceUsd": 29.51,
+  "refPriceUsd": 30.11,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -3091,7 +3091,7 @@
   "ticker": "URA",
   "name": "Uranio (Global X)",
   "sector": "ETF",
-  "refPriceUsd": 38.73,
+  "refPriceUsd": 45.86,
   "ratio": 5,
   "category": "ETF"
  },
@@ -3099,7 +3099,7 @@
   "ticker": "URBN",
   "name": "Urban Outfitters",
   "sector": "Consumo",
-  "refPriceUsd": 72.98,
+  "refPriceUsd": 75.02,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -3107,7 +3107,7 @@
   "ticker": "USO",
   "name": "Petróleo WTI (USO)",
   "sector": "ETF",
-  "refPriceUsd": 123.96,
+  "refPriceUsd": 135.2,
   "ratio": 15,
   "category": "ETF"
  },
@@ -3115,7 +3115,7 @@
   "ticker": "VEA",
   "name": "Desarrollados ex-US (Vanguard)",
   "sector": "ETF",
-  "refPriceUsd": 69.7,
+  "refPriceUsd": 73.47,
   "ratio": 10,
   "category": "ETF"
  },
@@ -3123,7 +3123,7 @@
   "ticker": "VIG",
   "name": "Dividend Appreciation (Vanguard)",
   "sector": "ETF",
-  "refPriceUsd": 237.61,
+  "refPriceUsd": 243.83,
   "ratio": 40,
   "category": "ETF"
  },
@@ -3131,7 +3131,7 @@
   "ticker": "VIV",
   "name": "Telefônica Brasil",
   "sector": "Comunicación",
-  "refPriceUsd": 13.95,
+  "refPriceUsd": 11.48,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -3139,7 +3139,7 @@
   "ticker": "VOD",
   "name": "Vodafone",
   "sector": "Comunicación",
-  "refPriceUsd": 15.74,
+  "refPriceUsd": 15.93,
   "ratio": 1,
   "category": "CEDEAR"
  },
@@ -3147,7 +3147,7 @@
   "ticker": "VRSN",
   "name": "VeriSign",
   "sector": "Tecnología",
-  "refPriceUsd": 277.66,
+  "refPriceUsd": 281.45,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3155,7 +3155,7 @@
   "ticker": "VST",
   "name": "Vistra",
   "sector": "Energía",
-  "refPriceUsd": 155.44,
+  "refPriceUsd": 137.14,
   "ratio": 25,
   "category": "CEDEAR"
  },
@@ -3163,7 +3163,7 @@
   "ticker": "XLB",
   "name": "Materiales (SPDR)",
   "sector": "ETF",
-  "refPriceUsd": 50.53,
+  "refPriceUsd": 53.54,
   "ratio": 18,
   "category": "ETF"
  },
@@ -3171,7 +3171,7 @@
   "ticker": "XLC",
   "name": "Comunicación (SPDR)",
   "sector": "ETF",
-  "refPriceUsd": 110.65,
+  "refPriceUsd": 111.84,
   "ratio": 18,
   "category": "ETF"
  },
@@ -3179,7 +3179,7 @@
   "ticker": "XLI",
   "name": "Industrial (SPDR)",
   "sector": "ETF",
-  "refPriceUsd": 179.41,
+  "refPriceUsd": 180.1,
   "ratio": 30,
   "category": "ETF"
  },
@@ -3187,7 +3187,7 @@
   "ticker": "XLP",
   "name": "Consumo básico (SPDR)",
   "sector": "ETF",
-  "refPriceUsd": 85.19,
+  "refPriceUsd": 85.82,
   "ratio": 16,
   "category": "ETF"
  },
@@ -3195,7 +3195,7 @@
   "ticker": "XLRE",
   "name": "Real Estate (SPDR)",
   "sector": "ETF",
-  "refPriceUsd": 45.42,
+  "refPriceUsd": 45.02,
   "ratio": 9,
   "category": "ETF"
  },
@@ -3203,7 +3203,7 @@
   "ticker": "XLU",
   "name": "Utilities (SPDR)",
   "sector": "ETF",
-  "refPriceUsd": 45.17,
+  "refPriceUsd": 43.05,
   "ratio": 15,
   "category": "ETF"
  },
@@ -3211,7 +3211,7 @@
   "ticker": "XLV",
   "name": "Salud (SPDR)",
   "sector": "ETF",
-  "refPriceUsd": 161.09,
+  "refPriceUsd": 174.97,
   "ratio": 30,
   "category": "ETF"
  },
@@ -3219,7 +3219,7 @@
   "ticker": "XLY",
   "name": "Consumo discrecional (SPDR)",
   "sector": "ETF",
-  "refPriceUsd": 115.44,
+  "refPriceUsd": 118.11,
   "ratio": 40,
   "category": "ETF"
  },
@@ -3227,7 +3227,7 @@
   "ticker": "XME",
   "name": "Metales y minería (SPDR)",
   "sector": "ETF",
-  "refPriceUsd": 98.35,
+  "refPriceUsd": 119.16,
   "ratio": 30,
   "category": "ETF"
  },
@@ -3235,7 +3235,7 @@
   "ticker": "XP",
   "name": "XP Inc",
   "sector": "Financiero",
-  "refPriceUsd": 16.67,
+  "refPriceUsd": 16.91,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -3243,7 +3243,7 @@
   "ticker": "XYZ",
   "name": "Block (ex Square)",
   "sector": "Financiero",
-  "refPriceUsd": 79.94,
+  "refPriceUsd": 81.26,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -3251,7 +3251,7 @@
   "ticker": "YELP",
   "name": "Yelp",
   "sector": "Tecnología",
-  "refPriceUsd": 26.22,
+  "refPriceUsd": 23.36,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -3259,7 +3259,7 @@
   "ticker": "GOOG",
   "name": "Alphabet (Clase C)",
   "sector": "Tecnología",
-  "refPriceUsd": 188,
+  "refPriceUsd": 342.39,
   "ratio": 29,
   "category": "CEDEAR"
  },
@@ -3267,7 +3267,7 @@
   "ticker": "SOFI",
   "name": "SoFi Technologies",
   "sector": "Fintech",
-  "refPriceUsd": 14,
+  "refPriceUsd": 18.96,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -3275,7 +3275,7 @@
   "ticker": "APP",
   "name": "AppLovin",
   "sector": "Tecnología",
-  "refPriceUsd": 330,
+  "refPriceUsd": 304.81,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3283,7 +3283,7 @@
   "ticker": "U",
   "name": "Unity Software",
   "sector": "Tecnología",
-  "refPriceUsd": 23,
+  "refPriceUsd": 46.7,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -3291,7 +3291,7 @@
   "ticker": "MDB",
   "name": "MongoDB",
   "sector": "Tecnología",
-  "refPriceUsd": 260,
+  "refPriceUsd": 428.6,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3299,7 +3299,7 @@
   "ticker": "OKTA",
   "name": "Okta",
   "sector": "Tecnología",
-  "refPriceUsd": 95,
+  "refPriceUsd": 136.01,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3307,7 +3307,7 @@
   "ticker": "DBX",
   "name": "Dropbox",
   "sector": "Tecnología",
-  "refPriceUsd": 28,
+  "refPriceUsd": 34.47,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -3315,7 +3315,7 @@
   "ticker": "SMCI",
   "name": "Super Micro Computer",
   "sector": "Tecnología",
-  "refPriceUsd": 42,
+  "refPriceUsd": 37.01,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -3323,7 +3323,7 @@
   "ticker": "WIX",
   "name": "Wix.com",
   "sector": "Tecnología",
-  "refPriceUsd": 165,
+  "refPriceUsd": 83.97,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3331,7 +3331,7 @@
   "ticker": "AFRM",
   "name": "Affirm Holdings",
   "sector": "Fintech",
-  "refPriceUsd": 60,
+  "refPriceUsd": 76.54,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -3347,7 +3347,7 @@
   "ticker": "FIS",
   "name": "Fidelity National Info",
   "sector": "Fintech",
-  "refPriceUsd": 78,
+  "refPriceUsd": 41.96,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -3355,7 +3355,7 @@
   "ticker": "GPN",
   "name": "Global Payments",
   "sector": "Fintech",
-  "refPriceUsd": 105,
+  "refPriceUsd": 94.44,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3363,7 +3363,7 @@
   "ticker": "GFS",
   "name": "GlobalFoundries",
   "sector": "Semiconductores",
-  "refPriceUsd": 42,
+  "refPriceUsd": 47.4,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -3371,7 +3371,7 @@
   "ticker": "MPWR",
   "name": "Monolithic Power",
   "sector": "Semiconductores",
-  "refPriceUsd": 640,
+  "refPriceUsd": 1305.8,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -3379,7 +3379,7 @@
   "ticker": "TER",
   "name": "Teradyne",
   "sector": "Semiconductores",
-  "refPriceUsd": 110,
+  "refPriceUsd": 372.11,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3387,7 +3387,7 @@
   "ticker": "QRVO",
   "name": "Qorvo",
   "sector": "Semiconductores",
-  "refPriceUsd": 85,
+  "refPriceUsd": 95.16,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3395,7 +3395,7 @@
   "ticker": "DG",
   "name": "Dollar General",
   "sector": "Consumo",
-  "refPriceUsd": 85,
+  "refPriceUsd": 123.09,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3403,7 +3403,7 @@
   "ticker": "DLTR",
   "name": "Dollar Tree",
   "sector": "Consumo",
-  "refPriceUsd": 72,
+  "refPriceUsd": 130.99,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -3411,7 +3411,7 @@
   "ticker": "BBY",
   "name": "Best Buy",
   "sector": "Consumo",
-  "refPriceUsd": 80,
+  "refPriceUsd": 86.73,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3419,7 +3419,7 @@
   "ticker": "CROX",
   "name": "Crocs",
   "sector": "Consumo",
-  "refPriceUsd": 105,
+  "refPriceUsd": 122.95,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3427,7 +3427,7 @@
   "ticker": "DKS",
   "name": "Dick's Sporting Goods",
   "sector": "Consumo",
-  "refPriceUsd": 220,
+  "refPriceUsd": 182.17,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3435,7 +3435,7 @@
   "ticker": "CLX",
   "name": "Clorox",
   "sector": "Consumo",
-  "refPriceUsd": 150,
+  "refPriceUsd": 107.06,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3443,7 +3443,7 @@
   "ticker": "KDP",
   "name": "Keurig Dr Pepper",
   "sector": "Consumo",
-  "refPriceUsd": 33,
+  "refPriceUsd": 32.09,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -3451,7 +3451,7 @@
   "ticker": "TAP",
   "name": "Molson Coors",
   "sector": "Consumo",
-  "refPriceUsd": 55,
+  "refPriceUsd": 42.91,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -3459,7 +3459,7 @@
   "ticker": "KVUE",
   "name": "Kenvue",
   "sector": "Consumo",
-  "refPriceUsd": 22,
+  "refPriceUsd": 19.09,
   "ratio": 2,
   "category": "CEDEAR"
  },
@@ -3467,7 +3467,7 @@
   "ticker": "DPZ",
   "name": "Domino's Pizza",
   "sector": "Consumo",
-  "refPriceUsd": 440,
+  "refPriceUsd": 342.23,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -3475,7 +3475,7 @@
   "ticker": "CHD",
   "name": "Church & Dwight",
   "sector": "Consumo",
-  "refPriceUsd": 100,
+  "refPriceUsd": 98.62,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3483,7 +3483,7 @@
   "ticker": "MKC",
   "name": "McCormick",
   "sector": "Consumo",
-  "refPriceUsd": 75,
+  "refPriceUsd": 55.89,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -3491,7 +3491,7 @@
   "ticker": "CI",
   "name": "Cigna",
   "sector": "Salud",
-  "refPriceUsd": 330,
+  "refPriceUsd": 277.48,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -3499,7 +3499,7 @@
   "ticker": "HUM",
   "name": "Humana",
   "sector": "Salud",
-  "refPriceUsd": 260,
+  "refPriceUsd": 382.13,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3507,7 +3507,7 @@
   "ticker": "ELV",
   "name": "Elevance Health",
   "sector": "Salud",
-  "refPriceUsd": 420,
+  "refPriceUsd": 399.71,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -3515,7 +3515,7 @@
   "ticker": "DXCM",
   "name": "Dexcom",
   "sector": "Salud",
-  "refPriceUsd": 75,
+  "refPriceUsd": 91.61,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -3523,7 +3523,7 @@
   "ticker": "IDXX",
   "name": "IDEXX Laboratories",
   "sector": "Salud",
-  "refPriceUsd": 480,
+  "refPriceUsd": 555.73,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -3531,7 +3531,7 @@
   "ticker": "ALGN",
   "name": "Align Technology",
   "sector": "Salud",
-  "refPriceUsd": 210,
+  "refPriceUsd": 160.22,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3539,7 +3539,7 @@
   "ticker": "EW",
   "name": "Edwards Lifesciences",
   "sector": "Salud",
-  "refPriceUsd": 72,
+  "refPriceUsd": 89.81,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -3547,7 +3547,7 @@
   "ticker": "HCA",
   "name": "HCA Healthcare",
   "sector": "Salud",
-  "refPriceUsd": 340,
+  "refPriceUsd": 429.47,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -3555,7 +3555,7 @@
   "ticker": "MCK",
   "name": "McKesson",
   "sector": "Salud",
-  "refPriceUsd": 600,
+  "refPriceUsd": 861.93,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -3563,7 +3563,7 @@
   "ticker": "A",
   "name": "Agilent Technologies",
   "sector": "Salud",
-  "refPriceUsd": 135,
+  "refPriceUsd": 159.09,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3571,7 +3571,7 @@
   "ticker": "COR",
   "name": "Cencora",
   "sector": "Salud",
-  "refPriceUsd": 240,
+  "refPriceUsd": 318.66,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3579,7 +3579,7 @@
   "ticker": "AFL",
   "name": "Aflac",
   "sector": "Financiero",
-  "refPriceUsd": 105,
+  "refPriceUsd": 116.38,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3587,7 +3587,7 @@
   "ticker": "ALL",
   "name": "Allstate",
   "sector": "Financiero",
-  "refPriceUsd": 195,
+  "refPriceUsd": 255.32,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3595,7 +3595,7 @@
   "ticker": "TRV",
   "name": "Travelers",
   "sector": "Financiero",
-  "refPriceUsd": 260,
+  "refPriceUsd": 364.19,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3603,7 +3603,7 @@
   "ticker": "PRU",
   "name": "Prudential Financial",
   "sector": "Financiero",
-  "refPriceUsd": 115,
+  "refPriceUsd": 120.98,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3611,7 +3611,7 @@
   "ticker": "TFC",
   "name": "Truist Financial",
   "sector": "Bancos",
-  "refPriceUsd": 44,
+  "refPriceUsd": 50.24,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -3619,7 +3619,7 @@
   "ticker": "ALLY",
   "name": "Ally Financial",
   "sector": "Bancos",
-  "refPriceUsd": 38,
+  "refPriceUsd": 42.79,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -3627,7 +3627,7 @@
   "ticker": "ICE",
   "name": "Intercontinental Exchange",
   "sector": "Financiero",
-  "refPriceUsd": 160,
+  "refPriceUsd": 161.79,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3635,7 +3635,7 @@
   "ticker": "CME",
   "name": "CME Group",
   "sector": "Financiero",
-  "refPriceUsd": 225,
+  "refPriceUsd": 274.74,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3643,7 +3643,7 @@
   "ticker": "MCO",
   "name": "Moody's",
   "sector": "Financiero",
-  "refPriceUsd": 480,
+  "refPriceUsd": 504.67,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -3651,7 +3651,7 @@
   "ticker": "AON",
   "name": "Aon",
   "sector": "Financiero",
-  "refPriceUsd": 360,
+  "refPriceUsd": 355.0,
   "ratio": 14,
   "category": "CEDEAR"
  },
@@ -3667,7 +3667,7 @@
   "ticker": "AMT",
   "name": "American Tower",
   "sector": "Real Estate",
-  "refPriceUsd": 205,
+  "refPriceUsd": 176.18,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3675,7 +3675,7 @@
   "ticker": "PLD",
   "name": "Prologis",
   "sector": "Real Estate",
-  "refPriceUsd": 115,
+  "refPriceUsd": 140.89,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3683,7 +3683,7 @@
   "ticker": "SPG",
   "name": "Simon Property",
   "sector": "Real Estate",
-  "refPriceUsd": 170,
+  "refPriceUsd": 218.1,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3691,7 +3691,7 @@
   "ticker": "PSA",
   "name": "Public Storage",
   "sector": "Real Estate",
-  "refPriceUsd": 300,
+  "refPriceUsd": 322.34,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -3699,7 +3699,7 @@
   "ticker": "EQIX",
   "name": "Equinix",
   "sector": "Real Estate",
-  "refPriceUsd": 870,
+  "refPriceUsd": 1062.9,
   "ratio": 30,
   "category": "CEDEAR"
  },
@@ -3707,7 +3707,7 @@
   "ticker": "DLR",
   "name": "Digital Realty",
   "sector": "Real Estate",
-  "refPriceUsd": 165,
+  "refPriceUsd": 190.8,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3715,7 +3715,7 @@
   "ticker": "CCI",
   "name": "Crown Castle",
   "sector": "Real Estate",
-  "refPriceUsd": 100,
+  "refPriceUsd": 75.08,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3723,7 +3723,7 @@
   "ticker": "WM",
   "name": "Waste Management",
   "sector": "Industrial",
-  "refPriceUsd": 215,
+  "refPriceUsd": 224.59,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3731,7 +3731,7 @@
   "ticker": "RSG",
   "name": "Republic Services",
   "sector": "Industrial",
-  "refPriceUsd": 210,
+  "refPriceUsd": 220.42,
   "ratio": 10,
   "category": "CEDEAR"
  },
@@ -3739,7 +3739,7 @@
   "ticker": "PH",
   "name": "Parker Hannifin",
   "sector": "Industrial",
-  "refPriceUsd": 650,
+  "refPriceUsd": 994.15,
   "ratio": 20,
   "category": "CEDEAR"
  },
@@ -3747,7 +3747,7 @@
   "ticker": "ROK",
   "name": "Rockwell Automation",
   "sector": "Industrial",
-  "refPriceUsd": 290,
+  "refPriceUsd": 436.05,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -3755,7 +3755,7 @@
   "ticker": "CMI",
   "name": "Cummins",
   "sector": "Industrial",
-  "refPriceUsd": 350,
+  "refPriceUsd": 592.51,
   "ratio": 14,
   "category": "CEDEAR"
  },
@@ -3763,7 +3763,7 @@
   "ticker": "CARR",
   "name": "Carrier Global",
   "sector": "Industrial",
-  "refPriceUsd": 72,
+  "refPriceUsd": 60.19,
   "ratio": 5,
   "category": "CEDEAR"
  },
@@ -3771,7 +3771,7 @@
   "ticker": "OTIS",
   "name": "Otis Worldwide",
   "sector": "Industrial",
-  "refPriceUsd": 98,
+  "refPriceUsd": 71.88,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3779,7 +3779,7 @@
   "ticker": "TT",
   "name": "Trane Technologies",
   "sector": "Industrial",
-  "refPriceUsd": 390,
+  "refPriceUsd": 455.08,
   "ratio": 15,
   "category": "CEDEAR"
  },
@@ -3787,7 +3787,7 @@
   "ticker": "DVN",
   "name": "Devon Energy",
   "sector": "Energía",
-  "refPriceUsd": 42,
+  "refPriceUsd": 49.41,
   "ratio": 3,
   "category": "CEDEAR"
  },
@@ -3795,7 +3795,7 @@
   "ticker": "FANG",
   "name": "Diamondback Energy",
   "sector": "Energía",
-  "refPriceUsd": 180,
+  "refPriceUsd": 211.72,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3803,7 +3803,7 @@
   "ticker": "WMB",
   "name": "Williams Companies",
   "sector": "Energía",
-  "refPriceUsd": 48,
+  "refPriceUsd": 70.74,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -3811,7 +3811,7 @@
   "ticker": "OKE",
   "name": "ONEOK",
   "sector": "Energía",
-  "refPriceUsd": 95,
+  "refPriceUsd": 93.64,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3819,7 +3819,7 @@
   "ticker": "LNG",
   "name": "Cheniere Energy",
   "sector": "Energía",
-  "refPriceUsd": 195,
+  "refPriceUsd": 278.6,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3835,7 +3835,7 @@
   "ticker": "FOXA",
   "name": "Fox Corporation",
   "sector": "Comunicación",
-  "refPriceUsd": 48,
+  "refPriceUsd": 69.45,
   "ratio": 4,
   "category": "CEDEAR"
  },
@@ -3843,7 +3843,7 @@
   "ticker": "LYV",
   "name": "Live Nation",
   "sector": "Comunicación",
-  "refPriceUsd": 135,
+  "refPriceUsd": 181.58,
   "ratio": 8,
   "category": "CEDEAR"
  },
@@ -3851,7 +3851,7 @@
   "ticker": "OMC",
   "name": "Omnicom Group",
   "sector": "Comunicación",
-  "refPriceUsd": 95,
+  "refPriceUsd": 87.94,
   "ratio": 6,
   "category": "CEDEAR"
  },
@@ -3859,7 +3859,7 @@
   "ticker": "LIN",
   "name": "Linde",
   "sector": "Materiales",
-  "refPriceUsd": 460,
+  "refPriceUsd": 487.94,
   "ratio": 18,
   "category": "CEDEAR"
  },
@@ -3867,7 +3867,7 @@
   "ticker": "APD",
   "name": "Air Products",
   "sector": "Materiales",
-  "refPriceUsd": 290,
+  "refPriceUsd": 305.35,
   "ratio": 12,
   "category": "CEDEAR"
  },
@@ -3875,7 +3875,7 @@
   "ticker": "SHW",
   "name": "Sherwin-Williams",
   "sector": "Materiales",
-  "refPriceUsd": 360,
+  "refPriceUsd": 346.35,
   "ratio": 14,
   "category": "CEDEAR"
  },
@@ -3883,7 +3883,7 @@
   "ticker": "ALB",
   "name": "Albemarle",
   "sector": "Materiales",
-  "refPriceUsd": 90,
+  "refPriceUsd": 143.4,
   "ratio": 6,
   "category": "CEDEAR"
  }
