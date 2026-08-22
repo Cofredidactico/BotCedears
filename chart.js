@@ -79,6 +79,7 @@ const BUY_ZONE_FILL = 'oklch(0.72 0.17 152 / 0.14)', BUY_ZONE_LINE = 'oklch(0.76
 const SELL_ZONE_FILL = 'oklch(0.75 0.15 70 / 0.14)', SELL_ZONE_LINE = 'oklch(0.75 0.15 70 / 0.55)';
 const STOP_COLOR = 'oklch(0.70 0.21 23)';
 const TP_COLOR = 'oklch(0.80 0.15 85)';
+const COST_COLOR = 'oklch(0.74 0.15 291)'; // violeta = "tu" línea (precio de compra)
 
 function scaleY(value, min, max, top, bottom) {
   if (max === min) return (top + bottom) / 2;
@@ -111,7 +112,7 @@ function priceExtent(candles, start, opts) {
   let pMin = Math.min(...l), pMax = Math.max(...h);
   if (bbU.length) pMax = Math.max(pMax, ...bbU);
   if (bbL.length) pMin = Math.min(pMin, ...bbL);
-  const { support, resistance, plan } = opts || {};
+  const { support, resistance, plan, costBasis } = opts || {};
   if (support != null && isFinite(support)) pMin = Math.min(pMin, support);
   if (resistance != null && isFinite(resistance)) pMax = Math.max(pMax, resistance);
   if (plan) {
@@ -119,6 +120,15 @@ function priceExtent(candles, start, opts) {
     if (isFinite(plan.stopLoss)) pMin = Math.min(pMin, plan.stopLoss);
     if (isFinite(plan.tp1)) pMax = Math.max(pMax, plan.tp1);
     if (isFinite(plan.sellHigh)) pMax = Math.max(pMax, plan.sellHigh);
+  }
+  // Tu precio de compra: solo se incluye en la escala si está razonablemente
+  // cerca del rango visible (≤35% por fuera), para no aplastar la acción reciente
+  // cuando compraste muy lejos del precio actual — en ese caso la línea se
+  // clampea al borde (ver renderPriceChartSVG).
+  if (costBasis != null && isFinite(costBasis) && costBasis > 0) {
+    const span = pMax - pMin || pMax * 0.1 || 1;
+    if (costBasis < pMin && costBasis >= pMin - span * 0.35) pMin = costBasis;
+    else if (costBasis > pMax && costBasis <= pMax + span * 0.35) pMax = costBasis;
   }
   const pPad = (pMax - pMin) * 0.08 || pMax * 0.02 || 1;
   return { pMin: pMin - pPad, pMax: pMax + pPad };
@@ -133,6 +143,8 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
     showKeltner = false, showSupertrend = false, showPivots = false, showIchimoku = false, showVolProfile = false,
     showPatterns = false,
     earningsInDays = null,
+    costBasis = null,          // tu precio de compra (USD del subyacente) — línea propia
+    costApprox = false,        // true si se convirtió desde ARS (aproximado con CCL actual)
   } = opts;
   const nTotal = candles.c.length;
   if (nTotal < 5) return '<div class="chart-empty">Historial insuficiente para graficar.</div>';
@@ -213,6 +225,21 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
     zonesSvg += zoneBand(plan.sellLow, plan.sellHigh, SELL_ZONE_FILL, SELL_ZONE_LINE, 'ZONA DE VENTA', 'oklch(0.32 0.08 70 / 0.85)', GOLD);
     zonesSvg += zoneLine(plan.stopLoss, STOP_COLOR, `STOP ${niceFmt(plan.stopLoss)}`, 'oklch(0.16 0.03 23)');
     zonesSvg += zoneLine(plan.tp1, TP_COLOR, `TP1 ${niceFmt(plan.tp1)}`, 'oklch(0.18 0.03 85)');
+  }
+  // ── Tu precio de compra (solo si tenés la posición con costo cargado) ──
+  // Línea violeta propia, con tu P&L no realizado vs el último cierre. Si tu
+  // entrada quedó fuera del rango visible, se clampea al borde con una flecha.
+  const hasCost = costBasis != null && isFinite(costBasis) && costBasis > 0;
+  if (hasCost) {
+    const nowP = last(c);
+    const pl = (nowP != null && nowP > 0) ? (nowP - costBasis) / costBasis * 100 : null;
+    let yy = yPrice(costBasis), arrow = '';
+    if (yy < PRICE_TOP) { yy = PRICE_TOP + 8; arrow = ' ↑'; }
+    else if (yy > PRICE_BOTTOM) { yy = PRICE_BOTTOM - 8; arrow = ' ↓'; }
+    const plTxt = pl != null ? `  ${pl >= 0 ? '+' : ''}${pl.toFixed(1)}%` : '';
+    const label = `${costApprox ? '≈ ' : ''}TU COMPRA ${niceFmt(costBasis)}${arrow}${plTxt}`;
+    zonesSvg += `<line x1="${PAD_L}" y1="${yy.toFixed(1)}" x2="${W - PAD_R}" y2="${yy.toFixed(1)}" stroke="${COST_COLOR}" stroke-width="1.6" stroke-dasharray="7 4" opacity="0.95"/>
+      ${pillLabel(PAD_L + 8, yy, label, COST_COLOR, 'oklch(0.16 0.03 291)')}`;
   }
 
   /* ── relleno de Bandas de Bollinger (área tenue entre banda sup. e inf.) ── */
@@ -564,6 +591,7 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
     <div class="chart-legend">
       <span><i style="background:${GREEN};"></i>Alcista</span>
       <span><i style="background:${RED};"></i>Bajista</span>
+      ${hasCost ? `<span><i style="background:${COST_COLOR};"></i>Tu compra</span>` : ''}
       ${showEma ? `<span><i style="background:${GOLD};"></i>EMA 20 · ${emaLbl(last(ema20))}</span>
       <span><i style="background:${WHITE};"></i>EMA 50 · ${emaLbl(last(ema50))}</span>
       <span><i style="background:${PURPLE};"></i>EMA 200 · ${emaLbl(last(ema200))}</span>` : ''}
