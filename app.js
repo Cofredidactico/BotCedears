@@ -1387,8 +1387,9 @@ async function selectTicker(ticker) {
 
 /* ───────────────────────── carga + cálculo del reporte ───────────────────────── */
 async function loadReport(ticker) {
+  showLoadingBar();
   const asset = await getAsset(ticker);
-  if (!asset) { state.loading = false; state.error = 'sin_activo'; state.asset = { ticker }; renderReport(); return; }
+  if (!asset) { state.loading = false; state.error = 'sin_activo'; state.asset = { ticker }; hideLoadingBar(); renderReport(); return; }
   state.asset = asset;
 
   try {
@@ -1471,6 +1472,7 @@ async function loadReport(ticker) {
     state.loading = false;
     state.error = 'error_carga';
   }
+  hideLoadingBar();
   renderTopbar();
   renderReport();
 }
@@ -4126,6 +4128,68 @@ function initMobileGestures() {
       if (idx >= 0 && next >= 0 && next < tabs.length) { hapticTap(); loadChartTf(tabs[next]); }
     }
   }, { passive: true });
+}
+
+/* ── Modo instalada (PWA standalone) ── */
+function isStandalone() {
+  try { return window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone === true; } catch { return false; }
+}
+
+/* ── Banner de "instalar como app" (descartable, se recuerda) ────────────────
+ * Android/Chrome dispara beforeinstallprompt → botón "Instalar" con el prompt
+ * nativo. iOS no lo dispara → se muestra la instrucción de Compartir → Agregar
+ * a inicio. No aparece si ya está instalada o si el usuario lo cerró antes. */
+function initInstallBanner() {
+  if (isStandalone() || lsGetSafe('icp_install_dismissed', '') === '1') return;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    showInstallBanner('Instalá <b>Vertex Signal</b> en tu celular para acceso directo y pantalla completa.', 'Instalar', async () => {
+      try { e.prompt(); const res = await e.userChoice; dismissInstallBanner(res?.outcome === 'accepted'); } catch { dismissInstallBanner(false); }
+    });
+  });
+  const ua = navigator.userAgent || '';
+  const isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (isIOS) setTimeout(() => {
+    if (!document.getElementById('install-banner') && lsGetSafe('icp_install_dismissed', '') !== '1')
+      showInstallBanner('Agregá <b>Vertex Signal</b> a tu inicio: tocá <b>Compartir</b> y luego <b>“Agregar a inicio”</b>.', null, null);
+  }, 3500);
+}
+function showInstallBanner(msgHtml, ctaLabel, onCta) {
+  if (document.getElementById('install-banner')) return;
+  const el = document.createElement('div');
+  el.id = 'install-banner'; el.className = 'install-banner'; el.setAttribute('role', 'dialog');
+  el.innerHTML = `
+    <img src="./icons/icon-192.png" alt="" class="ib-icon" onerror="this.style.display='none'" />
+    <div class="ib-msg">${msgHtml}</div>
+    ${ctaLabel ? `<button class="ib-cta" id="ib-cta">${esc(ctaLabel)}</button>` : ''}
+    <button class="ib-x" id="ib-x" aria-label="Cerrar">×</button>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  el.querySelector('#ib-x').addEventListener('click', () => dismissInstallBanner(true));
+  if (onCta) el.querySelector('#ib-cta')?.addEventListener('click', onCta);
+}
+function dismissInstallBanner(remember) {
+  const el = document.getElementById('install-banner');
+  if (el) { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }
+  if (remember) lsSetSafe('icp_install_dismissed', '1');
+}
+
+/* ── Barra de carga superior (señal "app": aparece al abrir un activo) ── */
+let _loadingBarTimer = null;
+function loadingBar() {
+  let el = document.getElementById('loading-bar');
+  if (!el) { el = document.createElement('div'); el.id = 'loading-bar'; el.className = 'loading-bar'; document.body.appendChild(el); }
+  return el;
+}
+function showLoadingBar() {
+  const el = loadingBar();
+  clearTimeout(_loadingBarTimer);
+  el.classList.remove('done'); el.classList.add('active');
+}
+function hideLoadingBar() {
+  const el = loadingBar();
+  el.classList.add('done'); el.classList.remove('active');
+  _loadingBarTimer = setTimeout(() => el.classList.remove('done'), 400);
 }
 
 function renderSidebarMarket() {
@@ -14029,11 +14093,13 @@ window.__vertexReload = () => {
     }
   } catch (e) { /* si algo aún no está listo, el próximo ciclo lo toma */ }
 };
+try { if (isStandalone()) document.documentElement.classList.add('is-standalone'); } catch { /* no-op */ }
 renderTopbar();
 renderReport();
 initSearch();
 initBackToTop();
 initMobileGestures();
+initInstallBanner();
 loadWatchlistData();
 loadTelegramConfig();
 if (telegramState.chatId) loadTelegramSubscriptions();

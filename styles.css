@@ -3512,3 +3512,61 @@ body::after {
 .fs-score { margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 13px; padding: 2px 9px; border-radius: 10px; }
 .fs-up { color: var(--text-mute); font-size: 15px; }
 @media (min-width: 861px) { .ficha-sticky { display: none !important; } }
+
+/* ══════════════ Pulido "app nativa": safe-area, standalone, instalación ══════════════ */
+/* Mata el pull-to-refresh nativo del navegador (usamos el propio) y el rebote encadenado */
+html { overscroll-behavior-y: contain; }
+
+@media (max-width: 860px) {
+  /* el header respeta el notch / barra de estado del dispositivo */
+  .topbar { padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
+  /* toasts por encima de la barra de navegación inferior */
+  .toast-container { bottom: calc(74px + env(safe-area-inset-bottom, 0px)) !important; }
+}
+/* modo instalada (standalone): el status bar se superpone → más aire arriba */
+html.is-standalone .topbar { padding-top: calc(20px + env(safe-area-inset-top, 0px)); }
+html.is-standalone .ficha-sticky { padding-top: calc(12px + env(safe-area-inset-top, 0px)); }
+
+/* En pantallas táctiles, mantener presionado un ticker NO debe abrir el menú de
+   selección/copia de iOS (pelea con el long-press de acciones rápidas). */
+@media (pointer: coarse) {
+  [data-dash-ticker], [data-ticker], [data-short-ticker], [data-alertc-ticker] {
+    -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+  }
+}
+
+/* Banner de instalación (arriba de la barra inferior en celular) */
+.install-banner {
+  position: fixed; left: 12px; right: 12px; z-index: 75;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px;
+  background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: 16px;
+  box-shadow: 0 10px 32px oklch(0 0 0 / 0.45);
+  transform: translateY(140%); opacity: 0; transition: transform 0.32s cubic-bezier(0.22,1,0.36,1), opacity 0.32s;
+}
+.install-banner.show { transform: translateY(0); opacity: 1; }
+.ib-icon { width: 38px; height: 38px; border-radius: 9px; flex-shrink: 0; }
+.ib-msg { flex: 1; font-size: 12.5px; line-height: 1.4; color: var(--text-dim); }
+.ib-msg b { color: var(--text); font-weight: 700; }
+.ib-cta { flex-shrink: 0; padding: 8px 14px; border-radius: 10px; border: none; background: var(--accent); color: oklch(0.15 0.03 291); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; font-weight: 700; cursor: pointer; }
+.ib-cta:active { transform: scale(0.95); }
+.ib-x { flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px; border: none; background: none; color: var(--text-mute); font-size: 20px; line-height: 1; cursor: pointer; }
+.ib-x:active { background: var(--surface-2); }
+@media (min-width: 861px) { .install-banner { left: auto; right: 20px; bottom: 20px; max-width: 380px; } }
+
+/* Barra de carga superior (señal "app") */
+.loading-bar {
+  position: fixed; top: 0; left: 0; height: 3px; width: 0; z-index: 200;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 10px var(--accent-2); opacity: 0; pointer-events: none;
+}
+.loading-bar.active { width: 85%; opacity: 1; transition: width 1.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s; }
+.loading-bar.done { width: 100%; opacity: 0; transition: width 0.25s ease, opacity 0.35s ease 0.15s; }
+@media (prefers-reduced-motion: reduce) { .loading-bar { transition: none !important; } }
+
+/* Transición entre vistas un poco más "app": el fade/rise ya existe (.report-fade);
+   en celular lo hacemos un toque más pronunciado y con easing de resorte. */
+@media (max-width: 860px) {
+  .report-fade { animation: riseMobile 0.34s cubic-bezier(0.22, 1, 0.36, 1); }
+}
+@keyframes riseMobile { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
