@@ -5,7 +5,7 @@
  * Volumen y RSI debajo, todo sobre el mismo OHLCV real que usa
  * indicators.js — nada se simula acá.
  */
-import { ema, bollinger, rsi, macd, sma, atr, keltnerChannels, detectCandlePattern } from './indicators.js';
+import { ema, bollinger, rsi, macd, sma, atr, keltnerChannels, detectCandlePattern, findSwings } from './indicators.js';
 
 /* ── Supertrend (ATR trailing por bandas) — indicador de tendencia clásico:
  *  línea verde bajo el precio en tendencia alcista, roja arriba en bajista,
@@ -130,9 +130,33 @@ function priceExtent(candles, start, opts) {
     if (costBasis < pMin && costBasis >= pMin - span * 0.35) pMin = costBasis;
     else if (costBasis > pMax && costBasis <= pMax + span * 0.35) pMax = costBasis;
   }
+  // Cono de volatilidad: la escala tiene que abarcar la proyección ±2σ al borde.
+  if (opts && opts.showCone) {
+    const cl = candles.c[candles.c.length - 1];
+    const sig = coneSigma(candles.c);
+    if (sig > 0 && cl > 0) {
+      const pb = coneProjBars(candles.c.length - start);
+      pMax = Math.max(pMax, cl * Math.exp(2 * sig * Math.sqrt(pb)));
+      pMin = Math.min(pMin, cl * Math.exp(-2 * sig * Math.sqrt(pb)));
+    }
+  }
   const pPad = (pMax - pMin) * 0.08 || pMax * 0.02 || 1;
   return { pMin: pMin - pPad, pMax: pMax + pPad };
 }
+
+// Volatilidad diaria (desvío de los retornos logarítmicos de las últimas ~90
+// ruedas) — base del cono. Cuántas ruedas proyectar hacia adelante.
+function coneSigma(closes) {
+  const n = closes.length, rets = [];
+  for (let i = Math.max(1, n - 90); i < n; i++) {
+    if (closes[i - 1] > 0 && closes[i] > 0) rets.push(Math.log(closes[i] / closes[i - 1]));
+  }
+  if (rets.length < 5) return 0;
+  const m = rets.reduce((a, b) => a + b, 0) / rets.length;
+  const v = rets.reduce((a, b) => a + (b - m) * (b - m), 0) / rets.length;
+  return Math.sqrt(v);
+}
+function coneProjBars(count) { return Math.min(16, Math.max(8, Math.round(count * 0.12))); }
 
 export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
   const {
@@ -142,6 +166,9 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
     showEma = true, showBb = true, showVwap = true, showPoc = true, showFib = true, showGaps = true,
     showKeltner = false, showSupertrend = false, showPivots = false, showIchimoku = false, showVolProfile = false,
     showPatterns = false,
+    showCone = false,          // cono de volatilidad (proyección ±1σ/±2σ hacia adelante)
+    showSmart = false,         // huellas institucionales: Fair Value Gaps + Order Blocks
+    showDivergence = false,    // divergencias precio↔RSI dibujadas
     earningsInDays = null,
     costBasis = null,          // tu precio de compra (USD del subyacente) — línea propia
     costApprox = false,        // true si se convirtió desde ARS (aproximado con CCL actual)
@@ -167,7 +194,11 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
   const hasVolume = v.some(x => x > 0);
 
   const plotW = W - PAD_L - PAD_R;
-  const slot = plotW / count;
+  // Cono de volatilidad: reserva ranuras a la derecha para la proyección hacia
+  // adelante, comprimiendo apenas las velas históricas (todo usa slot/x(), así
+  // que el resto del dibujo se reacomoda solo).
+  const projBars = showCone ? coneProjBars(count) : 0;
+  const slot = plotW / (count + projBars);
   const candleW = Math.max(1.2, Math.min(9, slot * 0.66));
   const x = (i) => PAD_L + slot * i + slot / 2;
 
@@ -240,6 +271,80 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
     const label = `${costApprox ? '≈ ' : ''}TU COMPRA ${niceFmt(costBasis)}${arrow}${plTxt}`;
     zonesSvg += `<line x1="${PAD_L}" y1="${yy.toFixed(1)}" x2="${W - PAD_R}" y2="${yy.toFixed(1)}" stroke="${COST_COLOR}" stroke-width="1.6" stroke-dasharray="7 4" opacity="0.95"/>
       ${pillLabel(PAD_L + 8, yy, label, COST_COLOR, 'oklch(0.16 0.03 291)')}`;
+  }
+
+  /* ── Cono de volatilidad (proyección ±1σ/±2σ hacia adelante) ──────────────
+   * A partir del último cierre proyecta el abanico realista de precios: con la
+   * volatilidad actual (σ de los retornos log), en k ruedas el precio tiende a
+   * estar dentro de ±1σ·√k (~68%) o ±2σ·√k (~95%). No predice dirección — dibuja
+   * el rango probable, centrado en el precio de hoy. */
+  let coneSvg = '';
+  if (showCone && projBars > 0) {
+    const cl = last(c), sig = coneSigma(candles.c);
+    if (cl > 0 && sig > 0) {
+      const anchorX = x(count - 1), anchorY = yPrice(cl);
+      const up1 = [], lo1 = [], up2 = [], lo2 = [];
+      for (let k = 1; k <= projBars; k++) {
+        const s = sig * Math.sqrt(k), xk = x(count - 1 + k);
+        up1.push([xk, yPrice(cl * Math.exp(s))]); lo1.push([xk, yPrice(cl * Math.exp(-s))]);
+        up2.push([xk, yPrice(cl * Math.exp(2 * s))]); lo2.push([xk, yPrice(cl * Math.exp(-2 * s))]);
+      }
+      const poly = (top, bot) => `M${anchorX.toFixed(1)},${anchorY.toFixed(1)} ` +
+        top.map(p => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ') + ' ' +
+        bot.slice().reverse().map(p => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ') + ' Z';
+      const CONE = 'oklch(0.72 0.13 250)';
+      coneSvg = `
+        <line x1="${anchorX.toFixed(1)}" y1="${PRICE_TOP}" x2="${anchorX.toFixed(1)}" y2="${PRICE_BOTTOM}" stroke="${CONE}" stroke-width="1" stroke-dasharray="2 3" opacity="0.5"/>
+        <path d="${poly(up2, lo2)}" fill="${CONE}" opacity="0.09"/>
+        <path d="${poly(up1, lo1)}" fill="${CONE}" opacity="0.16"/>
+        <line x1="${anchorX.toFixed(1)}" y1="${anchorY.toFixed(1)}" x2="${up1.at(-1)[0].toFixed(1)}" y2="${anchorY.toFixed(1)}" stroke="${CONE}" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>
+        ${pillLabel(up1.at(-1)[0] + 3, up1.at(-1)[1], `+1σ ${niceFmt(cl * Math.exp(sig * Math.sqrt(projBars)))}`, CONE, 'oklch(0.15 0.03 250)')}
+        ${pillLabel(lo1.at(-1)[0] + 3, lo1.at(-1)[1], `−1σ ${niceFmt(cl * Math.exp(-sig * Math.sqrt(projBars)))}`, CONE, 'oklch(0.15 0.03 250)')}
+        <text x="${anchorX.toFixed(1)}" y="${(PRICE_TOP + 10).toFixed(1)}" fill="${CONE}" font-size="9" font-family="IBM Plex Mono, monospace" text-anchor="middle" opacity="0.8">proyección ${projBars}r</text>`;
+    }
+  }
+
+  /* ── Huellas institucionales: Fair Value Gaps + Order Blocks (showSmart) ───
+   * FVG: desequilibrio de 3 velas (hueco entre la 1ª y la 3ª) que el precio
+   * suele volver a rellenar. Order Block: la última vela opuesta antes de un
+   * impulso fuerte — la zona desde donde empujó el dinero grande. Todo desde el
+   * OHLC, sin datos externos. Solo se muestran los más recientes y sin mitigar. */
+  let smartSvg = '';
+  if (showSmart) {
+    const atrArr = atr(candles.h, candles.l, candles.c, 14).slice(start);
+    const nowP = last(c);
+    const zoneBox = (i, lo2, hi2, color, label) => {
+      const yTop = yPrice(hi2), yBot = yPrice(lo2), xL = x(i);
+      const bh = Math.max(2, yBot - yTop);
+      return `<rect x="${xL.toFixed(1)}" y="${yTop.toFixed(1)}" width="${(W - PAD_R - xL).toFixed(1)}" height="${bh.toFixed(1)}" fill="${color}" opacity="0.11"/>
+        <rect x="${xL.toFixed(1)}" y="${yTop.toFixed(1)}" width="${(W - PAD_R - xL).toFixed(1)}" height="${bh.toFixed(1)}" fill="none" stroke="${color}" stroke-width="1" stroke-dasharray="3 2" opacity="0.7"/>
+        <text x="${(xL + 3).toFixed(1)}" y="${(yTop + 9).toFixed(1)}" fill="${color}" font-size="8" font-weight="700" font-family="IBM Plex Mono, monospace">${label}</text>`;
+    };
+    // Fair Value Gaps (máx. 4 más recientes sin rellenar)
+    const fvgs = [];
+    for (let i = count - 2; i >= 1 && fvgs.length < 4; i--) {
+      const bull = l[i + 1] > h[i - 1], bear = h[i + 1] < l[i - 1];
+      if (!bull && !bear) continue;
+      const lo2 = bull ? h[i - 1] : h[i + 1], hi2 = bull ? l[i + 1] : l[i - 1];
+      // ¿sigue sin rellenar? (ninguna vela posterior volvió a entrar en el hueco)
+      let filled = false;
+      for (let j = i + 2; j < count; j++) { if (l[j] <= hi2 && h[j] >= lo2) { filled = true; break; } }
+      if (filled) continue;
+      fvgs.push(zoneBox(i, lo2, hi2, bull ? GREEN : RED, 'FVG'));
+    }
+    // Order Blocks (máx. 2 alcistas + 2 bajistas recientes, no violados)
+    const obs = [];
+    let nbull = 0, nbear = 0;
+    for (let i = count - 4; i >= 1 && (nbull < 2 || nbear < 2); i--) {
+      const a = atrArr[i] || 0; if (!(a > 0)) continue;
+      const bodyLo = Math.min(o[i], c[i]), bodyHi = Math.max(o[i], c[i]);
+      // OB alcista: vela bajista seguida de un impulso que cierra > su máximo
+      const bullOB = c[i] < o[i] && c[i + 1] > o[i + 1] && c[i + 2] > h[i] && (c[i + 2] - c[i]) > 1.2 * a;
+      const bearOB = c[i] > o[i] && c[i + 1] < o[i + 1] && c[i + 2] < l[i] && (c[i] - c[i + 2]) > 1.2 * a;
+      if (bullOB && nbull < 2 && nowP > bodyLo) { obs.push(zoneBox(i, bodyLo, bodyHi, 'oklch(0.74 0.15 152)', 'OB↑')); nbull++; }
+      else if (bearOB && nbear < 2 && nowP < bodyHi) { obs.push(zoneBox(i, bodyLo, bodyHi, 'oklch(0.72 0.17 30)', 'OB↓')); nbear++; }
+    }
+    smartSvg = fvgs.join('') + obs.join('');
   }
 
   /* ── relleno de Bandas de Bollinger (área tenue entre banda sup. e inf.) ── */
@@ -375,6 +480,34 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
   rsiSvg += polyline(rsiFull, x, yRsi, PURPLE, 1, 1.5);
   const rsiLast = last(rsiFull);
   if (rsiLast != null) rsiSvg += pillLabel(W - PAD_R + 6, yRsi(rsiLast), rsiLast.toFixed(0), PURPLE, 'oklch(0.15 0.03 291)');
+
+  /* ── Divergencias precio↔RSI dibujadas (showDivergence) ───────────────────
+   * Conecta los dos últimos pivotes divergentes en el precio y en el RSI: precio
+   * hace un máximo más alto pero el RSI no lo acompaña (bajista), o mínimo más
+   * bajo que el RSI no confirma (alcista). Señal clásica de agotamiento. */
+  let divPriceSvg = '';
+  if (showDivergence) {
+    const { swingHighs, swingLows } = findSwings(c, c, count, 3);
+    const drawDiv = (a, b, color, label, up) => {
+      // línea en el panel de precio
+      const y1 = yPrice(c[a.i]), y2 = yPrice(c[b.i]);
+      divPriceSvg += `<line x1="${x(a.i).toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x(b.i).toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="1.6" stroke-dasharray="4 2" opacity="0.9"/>
+        <circle cx="${x(a.i).toFixed(1)}" cy="${y1.toFixed(1)}" r="2.5" fill="${color}"/><circle cx="${x(b.i).toFixed(1)}" cy="${y2.toFixed(1)}" r="2.5" fill="${color}"/>
+        ${pillLabel(x(b.i), (up ? y2 + 12 : y2 - 12), label, color, 'oklch(0.15 0.02 260)', 'end')}`;
+      // línea en el panel de RSI (mismos pivotes)
+      const r1 = rsiFull[a.i], r2 = rsiFull[b.i];
+      if (r1 != null && r2 != null) rsiSvg += `<line x1="${x(a.i).toFixed(1)}" y1="${yRsi(r1).toFixed(1)}" x2="${x(b.i).toFixed(1)}" y2="${yRsi(r2).toFixed(1)}" stroke="${color}" stroke-width="1.6" stroke-dasharray="4 2" opacity="0.9"/>
+        <circle cx="${x(a.i).toFixed(1)}" cy="${yRsi(r1).toFixed(1)}" r="2.2" fill="${color}"/><circle cx="${x(b.i).toFixed(1)}" cy="${yRsi(r2).toFixed(1)}" r="2.2" fill="${color}"/>`;
+    };
+    if (swingHighs.length >= 2) {
+      const a = swingHighs.at(-2), b = swingHighs.at(-1);
+      if (c[b.i] > c[a.i] && rsiFull[b.i] != null && rsiFull[a.i] != null && rsiFull[b.i] < rsiFull[a.i]) drawDiv(a, b, RED, 'Div. bajista', false);
+    }
+    if (swingLows.length >= 2) {
+      const a = swingLows.at(-2), b = swingLows.at(-1);
+      if (c[b.i] < c[a.i] && rsiFull[b.i] != null && rsiFull[a.i] != null && rsiFull[b.i] > rsiFull[a.i]) drawDiv(a, b, GREEN, 'Div. alcista', true);
+    }
+  }
 
   /* ── fechas ── */
   let dateSvg = '';
@@ -568,6 +701,8 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
       ${ichimokuSvg}
       ${keltnerSvg}
       ${pivotsSvg}
+      ${smartSvg}
+      ${coneSvg}
       ${zonesSvg}
       ${pocSvg}
       ${bbSvg}
@@ -576,6 +711,7 @@ export function renderPriceChartSVG(candles, opts = {}, windowSize = 130) {
       ${emaSvg}
       ${vwapSvg}
       ${patternsSvg}
+      ${divPriceSvg}
       ${extremaSvg}
       ${earningsSvg}
       ${lastPriceSvg}

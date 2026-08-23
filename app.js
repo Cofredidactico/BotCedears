@@ -949,6 +949,7 @@ const chartState = {
   ov: {              // overlays activos (persisten mientras dura la sesión)
     ema: true, bb: true, vwap: true, poc: true, fib: true, gaps: true,
     keltner: false, supertrend: false, pivots: false, ichimoku: false, volprofile: false, patterns: false,
+    cone: false, smart: false, divergence: false,
   },
 };
 // El estado del gráfico persiste entre sesiones (tipo/escala/indicadores).
@@ -973,7 +974,7 @@ function chartRenderOpts(dailyTechnical, plan, extra = {}) {
     type: chartState.type, logScale: chartState.logScale,
     showEma: ov.ema, showBb: ov.bb, showVwap: ov.vwap, showPoc: ov.poc, showFib: ov.fib, showGaps: ov.gaps,
     showKeltner: ov.keltner, showSupertrend: ov.supertrend, showPivots: ov.pivots, showIchimoku: ov.ichimoku, showVolProfile: ov.volprofile,
-    showPatterns: ov.patterns,
+    showPatterns: ov.patterns, showCone: ov.cone, showSmart: ov.smart, showDivergence: ov.divergence,
     ...extra,   // earningsInDays lo pasa el llamador (vive en el reporte, no en technical)
   };
 }
@@ -985,6 +986,7 @@ const CHART_TYPE_OPTS = [['candles', 'Velas'], ['heikin', 'Heikin-Ashi'], ['line
 const CHART_OVERLAY_OPTS = [
   ['ema', 'EMA'], ['bb', 'Bollinger'], ['vwap', 'VWAP'], ['poc', 'POC'], ['fib', 'Fibonacci'], ['gaps', 'Gaps'],
   ['keltner', 'Keltner'], ['supertrend', 'Supertrend'], ['ichimoku', 'Ichimoku'], ['pivots', 'Pivots'], ['volprofile', 'Vol. Profile'], ['patterns', 'Patrones'],
+  ['cone', 'Cono σ'], ['smart', 'FVG/OB'], ['divergence', 'Divergencias'],
 ];
 function chartControlsHTML() {
   const typeChips = CHART_TYPE_OPTS.map(([k, lbl]) =>
