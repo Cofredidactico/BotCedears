@@ -11,8 +11,8 @@
  *    versión vieja del código después de un deploy.
  *  - Estáticos que casi no cambian (íconos, manifest) → cache-first.
  */
-const SHELL_CACHE = 'icp-shell-v1';
-const ASSET_CACHE = 'icp-assets-v1';
+const SHELL_CACHE = 'icp-shell-v2';
+const ASSET_CACHE = 'icp-assets-v2';
 const SHELL_FILES = [
   './', './index.html', './app.js', './chart.js', './dataSource.js', './indicators.js',
   './scoring.js', './watchlist.js', './portfolio.js', './styles.css', './universe.json',
