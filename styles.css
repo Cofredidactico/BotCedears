@@ -3453,3 +3453,62 @@ body::after {
   .to-top.show { opacity: 1; pointer-events: auto; }
   .to-top:active { transform: scale(0.92); }
 }
+
+/* ══════════════ Interacciones táctiles (celular) ══════════════ */
+/* Pull-to-refresh */
+.ptr {
+  position: fixed; top: 8px; left: 50%; transform: translate(-50%, 0); z-index: 70;
+  width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-card); border: 1px solid var(--border-strong); box-shadow: 0 6px 18px oklch(0 0 0 / 0.35);
+  opacity: 0; transition: opacity 0.15s, transform 0.1s; pointer-events: none;
+}
+.ptr-spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent-text); }
+.ptr.ready .ptr-spin { border-top-color: var(--up-text); }
+.ptr.spin .ptr-spin { animation: ptr-rot 0.7s linear infinite; }
+@keyframes ptr-rot { to { transform: rotate(360deg); } }
+
+/* Bottom sheet (hoja de acciones rápidas) */
+.bottom-sheet { position: fixed; inset: 0; z-index: 80; }
+.bsheet-scrim { position: absolute; inset: 0; background: oklch(0 0 0 / 0.5); opacity: 0; transition: opacity 0.22s; }
+.bsheet-panel {
+  position: absolute; left: 0; right: 0; bottom: 0; background: var(--bg-card); border-top: 1px solid var(--border);
+  border-radius: 20px 20px 0 0; padding: 8px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+  transform: translateY(100%); transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 -10px 40px oklch(0 0 0 / 0.45);
+}
+.bottom-sheet.open .bsheet-scrim { opacity: 1; }
+.bottom-sheet.open .bsheet-panel { transform: translateY(0); }
+.bsheet-grip { width: 40px; height: 4px; border-radius: 3px; background: var(--border-strong); margin: 6px auto 10px; }
+.bsheet-head { display: flex; align-items: baseline; gap: 10px; padding: 0 6px 10px; border-bottom: 1px solid var(--border-soft); margin-bottom: 6px; }
+.bsheet-title { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 17px; color: var(--text); }
+.bsheet-sub { font-size: 12px; color: var(--text-mute); }
+.bsheet-actions { display: flex; flex-direction: column; }
+.bsheet-act {
+  display: flex; align-items: center; gap: 13px; width: 100%; padding: 14px 6px; background: none; border: none;
+  border-bottom: 1px solid var(--border-soft); color: var(--text); font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 14.5px; font-weight: 500; cursor: pointer; text-align: left; -webkit-tap-highlight-color: transparent;
+}
+.bsheet-act:last-child { border-bottom: none; }
+.bsheet-act:active { background: var(--surface-2); }
+.bsheet-act[disabled] { color: var(--text-faint); cursor: default; }
+.bsheet-act.danger { color: var(--down-text); }
+.bsheet-act svg { width: 21px; height: 21px; flex-shrink: 0; color: var(--accent-2); filter: drop-shadow(0 0 5px oklch(0.80 0.14 199 / 0.4)); }
+.bsheet-act[disabled] svg { color: var(--text-faint); filter: none; opacity: 0.7; }
+
+/* Cabecera flotante de la ficha */
+.ficha-sticky {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 55; display: none; align-items: center; gap: 12px;
+  padding: 10px 16px calc(10px); padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  background: color-mix(in oklch, var(--bg-card) 92%, transparent);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border); box-shadow: 0 6px 20px oklch(0 0 0 / 0.25);
+  transform: translateY(-100%); transition: transform 0.22s ease; cursor: pointer;
+}
+.ficha-sticky.show { display: flex; transform: translateY(0); }
+.fs-tk { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 15px; }
+.fs-price { font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: var(--text-dim); }
+.fs-chg { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; }
+.fs-chg.up { color: var(--up-text); } .fs-chg.down { color: var(--down-text); }
+.fs-score { margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 13px; padding: 2px 9px; border-radius: 10px; }
+.fs-up { color: var(--text-mute); font-size: 15px; }
+@media (min-width: 861px) { .ficha-sticky { display: none !important; } }
