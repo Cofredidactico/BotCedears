@@ -1387,8 +1387,9 @@ async function selectTicker(ticker) {
 
 /* ───────────────────────── carga + cálculo del reporte ───────────────────────── */
 async function loadReport(ticker) {
+  showLoadingBar();
   const asset = await getAsset(ticker);
-  if (!asset) { state.loading = false; state.error = 'sin_activo'; state.asset = { ticker }; renderReport(); return; }
+  if (!asset) { state.loading = false; state.error = 'sin_activo'; state.asset = { ticker }; hideLoadingBar(); renderReport(); return; }
   state.asset = asset;
 
   try {
@@ -1471,6 +1472,7 @@ async function loadReport(ticker) {
     state.loading = false;
     state.error = 'error_carga';
   }
+  hideLoadingBar();
   renderTopbar();
   renderReport();
 }
@@ -2520,6 +2522,7 @@ function renderReport() {
   renderReportImpl();
   triggerReportTransition();
   maybeRunCountUps();
+  try { renderFichaStickyHeader(); } catch { /* no crítico */ }
 }
 
 /* ── Count-up de cifras clave ──────────────────────────────────────────────
@@ -3926,9 +3929,267 @@ function initBackToTop() {
   btn.setAttribute('aria-label', 'Volver arriba'); btn.innerHTML = '↑';
   document.body.appendChild(btn);
   btn.addEventListener('click', () => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { window.scrollTo(0, 0); } });
-  const onScroll = () => btn.classList.toggle('show', window.scrollY > 640);
+  const onScroll = () => {
+    btn.classList.toggle('show', window.scrollY > 640);
+    const fs = document.getElementById('ficha-sticky');
+    if (fs) fs.classList.toggle('show', !!state.asset && !state.loading && window.scrollY > 220);
+  };
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
+}
+
+/* ══════════════════════ Interacciones táctiles (celular) ══════════════════════
+ * Pull-to-refresh, menú de acciones rápidas (mantener presionado + hoja
+ * inferior), swipe horizontal en el gráfico para cambiar de timeframe, y
+ * cabecera flotante de la ficha. Todo con eventos touch — en escritorio no se
+ * activa nada. Sin dependencias. */
+function hapticTap(ms = 12) { try { navigator.vibrate?.(ms); } catch { /* no soportado */ } }
+
+// Refresca los datos de la vista actual (o del activo abierto). Best-effort: los
+// loaders re-renderizan solos al terminar; el spinner se muestra un instante.
+async function refreshCurrentView() {
+  if (state.asset) { try { await loadReport(state.asset.ticker); } catch { /* ignore */ } return; }
+  const v = state.view;
+  if (v === 'portfolio') portState.data = {};
+  try { VIEW_PAGES[v]?.load?.(); } catch { /* ignore */ }
+  loadWatchlistData();
+  if (v === 'dashboard' || v === 'portfolio' || v === 'alerts') loadPreMarketData();
+}
+
+/* ── Hoja inferior (bottom sheet) genérica ── */
+function closeBottomSheet() {
+  const s = document.getElementById('bottom-sheet');
+  if (s) { s.classList.remove('open'); setTimeout(() => s.remove(), 250); }
+}
+function showBottomSheet(title, subtitle, actions) {
+  closeBottomSheet();
+  const sheet = document.createElement('div');
+  sheet.id = 'bottom-sheet'; sheet.className = 'bottom-sheet';
+  sheet.innerHTML = `
+    <div class="bsheet-scrim"></div>
+    <div class="bsheet-panel" role="dialog" aria-label="${esc(title)}">
+      <div class="bsheet-grip"></div>
+      <div class="bsheet-head"><span class="bsheet-title">${esc(title)}</span>${subtitle ? `<span class="bsheet-sub">${esc(subtitle)}</span>` : ''}</div>
+      <div class="bsheet-actions">
+        ${actions.map((a, i) => `<button class="bsheet-act ${a.danger ? 'danger' : ''}" data-bsheet-i="${i}" ${a.disabled ? 'disabled' : ''}>${a.icon ?? ''}<span>${esc(a.label)}</span></button>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add('open'));
+  sheet.querySelector('.bsheet-scrim').addEventListener('click', closeBottomSheet);
+  sheet.querySelectorAll('[data-bsheet-i]').forEach(b => b.addEventListener('click', () => {
+    const a = actions[+b.dataset.bsheetI]; if (a?.disabled) return;
+    closeBottomSheet(); hapticTap(); a?.onClick?.();
+  }));
+}
+
+// Menú de acciones rápidas para un ticker (long-press).
+function openTickerSheet(ticker) {
+  hapticTap(16);
+  const inWatch = getWatchlist().includes(ticker);
+  const inPort = getPortfolio().some(h => h.ticker === ticker);
+  const d = liveDataFor(ticker);
+  const sub = d ? `${fmtUsd(d.price)} · ${d.scoreLabel ?? ''} ${d.score ?? ''}` : 'acciones rápidas';
+  showBottomSheet(ticker, sub, [
+    { label: 'Ver ficha completa', icon: ICONS.chart, onClick: () => selectTicker(ticker) },
+    { label: inWatch ? 'Quitar de Watchlist' : 'Agregar a Watchlist', icon: ICONS.bookmark, onClick: () => { toggleWatchlist(ticker); showToast(inWatch ? `${ticker} quitado de la watchlist` : `${ticker} agregado a la watchlist`, 'success'); loadWatchlistData(); if (!state.asset) renderReport(); } },
+    { label: 'Crear alerta de precio', icon: ICONS.warning, onClick: () => openQuickAlert(ticker) },
+    { label: inPort ? 'Ya está en tu cartera' : 'Agregar a la cartera', icon: ICONS.briefcase, disabled: inPort, onClick: () => openQuickAddHolding(ticker) },
+  ]);
+}
+function openQuickAlert(ticker) {
+  const cur = liveDataFor(ticker)?.price;
+  const ans = window.prompt(`Alerta de precio para ${ticker} (USD)${cur ? ` — ahora ${fmtUsd(cur)}` : ''}:\nTe avisa cuando el precio cruce ese valor.`, cur != null ? String(round2(cur)) : '');
+  if (ans == null) return;
+  const val = parseFloat(String(ans).replace(',', '.'));
+  if (!isFinite(val) || val <= 0) { showToast('Valor inválido', 'info'); return; }
+  const op = (cur != null && val < cur) ? 'below' : 'above';
+  addUserAlert({ ticker, metric: 'price', op, value: val });
+  showToast(`Alerta creada: ${ticker} ${op === 'above' ? '≥' : '≤'} ${fmtUsd(val)}`, 'success');
+  ensureTickerLoaded(ticker);
+}
+function openQuickAddHolding(ticker) {
+  const ans = window.prompt(`¿Cuántas unidades de ${ticker} tenés? (podés cargar el costo después en la cartera)`, '');
+  if (ans == null) return;
+  const sh = parseFloat(String(ans).replace(',', '.'));
+  if (!(sh > 0)) { showToast('Cantidad inválida', 'info'); return; }
+  addHolding(ticker, sh, null, 'USD', null);
+  showToast(`${ticker} agregado a tu cartera (${sh} u.)`, 'success');
+  if (state.view === 'portfolio' && !state.asset) { portState.data = {}; loadPortfolioData(); renderReport(); }
+}
+
+// Cabecera flotante de la ficha: contenido (se actualiza en cada render); la
+// visibilidad la maneja el listener de scroll (en initBackToTop).
+function renderFichaStickyHeader() {
+  const r = state.report;
+  let el = document.getElementById('ficha-sticky');
+  if (!(state.asset && r && !state.loading)) { if (el) el.classList.remove('show'); return; }
+  if (!el) {
+    el = document.createElement('div'); el.id = 'ficha-sticky'; el.className = 'ficha-sticky';
+    el.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    document.body.appendChild(el);
+  }
+  const up = r.quote.changePct >= 0;
+  const sig = scoreLabelColor(r.scoreLabel);
+  el.innerHTML = `
+    <span class="fs-tk">${esc(r.asset.ticker)}</span>
+    <span class="fs-price">${fmtUsd(r.quote.usd)}</span>
+    <span class="fs-chg ${up ? 'up' : 'down'}">${fmtPct(r.quote.changePct)}</span>
+    <span class="fs-score" style="background:${sig.bg}; color:${sig.color};">${r.score}</span>
+    <span class="fs-up">↑</span>`;
+}
+
+function initMobileGestures() {
+  const PTR_TRIGGER = 72;       // px de arrastre para disparar el refresh
+  let sx = 0, sy = 0, st = 0, startScroll = 0, lpTimer = null, lpTicker = null;
+  let pulling = false, longFired = false, swipeChart = false, refreshing = false;
+
+  let ptrEl = null;
+  const ptr = () => {
+    if (!ptrEl) { ptrEl = document.createElement('div'); ptrEl.id = 'ptr'; ptrEl.className = 'ptr'; ptrEl.innerHTML = '<div class="ptr-spin"></div>'; document.body.appendChild(ptrEl); }
+    return ptrEl;
+  };
+  const setPtr = (dist, spin) => {
+    const el = ptr();
+    el.style.transform = `translate(-50%, ${Math.min(dist, 96)}px)`;
+    el.classList.toggle('ready', dist >= PTR_TRIGGER);
+    el.classList.toggle('spin', !!spin);
+    el.style.opacity = dist > 4 || spin ? '1' : '0';
+  };
+  const resetPtr = () => { const el = ptr(); el.style.transform = 'translate(-50%, 0)'; el.style.opacity = '0'; el.classList.remove('ready', 'spin'); };
+
+  const TICKER_SEL = '[data-dash-ticker],[data-ticker],[data-short-ticker],[data-alertc-ticker]';
+  const tickerFromTarget = (target) => {
+    const el = target.closest?.(TICKER_SEL);
+    if (!el) return null;
+    return el.dataset.dashTicker || el.dataset.ticker || el.dataset.shortTicker || el.dataset.alertcTicker || null;
+  };
+
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { clearTimeout(lpTimer); return; }
+    const t = e.touches[0];
+    sx = t.clientX; sy = t.clientY; st = Date.now(); startScroll = window.scrollY;
+    pulling = false; longFired = false;
+    // swipe solo si arranca dentro del gráfico
+    swipeChart = !!e.target.closest?.('.chart-svg-wrap');
+    // long-press sobre un ticker (no sobre botones/controles)
+    clearTimeout(lpTimer); lpTicker = null;
+    if (!e.target.closest('button, a, input, select, textarea, .star-btn, .watch-remove, .bsheet-panel')) {
+      const tk = tickerFromTarget(e.target);
+      if (tk) {
+        lpTicker = tk;
+        lpTimer = setTimeout(() => {
+          longFired = true;
+          // Suprime el "click fantasma" que dispara el touchend tras el
+          // long-press (si no, caería sobre el scrim y cerraría la hoja al toque).
+          const kill = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+          document.addEventListener('click', kill, { capture: true, once: true });
+          setTimeout(() => document.removeEventListener('click', kill, { capture: true }), 1000);
+          openTickerSheet(tk);
+        }, 500);
+      }
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) { clearTimeout(lpTimer); }
+    // pull-to-refresh: en el tope, arrastrando hacia abajo, gesto vertical
+    if (!refreshing && startScroll <= 0 && dy > 0 && Math.abs(dy) > Math.abs(dx) && !document.getElementById('bottom-sheet')) {
+      pulling = true;
+      const dist = Math.min(dy * 0.5, 110); // resistencia
+      setPtr(dist, false);
+      e.preventDefault(); // frena el rebote nativo mientras tiramos
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchend', (e) => {
+    clearTimeout(lpTimer);
+    const dx = (e.changedTouches[0]?.clientX ?? sx) - sx;
+    const dy = (e.changedTouches[0]?.clientY ?? sy) - sy;
+    const dt = Date.now() - st;
+    // pull-to-refresh
+    if (pulling) {
+      pulling = false;
+      const dist = Math.min(dy * 0.5, 110);
+      if (dist >= PTR_TRIGGER && !refreshing) {
+        refreshing = true; hapticTap(18); setPtr(PTR_TRIGGER, true);
+        refreshCurrentView().finally(() => setTimeout(() => { refreshing = false; resetPtr(); }, 900));
+      } else resetPtr();
+      return;
+    }
+    if (longFired) { longFired = false; return; }
+    // swipe horizontal en el gráfico → cambia timeframe
+    if (swipeChart && state.asset && chartState.mode === 'institucional' && dt < 500 && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+      const tabs = chartTabsForAsset(state.asset).map(x => x.key);
+      const idx = tabs.indexOf(chartState.tf);
+      const next = dx < 0 ? idx + 1 : idx - 1; // izquierda = más corto→más largo (avanza)
+      if (idx >= 0 && next >= 0 && next < tabs.length) { hapticTap(); loadChartTf(tabs[next]); }
+    }
+  }, { passive: true });
+}
+
+/* ── Modo instalada (PWA standalone) ── */
+function isStandalone() {
+  try { return window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone === true; } catch { return false; }
+}
+
+/* ── Banner de "instalar como app" (descartable, se recuerda) ────────────────
+ * Android/Chrome dispara beforeinstallprompt → botón "Instalar" con el prompt
+ * nativo. iOS no lo dispara → se muestra la instrucción de Compartir → Agregar
+ * a inicio. No aparece si ya está instalada o si el usuario lo cerró antes. */
+function initInstallBanner() {
+  if (isStandalone() || lsGetSafe('icp_install_dismissed', '') === '1') return;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    showInstallBanner('Instalá <b>Vertex Signal</b> en tu celular para acceso directo y pantalla completa.', 'Instalar', async () => {
+      try { e.prompt(); const res = await e.userChoice; dismissInstallBanner(res?.outcome === 'accepted'); } catch { dismissInstallBanner(false); }
+    });
+  });
+  const ua = navigator.userAgent || '';
+  const isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (isIOS) setTimeout(() => {
+    if (!document.getElementById('install-banner') && lsGetSafe('icp_install_dismissed', '') !== '1')
+      showInstallBanner('Agregá <b>Vertex Signal</b> a tu inicio: tocá <b>Compartir</b> y luego <b>“Agregar a inicio”</b>.', null, null);
+  }, 3500);
+}
+function showInstallBanner(msgHtml, ctaLabel, onCta) {
+  if (document.getElementById('install-banner')) return;
+  const el = document.createElement('div');
+  el.id = 'install-banner'; el.className = 'install-banner'; el.setAttribute('role', 'dialog');
+  el.innerHTML = `
+    <img src="./icons/icon-192.png" alt="" class="ib-icon" onerror="this.style.display='none'" />
+    <div class="ib-msg">${msgHtml}</div>
+    ${ctaLabel ? `<button class="ib-cta" id="ib-cta">${esc(ctaLabel)}</button>` : ''}
+    <button class="ib-x" id="ib-x" aria-label="Cerrar">×</button>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  el.querySelector('#ib-x').addEventListener('click', () => dismissInstallBanner(true));
+  if (onCta) el.querySelector('#ib-cta')?.addEventListener('click', onCta);
+}
+function dismissInstallBanner(remember) {
+  const el = document.getElementById('install-banner');
+  if (el) { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }
+  if (remember) lsSetSafe('icp_install_dismissed', '1');
+}
+
+/* ── Barra de carga superior (señal "app": aparece al abrir un activo) ── */
+let _loadingBarTimer = null;
+function loadingBar() {
+  let el = document.getElementById('loading-bar');
+  if (!el) { el = document.createElement('div'); el.id = 'loading-bar'; el.className = 'loading-bar'; document.body.appendChild(el); }
+  return el;
+}
+function showLoadingBar() {
+  const el = loadingBar();
+  clearTimeout(_loadingBarTimer);
+  el.classList.remove('done'); el.classList.add('active');
+}
+function hideLoadingBar() {
+  const el = loadingBar();
+  el.classList.add('done'); el.classList.remove('active');
+  _loadingBarTimer = setTimeout(() => el.classList.remove('done'), 400);
 }
 
 function renderSidebarMarket() {
@@ -13832,10 +14093,13 @@ window.__vertexReload = () => {
     }
   } catch (e) { /* si algo aún no está listo, el próximo ciclo lo toma */ }
 };
+try { if (isStandalone()) document.documentElement.classList.add('is-standalone'); } catch { /* no-op */ }
 renderTopbar();
 renderReport();
 initSearch();
 initBackToTop();
+initMobileGestures();
+initInstallBanner();
 loadWatchlistData();
 loadTelegramConfig();
 if (telegramState.chatId) loadTelegramSubscriptions();
