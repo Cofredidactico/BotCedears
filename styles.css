@@ -3414,3 +3414,42 @@ body::after {
 .short-chk-item.warn { color:var(--warn, oklch(0.78 0.14 75)); }
 .short-chk-item.bad { color:var(--down); }
 .stk-row.stk-expired { border-left:2px solid var(--warn, oklch(0.78 0.14 75)); padding-left:8px; }
+
+/* ══════════════ Navegación inferior en celular + volver-arriba ══════════════ */
+.bottom-nav { display: none; }
+.to-top { display: none; }
+@media (max-width: 860px) {
+  .bottom-nav {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    background: color-mix(in oklch, var(--bg-card) 92%, transparent);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 0 -6px 24px oklch(0 0 0 / 0.28);
+  }
+  .bnav-btn {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    min-height: 54px; padding: 7px 2px 8px; background: none; border: none; cursor: pointer;
+    color: var(--text-mute); font-family: 'IBM Plex Sans', sans-serif; font-size: 10px; font-weight: 600;
+    transition: color 0.15s, transform 0.1s; -webkit-tap-highlight-color: transparent;
+  }
+  .bnav-btn svg { width: 22px; height: 22px; }
+  .bnav-btn span { line-height: 1; }
+  .bnav-btn.active { color: var(--accent-text); }
+  .bnav-btn.active svg { filter: drop-shadow(0 0 6px color-mix(in oklch, var(--accent) 55%, transparent)); }
+  .bnav-btn:active { transform: scale(0.93); }
+  /* el contenido no debe quedar tapado por la barra */
+  .main-area { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important; }
+  /* el chip de cuenta se sube por encima de la barra */
+  .auth-chip { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); left: 10px; max-width: 92vw; }
+  /* botón volver-arriba (páginas largas) */
+  .to-top {
+    display: flex; position: fixed; right: 14px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 59;
+    width: 44px; height: 44px; border-radius: 50%; align-items: center; justify-content: center;
+    background: var(--bg-card); border: 1px solid var(--border-strong); color: var(--text);
+    font-size: 20px; cursor: pointer; box-shadow: 0 8px 22px oklch(0 0 0 / 0.4);
+    opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.1s;
+  }
+  .to-top.show { opacity: 1; pointer-events: auto; }
+  .to-top:active { transform: scale(0.92); }
+}

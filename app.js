@@ -1255,6 +1255,7 @@ const ICONS = {
   target: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.8"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg>`,
   check: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="8.5"/><polyline points="8,12.5 11,15.5 16,9"/></svg>`,
   grid: `<svg ${ICON_ATTR}><rect x="3" y="3" width="7.5" height="7.5" rx="1.2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.2"/></svg>`,
+  menu: `<svg ${ICON_ATTR}><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>`,
   trend: `<svg ${ICON_ATTR}><polyline points="3,16 10,9 14,13 21,5"/><polyline points="15,5 21,5 21,11"/></svg>`,
   radar: `<svg ${ICON_ATTR}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.2"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><line x1="12" y1="12" x2="18" y2="6.5"/></svg>`,
   bookmark: `<svg ${ICON_ATTR}><path d="M6 3.5h12a1 1 0 0 1 1 1V21l-7-4.2L5 21V4.5a1 1 0 0 1 1-1Z"/></svg>`,
@@ -1315,6 +1316,7 @@ function renderTopbar() {
   els.connbanner.style.color = conn.color;
   els.connbanner.style.border = `1px solid ${conn.border}`;
   els.connbanner.innerHTML = `<span class="dot" style="background:${conn.color}"></span>${esc(conn.text)}`;
+  renderBottomNav();
 }
 
 /* ───────────────────────── buscador ───────────────────────── */
@@ -3864,17 +3866,69 @@ function renderSidebar() {
     </div>` : ''}`;
 
   els.sidebarNav.querySelectorAll('.sidebar-nav-btn[data-view]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.asset = null; state.report = null; state.error = null; state.loading = false;
-      state.view = btn.dataset.view;
-      els.tickerchip.textContent = '—';
-      renderTopbar();
-      renderReport();
-      closeMobileSidebar();
-    });
+    btn.addEventListener('click', () => navigateTo(btn.dataset.view));
   });
 
   renderSidebarMarket();
+}
+
+/** Navegación a una vista principal — compartida por el sidebar y la barra
+ *  inferior de celular. Limpia el activo abierto, cambia de vista y sube el
+ *  scroll al tope (clave en mobile, donde cada vista es una pantalla). */
+function navigateTo(view) {
+  state.asset = null; state.report = null; state.error = null; state.loading = false;
+  state.view = view;
+  if (els.tickerchip) els.tickerchip.textContent = '—';
+  renderTopbar();
+  renderReport();
+  closeMobileSidebar();
+  try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch { /* no-op */ }
+}
+
+/* ── Barra de navegación inferior (solo celular) ──────────────────────────────
+ * Acceso con el pulgar a los destinos más usados, sin abrir el menú lateral.
+ * El 5º botón abre el menú completo para llegar a todo lo demás. Se construye
+ * una sola vez y solo actualiza el estado activo en cada render del topbar. */
+const BOTTOM_NAV_ITEMS = [
+  { view: 'dashboard', label: 'Inicio', icon: 'grid' },
+  { view: 'portfolio', label: 'Cartera', icon: 'briefcase' },
+  { view: 'shorttrades', label: 'Trades', icon: 'zap' },
+  { view: 'alerts', label: 'Alertas', icon: 'warning' },
+  { view: '__menu', label: 'Menú', icon: 'menu' },
+];
+function renderBottomNav() {
+  let el = document.getElementById('bottom-nav');
+  if (!el) {
+    el = document.createElement('nav');
+    el.id = 'bottom-nav'; el.className = 'bottom-nav'; el.setAttribute('aria-label', 'Navegación principal');
+    el.innerHTML = BOTTOM_NAV_ITEMS.map(it =>
+      `<button class="bnav-btn" data-bnav="${esc(it.view)}" aria-label="${esc(it.label)}">${ICONS[it.icon] ?? ''}<span>${esc(it.label)}</span></button>`).join('');
+    document.body.appendChild(el);
+    el.querySelectorAll('[data-bnav]').forEach(b => b.addEventListener('click', () => {
+      const v = b.dataset.bnav;
+      if (v === '__menu') { openMobileSidebar(); return; }
+      navigateTo(v);
+    }));
+  }
+  const active = !state.asset ? state.view : null;
+  el.querySelectorAll('[data-bnav]').forEach(b => {
+    const on = b.dataset.bnav === active;
+    b.classList.toggle('active', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
+}
+
+/* ── Botón "volver arriba" (celular, páginas largas) ── */
+function initBackToTop() {
+  if (document.getElementById('to-top')) return;
+  const btn = document.createElement('button');
+  btn.id = 'to-top'; btn.className = 'to-top'; btn.type = 'button';
+  btn.setAttribute('aria-label', 'Volver arriba'); btn.innerHTML = '↑';
+  document.body.appendChild(btn);
+  btn.addEventListener('click', () => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { window.scrollTo(0, 0); } });
+  const onScroll = () => btn.classList.toggle('show', window.scrollY > 640);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
 }
 
 function renderSidebarMarket() {
@@ -13781,6 +13835,7 @@ window.__vertexReload = () => {
 renderTopbar();
 renderReport();
 initSearch();
+initBackToTop();
 loadWatchlistData();
 loadTelegramConfig();
 if (telegramState.chatId) loadTelegramSubscriptions();
