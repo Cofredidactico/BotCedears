@@ -631,6 +631,55 @@ const UALERT_METRICS = {
   change: { label: 'Variación del día (%)', get: d => d?.changePct ?? null, fmt: v => v == null ? '—' : fmtPct(v) },
   score:  { label: 'Score técnico (0-100)', get: d => d?.score ?? null, fmt: v => v == null ? '—' : String(Math.round(v)) },
 };
+
+/* Alertas por EVENTO técnico (no solo niveles): se evalúan sobre la serie de
+ * cierres diarios ya cargada (d.closes) + señales que trae computeLightSignal.
+ * Cada test devuelve true SOLO cuando el evento ocurre en la última rueda (un
+ * cruce/ruptura fresca), así el aviso se dispara una vez y se re-arma solo. */
+function _emaCross(closes, a, b, dir) {
+  if (!Array.isArray(closes) || closes.length < b + 2) return false;
+  const ea = ema(closes, a), eb = ema(closes, b), n = closes.length - 1;
+  if ([ea[n], eb[n], ea[n - 1], eb[n - 1]].some(x => x == null || isNaN(x))) return false;
+  const prev = ea[n - 1] - eb[n - 1], now = ea[n] - eb[n];
+  return dir === 'up' ? (prev <= 0 && now > 0) : (prev >= 0 && now < 0);
+}
+function _priceEmaCross(closes, p, dir) {
+  if (!Array.isArray(closes) || closes.length < p + 2) return false;
+  const e = ema(closes, p), n = closes.length - 1;
+  if ([e[n], e[n - 1]].some(x => x == null || isNaN(x))) return false;
+  const prev = closes[n - 1] - e[n - 1], now = closes[n] - e[n];
+  return dir === 'up' ? (prev <= 0 && now > 0) : (prev >= 0 && now < 0);
+}
+function _macdCross(closes, dir) {
+  if (!Array.isArray(closes) || closes.length < 40) return false;
+  const m = macd(closes), line = m.macdLine, sig = m.signalLine, n = line.length - 1;
+  if ([line[n], sig[n], line[n - 1], sig[n - 1]].some(x => x == null || isNaN(x))) return false;
+  const prev = line[n - 1] - sig[n - 1], now = line[n] - sig[n];
+  return dir === 'up' ? (prev <= 0 && now > 0) : (prev >= 0 && now < 0);
+}
+function _breakout(closes, win, dir) {
+  if (!Array.isArray(closes) || closes.length < win + 2) return false;
+  const n = closes.length - 1, prior = closes.slice(n - win, n);
+  if (dir === 'up') { const mx = Math.max(...prior); return closes[n] > mx && closes[n - 1] <= mx; }
+  const mn = Math.min(...prior); return closes[n] < mn && closes[n - 1] >= mn;
+}
+const UALERT_EVENTS = {
+  ema20_50_up:  { label: 'Cruce alcista EMA20/50', dir: 'up', test: d => _emaCross(d?.closes, 20, 50, 'up') },
+  ema20_50_dn:  { label: 'Cruce bajista EMA20/50', dir: 'down', test: d => _emaCross(d?.closes, 20, 50, 'down') },
+  ema50_200_up: { label: 'Golden cross (EMA50/200)', dir: 'up', test: d => _emaCross(d?.closes, 50, 200, 'up') },
+  ema50_200_dn: { label: 'Death cross (EMA50/200)', dir: 'down', test: d => _emaCross(d?.closes, 50, 200, 'down') },
+  macd_up:      { label: 'MACD cruza al alza su señal', dir: 'up', test: d => _macdCross(d?.closes, 'up') },
+  macd_dn:      { label: 'MACD cruza a la baja su señal', dir: 'down', test: d => _macdCross(d?.closes, 'down') },
+  px_ema200_up: { label: 'Precio cruza la EMA200 al alza', dir: 'up', test: d => _priceEmaCross(d?.closes, 200, 'up') },
+  px_ema200_dn: { label: 'Precio cruza la EMA200 a la baja', dir: 'down', test: d => _priceEmaCross(d?.closes, 200, 'down') },
+  breakout20:   { label: 'Ruptura de máximos de 20 ruedas', dir: 'up', test: d => _breakout(d?.closes, 20, 'up') },
+  breakdown20:  { label: 'Ruptura de mínimos de 20 ruedas', dir: 'down', test: d => _breakout(d?.closes, 20, 'down') },
+  hi52:         { label: 'Nuevo máximo de 52 semanas', dir: 'up', test: d => _breakout(d?.closes, 252, 'up') },
+  lo52:         { label: 'Nuevo mínimo de 52 semanas', dir: 'down', test: d => _breakout(d?.closes, 252, 'down') },
+  squeeze:      { label: 'Squeeze de volatilidad liberado', dir: 'up', test: d => !!d?.squeezeWatch?.justFired || !!(d?.setup?.strategy === 'squeeze' && d?.setup?.qualifies) },
+  gap:          { label: 'Gap de apertura', dir: 'up', test: d => !!d?.gap },
+  structure:    { label: 'Cambio de estructura (BOS/CHoCH)', dir: 'up', test: d => /BOS|CHoCH/i.test(d?.structure?.short || d?.structure?.label || '') },
+};
 function getUserAlerts() {
   try { const a = JSON.parse(localStorage.getItem(USER_ALERTS_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
 }
@@ -648,6 +697,7 @@ function liveDataFor(ticker) {
   return dashState.data[ticker] || watchState.data[ticker] || portState.data[ticker] || divState.signal?.[ticker] || null;
 }
 function userAlertText(a) {
+  if (a.kind === 'event') { const ev = UALERT_EVENTS[a.event]; return `${a.ticker} · ${ev ? ev.label : a.event}`; }
   const m = UALERT_METRICS[a.metric];
   return `${a.ticker} · ${m ? m.label : a.metric} ${a.op === 'above' ? '≥' : '≤'} ${m ? m.fmt(a.value) : a.value}`;
 }
@@ -675,8 +725,15 @@ function loadUserAlertTickers() {
 }
 // ¿La condición se cumple ahora? {met:true|false, current} o {met:null} sin dato.
 function evalUserAlert(a) {
+  const d = liveDataFor(a.ticker);
+  if (a.kind === 'event') {
+    const ev = UALERT_EVENTS[a.event];
+    if (!ev || !d) return { met: null, current: null };
+    let ok; try { ok = !!ev.test(d); } catch { ok = null; }
+    return { met: ok, current: null };
+  }
   const m = UALERT_METRICS[a.metric];
-  const cur = m ? m.get(liveDataFor(a.ticker)) : null;
+  const cur = m ? m.get(d) : null;
   if (cur == null || !isFinite(cur)) return { met: null, current: null };
   return { met: a.op === 'above' ? cur >= a.value : cur <= a.value, current: cur };
 }
@@ -12857,15 +12914,19 @@ function alertCenterCardHTML() {
     </div>`;
   };
   const customItem = (x) => {
-    const m = UALERT_METRICS[x.a.metric];
+    const isEvent = x.a.kind === 'event';
+    const m = isEvent ? null : UALERT_METRICS[x.a.metric];
+    const sub = isEvent
+      ? `⚡ ${esc(UALERT_EVENTS[x.a.event]?.label ?? x.a.event)} — ocurrió en la última rueda`
+      : `${esc(m ? m.label : x.a.metric)} ${x.a.op === 'above' ? '≥' : '≤'} <b>${m ? m.fmt(x.a.value) : x.a.value}</b> · ahora <b>${m ? m.fmt(x.current) : x.current}</b>`;
     return `<div class="alertc-item" data-alertc-ticker="${esc(x.a.ticker)}" style="--ac:${GOLD};">
       <div class="alertc-dot" style="background:${GOLD};"></div>
       <div class="alertc-body">
         <div class="alertc-top">
           <span class="alertc-tk">${esc(x.a.ticker)}</span>
-          <span class="alertc-label" style="color:${GOLD};">⭐ Personalizada cumplida</span>
+          <span class="alertc-label" style="color:${GOLD};">${isEvent ? '⚡ Evento técnico' : '⭐ Personalizada cumplida'}</span>
         </div>
-        <div class="alertc-sub">${esc(m ? m.label : x.a.metric)} ${x.a.op === 'above' ? '≥' : '≤'} <b>${m ? m.fmt(x.a.value) : x.a.value}</b> · ahora <b>${m ? m.fmt(x.current) : x.current}</b></div>
+        <div class="alertc-sub">${sub}</div>
       </div>
     </div>`;
   };
@@ -12891,16 +12952,20 @@ function alertCenterCardHTML() {
 function userAlertsCardHTML() {
   const list = getUserAlerts();
   const metricOpts = Object.entries(UALERT_METRICS).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
+  const eventOpts = Object.entries(UALERT_EVENTS).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
   const rows = list.map(a => {
     const { met, current } = evalUserAlert(a);
-    const m = UALERT_METRICS[a.metric];
-    const stateCls = met === null ? 'ua-wait' : met ? 'ua-met' : 'ua-wait';
+    const m = a.kind === 'event' ? null : UALERT_METRICS[a.metric];
+    const stateCls = met ? 'ua-met' : 'ua-wait';
     const stateTxt = met === null ? 'Sin dato en vivo' : met ? '✓ Cumplida' : 'Esperando';
     const stateColor = met === null ? 'var(--text-faint)' : met ? GREEN : AMBER;
+    const cond = a.kind === 'event'
+      ? `<span class="ua-evt">⚡ ${esc(UALERT_EVENTS[a.event]?.label ?? a.event)}</span>`
+      : `${esc(m ? m.label : a.metric)} ${a.op === 'above' ? '≥' : '≤'} <b>${m ? m.fmt(a.value) : a.value}</b>`;
     return `<div class="ua-row">
       <div class="ua-row-main">
         <span class="ua-tk" data-alertc-ticker="${esc(a.ticker)}">${esc(a.ticker)}</span>
-        <span class="ua-cond">${esc(m ? m.label : a.metric)} ${a.op === 'above' ? '≥' : '≤'} <b>${m ? m.fmt(a.value) : a.value}</b></span>
+        <span class="ua-cond">${cond}</span>
         <span class="ua-state ${stateCls}" style="color:${stateColor};">${stateTxt}${current != null && m ? ` · ahora ${m.fmt(current)}` : ''}</span>
       </div>
       <button class="ua-del" data-ua-del="${esc(a.id)}" title="Borrar alerta" aria-label="Borrar alerta de ${esc(a.ticker)}">×</button>
@@ -12908,17 +12973,22 @@ function userAlertsCardHTML() {
   }).join('');
   return `
     ${sectionTitleHTML('⭐ Alertas personalizadas', 'warning', 'margin-top:26px;')}
-    <div class="dash-intro">Definí tu propia condición por activo y la ves cumplirse en vivo. Se evalúa contra los datos que ya carga la app (dashboard, Watchlist y cartera). Se guarda en este navegador y se sincroniza con tu cuenta. Con las notificaciones activadas, además te avisa cuando se cumple.</div>
+    <div class="dash-intro">Definí tu propia condición por activo y la ves cumplirse en vivo — por <strong>nivel</strong> (precio, RSI, variación, score) o por <strong>evento técnico</strong> (cruce de EMAs, MACD, ruptura de máximos, golden/death cross, squeeze, gap…). Se evalúa contra los datos que ya carga la app. Se guarda en este navegador y se sincroniza con tu cuenta; con las notificaciones activadas te avisa al cumplirse.</div>
     <div class="card ua-form-card">
-      <div class="ua-form">
+      <div class="ua-form" data-ua-mode="level">
         <input list="ua-ticker-list" id="ua-ticker" class="port-input" placeholder="Ticker (ej. AAPL)" aria-label="Ticker de la alerta" autocomplete="off" style="text-transform:uppercase;" />
         <datalist id="ua-ticker-list">${universe.map(a => `<option value="${esc(a.ticker)}">${esc(a.name)}</option>`).join('')}</datalist>
-        <select id="ua-metric" class="watch-select" aria-label="Métrica">${metricOpts}</select>
-        <select id="ua-op" class="watch-select" aria-label="Condición">
+        <select id="ua-kind" class="watch-select" aria-label="Tipo de alerta">
+          <option value="level">Por nivel</option>
+          <option value="event">Por evento técnico</option>
+        </select>
+        <select id="ua-metric" class="watch-select ua-level-field" aria-label="Métrica">${metricOpts}</select>
+        <select id="ua-op" class="watch-select ua-level-field" aria-label="Condición">
           <option value="above">≥ mayor o igual a</option>
           <option value="below">≤ menor o igual a</option>
         </select>
-        <input id="ua-value" class="port-input" type="number" step="any" placeholder="Valor" aria-label="Valor umbral" style="max-width:120px;" />
+        <input id="ua-value" class="port-input ua-level-field" type="number" step="any" placeholder="Valor" aria-label="Valor umbral" style="max-width:120px;" />
+        <select id="ua-event" class="watch-select ua-event-field" aria-label="Evento técnico" style="display:none;">${eventOpts}</select>
         <button class="port-add-btn" id="ua-add">＋ Crear alerta</button>
       </div>
     </div>
@@ -12962,9 +13032,61 @@ function alertChangesCardHTML() {
     <div class="card alertch-list">${changes.map(item).join('')}</div>`;
 }
 
+/* ─────────────── Digest "qué puede gatillar hoy" ───────────────
+ * Panel proactivo arriba del Centro: en vez de esperar el aviso, muestra lo que
+ * está MÁS CERCA de dispararse hoy — tus alertas de nivel próximas al umbral y
+ * las señales del motor "a punto" (tentativas) — más el clima de mercado. */
+function userAlertProximity(a) {
+  if (a.kind === 'event') return null;
+  const { met, current } = evalUserAlert(a);
+  if (met !== false || current == null) return null; // solo las que esperan, con dato
+  const m = UALERT_METRICS[a.metric];
+  const pct = (a.metric === 'price' || a.metric === 'ars');
+  const dist = pct ? (current > 0 ? Math.abs((a.value - current) / current) * 100 : 999) : Math.abs(a.value - current);
+  return { ticker: a.ticker, kind: 'custom', dist, unit: pct ? '%' : 'pts',
+    condLabel: `${m.label} ${a.op === 'above' ? '≥' : '≤'} ${m.fmt(a.value)}` };
+}
+function alertDigestCardHTML() {
+  const items = [];
+  for (const a of getUserAlerts()) {
+    const p = userAlertProximity(a);
+    if (p && p.dist <= (p.unit === '%' ? 8 : 12)) items.push(p);
+  }
+  const seen = new Set();
+  for (const map of [dashState.data, watchState.data, portState.data]) {
+    for (const [ticker, d] of Object.entries(map)) {
+      if (!d || seen.has(ticker)) continue;
+      if (d.alert?.pending && (d.alert.type === 'buy' || d.alert.type === 'sell')) {
+        seen.add(ticker);
+        const meta = ALERT_META[d.alert.type];
+        items.push({ ticker, kind: 'engine', dist: 0.4, color: meta?.color, condLabel: `${meta?.label ?? 'Zona'} · ${d.scoreLabel ?? ''} ${d.score ?? ''}` });
+      }
+    }
+  }
+  items.sort((a, b) => (a.dist ?? 9) - (b.dist ?? 9));
+  const top = items.slice(0, 7);
+  const spy = spyRegimeState();
+  const climate = spy === 'bull' ? { t: 'Mercado risk-on', c: GREEN } : spy === 'bear' ? { t: 'Mercado risk-off', c: RED } : { t: 'Mercado neutral', c: AMBER };
+  const loading = dashState.started && DASHBOARD_UNIVERSE.some(t => !dashState.data[t]);
+  return `
+    ${sectionTitleHTML('Qué puede gatillar hoy', 'radar')}
+    <div class="card digest-card">
+      <div class="digest-climate"><span class="digest-dot" style="background:${climate.c};"></span><b style="color:${climate.c};">${climate.t}</b><span class="digest-clim-sub">${top.length ? `${top.length} cosa(s) cerca de activarse` : 'nada cerca de gatillar'}</span></div>
+      ${!top.length ? `<div class="digest-empty">${loading ? 'Analizando el universo…' : 'Nada cerca de dispararse ahora. Cuando algo se acerque a una alerta —tuya o del motor— aparece acá.'}</div>` : `
+      <div class="digest-list">
+        ${top.map(it => `<div class="digest-row" data-alertc-ticker="${esc(it.ticker)}">
+          <span class="digest-tk">${esc(it.ticker)}</span>
+          <span class="digest-text"${it.color ? ` style="color:${it.color};"` : ''}>${esc(it.condLabel)}</span>
+          ${it.kind === 'custom' ? `<span class="digest-dist">${it.dist.toFixed(it.unit === '%' ? 1 : 0)}${it.unit}</span>` : '<span class="digest-dist warn">tentativa</span>'}
+        </div>`).join('')}
+      </div>`}
+    </div>`;
+}
+
 function alertsPageHTML() {
   return `
     ${sectionTitleHTML('Alertas', 'warning')}
+    ${alertDigestCardHTML()}
     ${alertCenterCardHTML()}
     ${userAlertsCardHTML()}
     ${alertChangesCardHTML()}
@@ -12986,16 +13108,33 @@ function wireAlertsEvents() {
     el.addEventListener('click', (e) => { if (e.target.closest('.ua-del')) return; selectTicker(el.dataset.alertcTicker); });
   });
   // Alertas personalizadas: crear / borrar.
+  // Alterna los campos del formulario entre "por nivel" y "por evento".
+  const uaKind = document.getElementById('ua-kind');
+  const uaForm = els.report.querySelector('.ua-form');
+  const syncUaMode = () => {
+    const ev = uaKind?.value === 'event';
+    if (uaForm) uaForm.dataset.uaMode = ev ? 'event' : 'level';
+    els.report.querySelectorAll('.ua-level-field').forEach(el => { el.style.display = ev ? 'none' : ''; });
+    els.report.querySelectorAll('.ua-event-field').forEach(el => { el.style.display = ev ? '' : 'none'; });
+  };
+  uaKind?.addEventListener('change', syncUaMode);
   document.getElementById('ua-add')?.addEventListener('click', () => {
     const ticker = (document.getElementById('ua-ticker')?.value || '').trim().toUpperCase();
-    const metric = document.getElementById('ua-metric')?.value;
-    const op = document.getElementById('ua-op')?.value;
-    const value = parseFloat((document.getElementById('ua-value')?.value || '').replace(',', '.'));
     if (!ticker) { showToast('Ingresá un ticker.', 'info'); return; }
     if (!universe.some(a => a.ticker === ticker)) { showToast(`No conozco el ticker ${ticker}.`, 'info'); return; }
-    if (!isFinite(value)) { showToast('Ingresá un valor numérico para la condición.', 'info'); return; }
-    addUserAlert({ ticker, metric, op, value });
-    showToast(`Alerta creada para ${ticker}.`, 'success');
+    if (uaKind?.value === 'event') {
+      const event = document.getElementById('ua-event')?.value;
+      if (!UALERT_EVENTS[event]) { showToast('Elegí un evento válido.', 'info'); return; }
+      addUserAlert({ ticker, kind: 'event', event });
+      showToast(`Alerta de evento creada: ${ticker} · ${UALERT_EVENTS[event].label}.`, 'success');
+    } else {
+      const metric = document.getElementById('ua-metric')?.value;
+      const op = document.getElementById('ua-op')?.value;
+      const value = parseFloat((document.getElementById('ua-value')?.value || '').replace(',', '.'));
+      if (!isFinite(value)) { showToast('Ingresá un valor numérico para la condición.', 'info'); return; }
+      addUserAlert({ ticker, metric, op, value });
+      showToast(`Alerta creada para ${ticker}.`, 'success');
+    }
     ensureTickerLoaded(ticker); // trae datos en vivo si el activo no estaba cargado
     renderReport();
   });
