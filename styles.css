@@ -3591,3 +3591,19 @@ html.is-standalone .ficha-sticky { padding-top: calc(12px + env(safe-area-inset-
 .tod-reasons { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
 .tod-reason { font-size: 11.5px; font-weight: 600; padding: 3px 10px; border-radius: 12px; color: var(--up-text); background: oklch(0.76 0.18 152 / 0.12); }
 .tod-reason.bad { color: var(--amber-text); background: oklch(0.75 0.15 70 / 0.14); }
+
+/* ══════════════ Alertas: digest "qué puede gatillar hoy" + evento ══════════════ */
+.digest-card { padding: 14px 16px; }
+.digest-climate { display: flex; align-items: center; gap: 9px; padding-bottom: 11px; margin-bottom: 6px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.digest-dot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+.digest-clim-sub { color: var(--text-mute); font-size: 12px; margin-left: auto; }
+.digest-empty { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; padding: 6px 2px; }
+.digest-list { display: flex; flex-direction: column; }
+.digest-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--border-soft); cursor: pointer; transition: background 0.12s; }
+.digest-row:last-child { border-bottom: none; }
+.digest-row:hover { background: var(--surface-2); }
+.digest-tk { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 14px; min-width: 56px; }
+.digest-text { flex: 1; font-size: 12.5px; color: var(--text-dim); }
+.digest-dist { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 700; color: var(--accent-text); padding: 2px 9px; border-radius: 11px; background: var(--surface-2); white-space: nowrap; }
+.digest-dist.warn { color: var(--amber-text); }
+.ua-evt { color: var(--accent-text); font-weight: 600; }
