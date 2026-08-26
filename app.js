@@ -7146,6 +7146,8 @@ function shortTradesPageHTML() {
 
     ${dayBiasCardHTML()}
 
+    ${tradeOfDayCardHTML()}
+
     ${shortBookRiskHTML()}
 
     ${shortCalculatorHTML()}
@@ -7432,6 +7434,113 @@ function shortLiquidityLabel(usd) {
   return `US$${Math.round(usd / 1e3)}k/día`;
 }
 
+/* ── Confirmación multi-timeframe: tendencia semanal desde los cierres diarios ──
+ * Resamplea los cierres diarios a semanales (último de cada bloque de 5 ruedas)
+ * y clasifica la tendencia semanal comparando el último cierre con su EMA(10) y
+ * la pendiente reciente. Un setup diario a favor del timeframe mayor tiene, en
+ * general, más probabilidad — por eso se muestra como semáforo en la card. */
+function weeklyTrendFromCloses(closes) {
+  if (!Array.isArray(closes) || closes.length < 60) return null;
+  const wk = [];
+  for (let i = closes.length - 1; i >= 0; i -= 5) wk.unshift(closes[i]);
+  if (wk.length < 12) return null;
+  const e = ema(wk, 10);
+  const lastC = wk[wk.length - 1], lastE = e[e.length - 1];
+  const slope = wk[wk.length - 1] - wk[wk.length - 4];
+  if (!(lastE > 0)) return null;
+  if (lastC > lastE && slope > 0) return 'up';
+  if (lastC < lastE && slope < 0) return 'down';
+  return 'flat';
+}
+function mtfBadge(d, direction) {
+  const wt = weeklyTrendFromCloses(d?.closes);
+  if (!wt) return '';
+  const aligned = (direction === 'long' && wt === 'up') || (direction === 'short' && wt === 'down');
+  const against = (direction === 'long' && wt === 'down') || (direction === 'short' && wt === 'up');
+  if (aligned) return `<span class="mtf-badge ok" title="El setup diario va a favor de la tendencia semanal — mayor probabilidad de continuación">🟢 a favor del semanal</span>`;
+  if (against) return `<span class="mtf-badge bad" title="El setup diario va en contra de la tendencia semanal — menor probabilidad, operá con más cautela">🔴 contra el semanal</span>`;
+  return `<span class="mtf-badge flat" title="Tendencia semanal lateral — sin viento a favor ni en contra del timeframe mayor">🟡 semanal lateral</span>`;
+}
+
+/* ── Trade del día: el mejor setup AHORA por ventaja compuesta ───────────────
+ * Entre todos los setups que califican (largos/cortos + rebotes + pullbacks),
+ * elige uno solo combinando confianza, R:R, score, liquidez, alineación con el
+ * régimen de mercado y con la tendencia semanal, y penaliza el balance cercano.
+ * No pide nada extra: usa lo ya calculado por computeLightSignal. */
+function tradeOfDayPick() {
+  const cands = [], seen = new Set(), spy = spyRegimeState();
+  const push = (ticker, d, s, kindLabel, takeKind, direction) => {
+    if (!s?.qualifies) return;
+    if (shortState.onlyArg && !isArgBuyable(ticker)) return;
+    cands.push({ ticker, d, s, kindLabel, takeKind, direction });
+  };
+  for (const map of [dashState.data, watchState.data]) for (const [ticker, d] of Object.entries(map)) {
+    if (!d || seen.has(ticker)) continue; seen.add(ticker);
+    if (d.setup?.qualifies) push(ticker, d, d.setup, SHORT_STRATEGIES[d.setup.strategy]?.label ?? 'Setup', 'setup', d.setup.direction);
+    else if (d.rebound?.qualifies) push(ticker, d, d.rebound, 'Rebote', 'rebound', 'long');
+    else if (d.pullback?.qualifies) push(ticker, d, d.pullback, 'Pullback', 'pullback', 'long');
+  }
+  if (!cands.length) return null;
+  const scoreOf = (c) => {
+    const s = c.s;
+    let e = (SHORT_CONF_RANK[s.confidence] ?? 0) * 22;
+    e += Math.min(s.rr ?? 0, 3) * 14;
+    e += Math.min(s.score ?? 0, 100) * 0.25;
+    e += (c.d.liquidityUsd >= 20e6) ? 8 : (c.d.liquidityUsd >= 5e6) ? 4 : 0;
+    if (spy === 'bull') e += c.direction === 'long' ? 10 : -6;
+    else if (spy === 'bear') e += c.direction === 'short' ? 10 : -6;
+    const w = weeklyTrendFromCloses(c.d.closes);
+    if (w) { const al = (c.direction === 'long' && w === 'up') || (c.direction === 'short' && w === 'down'); const ag = (c.direction === 'long' && w === 'down') || (c.direction === 'short' && w === 'up'); e += al ? 10 : ag ? -8 : 0; }
+    const ed = earningsSoonDays(c.ticker); if (ed != null && ed <= 5) e -= 14;
+    return e;
+  };
+  cands.forEach(c => { c._edge = scoreOf(c); });
+  cands.sort((a, b) => b._edge - a._edge);
+  return { pick: cands[0], total: cands.length };
+}
+function tradeOfDayCardHTML() {
+  const res = tradeOfDayPick();
+  if (!res) return '';
+  const { pick, total } = res;
+  const { ticker, d, s, kindLabel, takeKind, direction } = pick;
+  const dm = shortDirMeta(direction);
+  const target = s.target1 ?? s.target ?? null;
+  const spy = spyRegimeState(), w = weeklyTrendFromCloses(d.closes), ed = earningsSoonDays(ticker);
+  const reasons = [], cautions = [];
+  if ((SHORT_CONF_RANK[s.confidence] ?? 0) >= 2) reasons.push(`Confianza ${s.confidence}`);
+  if (s.rr != null && s.rr >= 1.5) reasons.push(`R:R ${s.rr.toFixed(1)}:1`);
+  if ((spy === 'bull' && direction === 'long') || (spy === 'bear' && direction === 'short')) reasons.push(`A favor del régimen (${spy === 'bull' ? 'risk-on' : 'risk-off'})`);
+  if ((direction === 'long' && w === 'up') || (direction === 'short' && w === 'down')) reasons.push('A favor de la tendencia semanal');
+  if (d.liquidityUsd >= 20e6) reasons.push(`Liquidez alta (${shortLiquidityLabel(d.liquidityUsd)})`);
+  else if (d.liquidityUsd >= 5e6) reasons.push('Buena liquidez');
+  if (ed == null) reasons.push('Sin balance cercano');
+  if ((direction === 'long' && w === 'down') || (direction === 'short' && w === 'up')) cautions.push('va en contra del semanal');
+  if (ed != null && ed <= 5) cautions.push(`balance en ${ed}d`);
+  return `
+    ${sectionTitleHTML('⭐ Trade del día', 'award')}
+    <div class="card tod-card" data-short-ticker="${esc(ticker)}" style="--dir-color:${dm.color};">
+      <div class="tod-head">
+        <div class="tod-id">
+          <span class="tod-tk">${esc(ticker)}</span>
+          <span class="short-dir-badge" style="color:${dm.color}; background:${dm.bg};">${dm.arrow} ${dm.label}</span>
+          <span class="tod-kind">${esc(kindLabel)}</span>
+          ${mtfBadge(d, direction)}${earningsSoonBadge(ticker)}
+        </div>
+        <div class="tod-conf" style="color:${SHORT_CONF_COLOR[s.confidence] ?? AMBER};"><b>${s.score}</b><small>confianza ${esc(s.confidence)}</small></div>
+      </div>
+      <div class="tod-sub">El setup con mejor <b>ventaja compuesta</b> ahora, entre ${total} que califican — pondera confianza, R:R, liquidez, régimen de mercado y tendencia semanal. No es una recomendación: es el que hoy tiene el tamiz más a favor.</div>
+      ${s.narrative ? `<div class="short-narrative ${direction === 'short' ? 'down' : 'up'}">${s.narrative}</div>` : ''}
+      <div class="tod-reasons">${reasons.map(r => `<span class="tod-reason">✓ ${esc(r)}</span>`).join('')}${cautions.map(c => `<span class="tod-reason bad">⚠ ${esc(c)}</span>`).join('')}</div>
+      <div class="short-plan">
+        <div class="short-plan-cell"><span>Entrada</span><b>${fmtUsd(s.entry)}</b></div>
+        <div class="short-plan-cell"><span>Stop</span><b class="down">${fmtUsd(s.stop)}</b></div>
+        <div class="short-plan-cell"><span>Objetivo</span><b class="up">${target != null ? fmtUsd(target) : '—'}</b></div>
+        <div class="short-plan-cell"><span>Riesgo/Beneficio</span><b>${s.rr != null ? s.rr.toFixed(1) + ':1' : 'N/D'}</b></div>
+      </div>
+      ${shortTakeBtn(ticker, takeKind, direction, s.entry, target, s.stop, s.strategy ?? takeKind)}
+    </div>`;
+}
+
 function shortTradeCardHTML(ticker, d) {
   const s = d.setup;
   const conf = SHORT_CONF_COLOR[s.confidence] ?? AMBER;
@@ -7450,7 +7559,7 @@ function shortTradeCardHTML(ticker, d) {
           <div class="short-name">${esc(d.name ?? '')}</div>
         </div>
         <div class="short-head-right">
-          <span class="short-dir-badge" style="color:${dm.color}; background:${dm.bg};">${dm.arrow} ${dm.label}</span>${shortStrategyBadge(s.strategy)}${shortPreMarketChip(ticker)}${earningsSoonBadge(ticker)}
+          <span class="short-dir-badge" style="color:${dm.color}; background:${dm.bg};">${dm.arrow} ${dm.label}</span>${shortStrategyBadge(s.strategy)}${mtfBadge(d, s.direction)}${shortPreMarketChip(ticker)}${earningsSoonBadge(ticker)}
           <div class="short-conf" style="color:${conf};">
             <div class="short-conf-score">${s.score}</div>
             <div class="short-conf-label">confianza ${esc(s.confidence)}</div>
