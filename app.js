@@ -9162,6 +9162,56 @@ function deletePortOp(id) {
   lsSetSafe(PORT_OPS_KEY, JSON.stringify(list));
 }
 
+/* ── Plan de salida propio por tenencia (objetivo + stop en USD del subyacente) ──
+ * Convierte cada posición en una con plan: fijás TU objetivo y TU stop, se ven
+ * las distancias en la tabla y te avisa cuando el precio los toca (una vez por
+ * cruce, re-armable). Es tu plan, distinto del stop/objetivo SUGERIDO por el
+ * análisis. Todo en este navegador y se sincroniza con tu cuenta. */
+const PORT_PLANS_KEY = 'icp_port_plans';
+function getHoldingPlans() { try { return JSON.parse(localStorage.getItem(PORT_PLANS_KEY) || '{}') || {}; } catch { return {}; } }
+function getHoldingPlan(ticker) { return getHoldingPlans()[ticker] || null; }
+function saveHoldingPlans(all) { lsSetSafe(PORT_PLANS_KEY, JSON.stringify(all)); }
+function setHoldingPlan(ticker, target, stop) {
+  const all = getHoldingPlans();
+  const t = (target != null && target > 0) ? target : null;
+  const s = (stop != null && stop > 0) ? stop : null;
+  if (t == null && s == null) delete all[ticker];
+  else all[ticker] = { target: t, stop: s, hitTarget: false, hitStop: false, ts: Date.now() };
+  saveHoldingPlans(all);
+}
+// Avisa cuando una tenencia con plan toca tu objetivo o tu stop. Se dispara una
+// sola vez por cruce y se re-arma si el precio vuelve del otro lado.
+function checkHoldingPlanAlerts() {
+  const all = getHoldingPlans();
+  const held = new Set(getPortfolio().map(h => h.ticker));
+  let changed = false;
+  for (const [ticker, plan] of Object.entries(all)) {
+    if (!held.has(ticker)) continue; // solo tenencias vigentes
+    const price = liveDataFor(ticker)?.price;
+    if (price == null || !isFinite(price)) continue;
+    if (plan.target != null) {
+      const hit = price >= plan.target;
+      if (hit && !plan.hitTarget) { plan.hitTarget = true; changed = true; fireHoldingPlanAlert(ticker, 'target', plan.target, price); }
+      else if (!hit && plan.hitTarget) { plan.hitTarget = false; changed = true; }
+    }
+    if (plan.stop != null) {
+      const hit = price <= plan.stop;
+      if (hit && !plan.hitStop) { plan.hitStop = true; changed = true; fireHoldingPlanAlert(ticker, 'stop', plan.stop, price); }
+      else if (!hit && plan.hitStop) { plan.hitStop = false; changed = true; }
+    }
+  }
+  if (changed) saveHoldingPlans(all);
+}
+function fireHoldingPlanAlert(ticker, kind, level, price) {
+  const isT = kind === 'target';
+  const label = isT ? `llegó a tu objetivo ${fmtUsd(level)}` : `tocó tu stop ${fmtUsd(level)}`;
+  logAlertHistory(ticker, isT ? 'buy' : 'stop', null, [`Tu tenencia ${label} (ahora ${fmtUsd(price)})`]);
+  showToast(`${isT ? '🎯' : '🛑'} ${ticker}: tu tenencia ${label}`, isT ? 'success' : 'error', 6000);
+  if (alertsEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try { new Notification(`${ticker}: ${label}`, { body: `Tu plan de salida — precio ahora ${fmtUsd(price)}`, tag: `icp-hp-${ticker}-${kind}` }); } catch { /* no-op */ }
+  }
+}
+
 /* ── Aportes y Retiros: flujo de fondos fechado (depósitos/extracciones) ──
  *  Permite medir el aporte NETO real (aún si metiste y sacaste plata varias
  *  veces) y el retorno del dinero (TIR / money-weighted), que sí tiene en
@@ -11740,10 +11790,23 @@ function portfolioRowHTML(r, maxAbsPnl = 1) {
   // decisión es inminente, no un dato de fondo.
   let stopCell = '—';
   const pr = r.d.planRaw;
-  if (pr?.stopLoss != null && r.d.price > 0) {
+  const uPlan = getHoldingPlan(r.ticker);
+  if (uPlan && (uPlan.target != null || uPlan.stop != null) && r.d.price > 0) {
+    // Plan de salida PROPIO del usuario (tiene prioridad sobre el sugerido).
+    const parts = [];
+    if (uPlan.target != null) {
+      const dp = ((uPlan.target - r.d.price) / r.d.price) * 100;
+      parts.push(`<span title="Tu objetivo">🎯 <b>${fmtUsd(uPlan.target)}</b> <span class="port-stop-dist up">${dp <= 0 ? 'alcanzado' : `a ${dp.toFixed(1)}%`}</span></span>`);
+    }
+    if (uPlan.stop != null) {
+      const ds = ((r.d.price - uPlan.stop) / r.d.price) * 100;
+      parts.push(`<span title="Tu stop">🛑 <b>${fmtUsd(uPlan.stop)}</b> <span class="port-stop-dist ${ds <= 3 ? 'near' : ''}">${ds <= 0 ? 'tocado' : `a ${ds.toFixed(1)}%`}</span></span>`);
+    }
+    stopCell = parts.join('<br>') + `<br><span class="port-pnl-abs" style="opacity:0.7;">tu plan</span>`;
+  } else if (pr?.stopLoss != null && r.d.price > 0) {
     const distPct = ((r.d.price - pr.stopLoss) / r.d.price) * 100;
     const near = distPct <= 3;
-    stopCell = `${fmtUsd(pr.stopLoss)} <span class="port-stop-dist ${near ? 'near' : ''}" title="Distancia entre el precio actual y el stop sugerido">${distPct <= 0 ? 'stop superado' : `a ${distPct.toFixed(1)}%`}</span><br><span class="port-pnl-abs">obj ${fmtUsd(pr.tp1)}</span>`;
+    stopCell = `${fmtUsd(pr.stopLoss)} <span class="port-stop-dist ${near ? 'near' : ''}" title="Distancia entre el precio actual y el stop sugerido">${distPct <= 0 ? 'stop superado' : `a ${distPct.toFixed(1)}%`}</span><br><span class="port-pnl-abs">obj ${fmtUsd(pr.tp1)} · sugerido</span>`;
   }
 
   const _badges = `${r.d.isReal === false ? ' <span class="watch-stale">demo</span>' : ''}${r.costCurrency === 'ARS' ? ' <span class="watch-stale">ARS</span>' : ''}`;
@@ -11759,6 +11822,7 @@ function portfolioRowHTML(r, maxAbsPnl = 1) {
   const actionsTd = `<td class="port-actions-cell">
       <button class="port-buy" data-port-buy="${esc(r.ticker)}" title="Comprar más" aria-label="Registrar una compra adicional de ${esc(r.ticker)}">＋</button>
       <button class="port-sell" data-port-sell="${esc(r.ticker)}" title="Registrar venta" aria-label="Registrar venta de ${esc(r.ticker)}">⤓</button>
+      <button class="port-plan ${uPlan ? 'on' : ''}" data-port-plan="${esc(r.ticker)}" title="Definir tu objetivo y stop (plan de salida)" aria-label="Plan de salida de ${esc(r.ticker)}">🎯</button>
       <button class="port-edit" data-port-edit="${esc(r.ticker)}" title="Editar" aria-label="Editar tenencia de ${esc(r.ticker)}">✎</button>
       <button class="port-remove" data-port-remove="${esc(r.ticker)}" title="Quitar" aria-label="Quitar ${esc(r.ticker)} de la cartera">×</button>
     </td>`;
@@ -12157,6 +12221,32 @@ function wirePortfolioEvents() {
       renderReport();
     });
   });
+  els.report.querySelectorAll('.port-plan').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); openHoldingPlanDialog(btn.dataset.portPlan); });
+  });
+}
+
+/** Diálogo para fijar tu plan de salida (objetivo + stop en USD del subyacente)
+ *  de una tenencia. Pre-carga tu plan actual o, si no hay, los niveles sugeridos
+ *  por el análisis. Vacío en ambos = quita el plan. */
+function openHoldingPlanDialog(ticker) {
+  const d = liveDataFor(ticker);
+  const cur = d?.price;
+  const existing = getHoldingPlan(ticker) || {};
+  const sug = d?.planRaw;
+  const tPre = existing.target != null ? String(existing.target) : (sug?.tp1 != null ? String(round2(sug.tp1)) : '');
+  const tAns = window.prompt(`🎯 Objetivo de ${ticker} — precio USD del subyacente${cur != null ? ` (ahora ${fmtUsd(cur)})` : ''}\nTe avisa cuando el precio LLEGA o SUPERA este valor. Vacío = sin objetivo.`, tPre);
+  if (tAns == null) return;
+  const sPre = existing.stop != null ? String(existing.stop) : (sug?.stopLoss != null ? String(round2(sug.stopLoss)) : '');
+  const sAns = window.prompt(`🛑 Stop de ${ticker} — precio USD del subyacente${cur != null ? ` (ahora ${fmtUsd(cur)})` : ''}\nTe avisa cuando el precio TOCA o CAE bajo este valor. Vacío = sin stop.`, sPre);
+  if (sAns == null) return;
+  const target = tAns.trim() === '' ? null : parseFloat(tAns.replace(',', '.'));
+  const stop = sAns.trim() === '' ? null : parseFloat(sAns.replace(',', '.'));
+  if ((tAns.trim() !== '' && !(target > 0)) || (sAns.trim() !== '' && !(stop > 0))) { showToast('Valor inválido — usá números positivos.', 'info'); return; }
+  setHoldingPlan(ticker, target, stop);
+  showToast((target || stop) ? `Plan de salida guardado para ${ticker}.` : `Plan de salida quitado de ${ticker}.`, 'success');
+  ensureTickerLoaded(ticker);
+  renderReport();
 }
 
 // Solo pide lo que todavía no tiene: renderReport() dispara esto en cada
@@ -12233,6 +12323,7 @@ async function loadPortfolioData() {
       trackAlertChange(h.ticker, signal);
       checkUserAlerts();
       checkShortWatchAlerts();
+      checkHoldingPlanAlerts();
     } catch (e) {
       console.warn('[portfolio] no se pudo cargar', h.ticker, e.message);
     } finally {
