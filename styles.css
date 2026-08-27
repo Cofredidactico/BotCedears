@@ -3610,3 +3610,30 @@ html.is-standalone .ficha-sticky { padding-top: calc(12px + env(safe-area-inset-
 .digest-dist { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 700; color: var(--accent-text); padding: 2px 9px; border-radius: 11px; background: var(--surface-2); white-space: nowrap; }
 .digest-dist.warn { color: var(--amber-text); }
 .ua-evt { color: var(--accent-text); font-weight: 600; }
+
+/* ══════════════ Visuales: confetti, cinta de precios, heatmap ══════════════ */
+/* Confetti (momentos de celebración) */
+.confetti-wrap { position: fixed; inset: 0; pointer-events: none; z-index: 300; overflow: hidden; }
+.confetti-bit { position: absolute; top: -14px; border-radius: 2px; opacity: 0; will-change: transform; animation-name: confetti-fall; animation-timing-function: cubic-bezier(0.3, 0.6, 0.5, 1); animation-fill-mode: forwards; }
+@keyframes confetti-fall {
+  0% { transform: translateY(-14px) translateX(0) rotate(0); opacity: 1; }
+  100% { transform: translateY(102vh) translateX(var(--drift, 0)) rotate(var(--rot, 360deg)); opacity: 0.85; }
+}
+@media (prefers-reduced-motion: reduce) { .confetti-wrap { display: none; } }
+
+/* Cinta de precios en vivo (ticker tape) */
+.ticker-tape { overflow: hidden; white-space: nowrap; border-bottom: 1px solid var(--border); background: color-mix(in oklch, var(--bg-card) 90%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
+.tt-track { display: inline-flex; will-change: transform; animation: tt-scroll 55s linear infinite; }
+.ticker-tape:hover .tt-track { animation-play-state: paused; }
+@keyframes tt-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.tt-item { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 16px; border-right: 1px solid var(--border-soft); cursor: pointer; font-size: 12px; flex-shrink: 0; transition: background 0.15s; }
+.tt-item:hover { background: var(--surface-2); }
+.tt-sym { font-family: 'IBM Plex Mono', monospace; font-weight: 700; color: var(--text); letter-spacing: 0.3px; }
+.tt-price { font-family: 'IBM Plex Mono', monospace; color: var(--text-dim); }
+.tt-chg { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 11px; }
+.tt-chg.up { color: var(--up-text); } .tt-chg.down { color: var(--down-text); }
+@media (prefers-reduced-motion: reduce) { .tt-track { animation: none; } .ticker-tape { overflow-x: auto; } }
+@media (max-width: 860px) { .tt-item { padding: 5px 12px; font-size: 11px; } }
+
+/* Heatmap en la celda de P&L de la cartera */
+.port-pnl-heat { border-radius: 6px; transition: background 0.3s; }

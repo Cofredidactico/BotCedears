@@ -1374,6 +1374,44 @@ function renderTopbar() {
   els.connbanner.style.border = `1px solid ${conn.border}`;
   els.connbanner.innerHTML = `<span class="dot" style="background:${conn.color}"></span>${esc(conn.text)}`;
   renderBottomNav();
+  try { renderTickerTape(); } catch { /* no crítico */ }
+}
+
+/* ── Cinta de precios en vivo (ticker tape) — sensación de terminal ──────────
+ * Banda deslizante arriba con precios/variación en vivo de índices, cripto,
+ * majors y tu watchlist. Reusa los datos ya cargados (dashState/watch); no pide
+ * nada. Se construye una vez y actualiza los valores EN SU LUGAR para no cortar
+ * la animación. Tocá un símbolo para abrir su ficha. */
+const TICKER_TAPE_BASE = ['SPY', 'QQQ', 'DIA', 'IWM', 'BTC', 'ETH', 'NVDA', 'AAPL', 'MSFT', 'TSLA', 'MELI', 'GGAL', 'YPF', 'KO', 'AMD'];
+let _ttKey = '';
+function renderTickerTape() {
+  const tickers = [...new Set([...TICKER_TAPE_BASE, ...getWatchlist()])].filter(t => universe.some(a => a.ticker === t));
+  if (!tickers.length) return;
+  let el = document.getElementById('ticker-tape');
+  if (!el) {
+    const mainArea = document.querySelector('.main-area');
+    if (!mainArea) return;
+    el = document.createElement('div'); el.id = 'ticker-tape'; el.className = 'ticker-tape';
+    mainArea.insertBefore(el, mainArea.firstChild);
+    el.addEventListener('click', (e) => { const it = e.target.closest('[data-tt]'); if (it) selectTicker(it.dataset.tt); });
+  }
+  const key = tickers.join(',');
+  if (key !== _ttKey) {
+    const chip = (t) => {
+      const d = liveDataFor(t), chg = d?.changePct;
+      const cls = chg == null ? '' : chg >= 0 ? 'up' : 'down', arrow = chg == null ? '' : chg >= 0 ? '▲' : '▼';
+      return `<span class="tt-item" data-tt="${esc(t)}"><span class="tt-sym">${esc(t)}</span><span class="tt-price" data-tt-price="${esc(t)}">${d?.price != null ? fmtUsd(d.price) : '—'}</span><span class="tt-chg ${cls}" data-tt-chg="${esc(t)}">${arrow}${chg != null ? Math.abs(chg).toFixed(1) + '%' : ''}</span></span>`;
+    };
+    const one = tickers.map(chip).join('');
+    el.innerHTML = `<div class="tt-track">${one}${one}</div>`; // duplicado = loop sin costura
+    _ttKey = key;
+  } else {
+    for (const t of tickers) {
+      const d = liveDataFor(t), chg = d?.changePct;
+      el.querySelectorAll(`[data-tt-price="${t}"]`).forEach(s => { s.textContent = d?.price != null ? fmtUsd(d.price) : '—'; });
+      el.querySelectorAll(`[data-tt-chg="${t}"]`).forEach(s => { s.className = 'tt-chg ' + (chg == null ? '' : chg >= 0 ? 'up' : 'down'); s.textContent = chg == null ? '' : (chg >= 0 ? '▲' : '▼') + Math.abs(chg).toFixed(1) + '%'; });
+    }
+  }
 }
 
 /* ───────────────────────── buscador ───────────────────────── */
@@ -1382,6 +1420,7 @@ let debounceTimer = null;
 
 async function initSearch() {
   universe = await getUniverse();
+  try { renderTickerTape(); } catch { /* la cinta se arma en el próximo render igual */ }
   els.searchinput.addEventListener('input', (e) => {
     state.query = e.target.value;
     clearTimeout(debounceTimer);
@@ -4002,6 +4041,45 @@ function initBackToTop() {
  * activa nada. Sin dependencias. */
 function hapticTap(ms = 12) { try { navigator.vibrate?.(ms); } catch { /* no soportado */ } }
 
+/* ── Momento de celebración (confetti) — para ganancias, objetivos y metas ──
+ * Sin librerías: partículas DOM con animación CSS, respeta prefers-reduced-motion
+ * y se limpia sola. Se dispara en los "momentos ganadores" reales. */
+let _lastCelebrate = 0;
+function celebrate(intensity = 1) {
+  try { if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return; } catch { /* seguir */ }
+  const now = Date.now();
+  if (now - _lastCelebrate < 1500) return; // evita ráfagas simultáneas
+  _lastCelebrate = now;
+  hapticTap(24);
+  const wrap = document.createElement('div');
+  wrap.className = 'confetti-wrap';
+  const colors = [GREEN, GOLD, BLUE, 'oklch(0.74 0.15 291)', AMBER, 'oklch(0.80 0.14 199)'];
+  const n = Math.round(40 * Math.max(0.5, Math.min(2, intensity)));
+  let bits = '';
+  for (let i = 0; i < n; i++) {
+    const x = Math.random() * 100, delay = Math.random() * 0.35, dur = 1.7 + Math.random() * 1.3;
+    const col = colors[i % colors.length], rot = (Math.random() * 720 - 360), drift = (Math.random() - 0.5) * 200;
+    const w = 6 + Math.random() * 5, h = 8 + Math.random() * 8;
+    bits += `<i class="confetti-bit" style="left:${x.toFixed(1)}%; width:${w.toFixed(0)}px; height:${h.toFixed(0)}px; background:${col}; animation-duration:${dur.toFixed(2)}s; animation-delay:${delay.toFixed(2)}s; --drift:${drift.toFixed(0)}px; --rot:${rot.toFixed(0)}deg;"></i>`;
+  }
+  wrap.innerHTML = bits;
+  document.body.appendChild(wrap);
+  setTimeout(() => wrap.remove(), 3400);
+}
+
+/* ── Formato condicional tipo heatmap: fondo verde↔rojo por intensidad ──
+ * Devuelve un `background:` inline según el signo y la magnitud del valor (%),
+ * saturando en ±cap. Para colorear celdas (P&L, variación) de un vistazo. */
+function heatBg(pct, cap = 15) {
+  if (pct == null || !isFinite(pct)) return '';
+  const t = Math.max(-1, Math.min(1, pct / cap));
+  const a = (Math.abs(t) * 0.30).toFixed(3);
+  if (Math.abs(t) < 0.02) return '';
+  return t >= 0
+    ? `background: oklch(0.72 0.18 152 / ${a});`
+    : `background: oklch(0.68 0.20 23 / ${a});`;
+}
+
 // Refresca los datos de la vista actual (o del activo abierto). Best-effort: los
 // loaders re-renderizan solos al terminar; el spinner se muestra un instante.
 async function refreshCurrentView() {
@@ -6193,6 +6271,7 @@ function checkShortWatchAlerts() {
         const kindLbl = SHORT_WATCH_KIND_LABEL[w.kind] ?? w.kind;
         logAlertHistory(w.ticker, 'setup', null, [`${kindLbl} ${dir}: ${meta.label}`]);
         showToast(`${meta.emoji} ${w.ticker}: tu setup ${meta.label} (${fmtUsd(stx.price)})`, meta.tone, 6000);
+        if (stx.key === 'objetivo') celebrate(1); // el setup llegó al objetivo
         if (alertsEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
           try { new Notification(`${w.ticker}: setup ${meta.label}`, { body: `Vertex Signal — ${kindLbl} ${dir} · entrada ${fmtUsd(w.entry)}, ahora ${fmtUsd(stx.price)}`, tag: `icp-sw-${w.id}` }); } catch { /* no-op */ }
         }
@@ -6259,8 +6338,10 @@ function closeShortTrade(id, exitPrice) {
   const realizedR = riskUnit > 0 ? (long ? px - t.entry : t.entry - px) / riskUnit : null;
   const realizedPct = (long ? px - t.entry : t.entry - px) / t.entry * 100;
   const closed = getClosedShortTrades();
-  closed.unshift({ ...t, exitPrice: px, realizedR, realizedPct, closeDate: new Date().toISOString().slice(0, 10) });
+  const rec = { ...t, exitPrice: px, realizedR, realizedPct, closeDate: new Date().toISOString().slice(0, 10) };
+  closed.unshift(rec);
   saveClosedShortTrades(closed);
+  return rec;
 }
 function removeShortTrade(id) { const list = getShortTrades().filter(x => x.id !== id); saveShortTrades(list); return list; }
 function updateShortTradeNote(id, note) { const list = getShortTrades(); const t = list.find(x => x.id === id); if (t) { t.note = String(note || '').slice(0, 180); saveShortTrades(list); } return list; }
@@ -7786,8 +7867,9 @@ function wireShortTradesEvents() {
       const ans = window.prompt(`Cerrar ${t?.ticker ?? ''}: ¿a qué precio (USD) saliste?\n(Enter vacío = precio actual${live != null ? ' ' + fmtUsd(live) : ''}; Cancelar = no cerrar)`, live != null ? String(round2(live)) : '');
       if (ans === null) return; // cancelar
       const exit = ans.trim() === '' ? live : parseFloat(ans.replace(',', '.'));
-      closeShortTrade(id, exit);
+      const rec = closeShortTrade(id, exit);
       showToast(exit > 0 ? `Trade de ${t?.ticker ?? ''} cerrado y registrado en tu historial.` : `Trade de ${t?.ticker ?? ''} quitado del seguimiento.`, 'success');
+      if (rec && rec.realizedPct > 0) celebrate(Math.min(2, 0.8 + (rec.realizedR ?? 1) / 3)); // trade ganador: celebración proporcional
       rerender();
     });
   });
@@ -9207,6 +9289,7 @@ function fireHoldingPlanAlert(ticker, kind, level, price) {
   const label = isT ? `llegó a tu objetivo ${fmtUsd(level)}` : `tocó tu stop ${fmtUsd(level)}`;
   logAlertHistory(ticker, isT ? 'buy' : 'stop', null, [`Tu tenencia ${label} (ahora ${fmtUsd(price)})`]);
   showToast(`${isT ? '🎯' : '🛑'} ${ticker}: tu tenencia ${label}`, isT ? 'success' : 'error', 6000);
+  if (isT) celebrate(1); // llegar a tu objetivo es un momento ganador
   if (alertsEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     try { new Notification(`${ticker}: ${label}`, { body: `Tu plan de salida — precio ahora ${fmtUsd(price)}`, tag: `icp-hp-${ticker}-${kind}` }); } catch { /* no-op */ }
   }
@@ -11816,7 +11899,7 @@ function portfolioRowHTML(r, maxAbsPnl = 1) {
   const valueCell = `<td data-label="Valor">${r.valueArs != null
     ? `${pv(fmtArs(r.valueArs))}<br><span class="port-pnl-abs">${pv(fmtUsd(r.value))}</span>`
     : (r.value != null ? pv(fmtUsd(r.value)) : 'N/D')}</td>`;
-  const pnlTd = `<td data-label="P&L" class="${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}">${pnlCell}</td>`;
+  const pnlTd = `<td data-label="P&L" class="port-pnl-heat ${r.gainPct != null ? (r.gainPct >= 0 ? 'up' : 'down') : ''}" style="${heatBg(r.gainPct)}">${pnlCell}</td>`;
   const signalTd = `<td data-label="Señal"><span class="watch-signal" style="background:${sig.bg}; color:${sig.color};">${esc(r.d.scoreLabel)} · ${r.d.score}</span></td>`;
   const recoTd = `<td data-label="Recom."><span>${reco ? `<span class="watch-signal" style="background:${recoTone.bg}; color:${recoTone.color};" title="${esc(reco.detail)}">${esc(reco.label)}</span>` : 'N/D'}</span></td>`;
   const actionsTd = `<td class="port-actions-cell">
